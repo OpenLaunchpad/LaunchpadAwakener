@@ -7,7 +7,7 @@
 - **所属愿景**: 无
 - **关联提案**: 无
 - **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；验证用原型在分支 `experiment/injection-prototype`
-- **配套文档**: 待定 —— 落地时登记实现说明 / 使用指南的链接
+- **配套文档**: [实现说明](../Internal/LaunchpadReplica.md)
 
 ## 摘要
 
