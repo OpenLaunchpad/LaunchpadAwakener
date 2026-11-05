@@ -117,7 +117,7 @@ public final class PayloadInjectionCoordinator {
         }
         processMonitor.onProcessExited = { [weak self] processIdentifier in
             Task { @MainActor in
-                self?.injectedProcessIdentifiers.remove(processIdentifier)
+                self?.recordExit(ofProcessIdentifier: processIdentifier)
             }
         }
     }
@@ -269,6 +269,7 @@ public final class PayloadInjectionCoordinator {
         }
 
         injectedProcessIdentifiers.insert(processIdentifier)
+        injectionDatesByProcessIdentifier[processIdentifier] = Date()
         lastErrorDescription = nil
         Self.logger.info("Injected into \(processIdentifier, privacy: .public)")
     }
@@ -288,16 +289,58 @@ public final class PayloadInjectionCoordinator {
 
     // MARK: - Automatic re-injection
 
-    /// Starts watching for the target and injecting as it appears.
+    private static let automaticInjectionPreferenceKey = "AutomaticInjectionEnabled"
+
+    /// Whether automatic injection should run: on unless it was switched off, by the user or by the
+    /// quick-exit guard. Re-injecting after every Dock restart is what makes the replacement stick.
+    public var prefersAutomaticInjection: Bool {
+        UserDefaults.standard.object(forKey: Self.automaticInjectionPreferenceKey) as? Bool ?? true
+    }
+
+    /// Starts watching for the target and injecting as it appears, and remembers the choice.
     public func startAutomaticInjection() {
+        UserDefaults.standard.set(true, forKey: Self.automaticInjectionPreferenceKey)
         guard !isAutomaticInjectionEnabled else { return }
+        consecutiveQuickExitCount = 0
         isAutomaticInjectionEnabled = true
         processMonitor.start()
     }
 
+    /// Stops automatic injection, and remembers the choice across launches.
     public func stopAutomaticInjection() {
+        UserDefaults.standard.set(false, forKey: Self.automaticInjectionPreferenceKey)
         guard isAutomaticInjectionEnabled else { return }
         isAutomaticInjectionEnabled = false
         processMonitor.stop()
+    }
+
+    // MARK: - Quick-exit guard
+
+    /// A target that exits this soon after being injected counts as brought down by the payload.
+    private static let quickExitInterval: TimeInterval = 15
+
+    /// This many quick exits in a row switch automatic injection off.
+    private static let quickExitLimit = 3
+
+    private var injectionDatesByProcessIdentifier: [pid_t: Date] = [:]
+    private var consecutiveQuickExitCount = 0
+
+    /// Stops a crash loop. With automatic injection on, a payload that crashes the Dock as it loads
+    /// would be injected into every relaunched Dock, again and again; after `quickExitLimit` quick
+    /// exits in a row automatic injection switches itself off and says why.
+    private func recordExit(ofProcessIdentifier processIdentifier: pid_t) {
+        injectedProcessIdentifiers.remove(processIdentifier)
+        guard let injectionDate = injectionDatesByProcessIdentifier.removeValue(forKey: processIdentifier) else { return }
+
+        if Date().timeIntervalSince(injectionDate) < Self.quickExitInterval {
+            consecutiveQuickExitCount += 1
+        } else {
+            consecutiveQuickExitCount = 0
+        }
+        guard consecutiveQuickExitCount >= Self.quickExitLimit, isAutomaticInjectionEnabled else { return }
+
+        stopAutomaticInjection()
+        lastErrorDescription = "The target quit within \(Int(Self.quickExitInterval)) seconds of being injected \(Self.quickExitLimit) times in a row, so automatic injection is now off. Fix the payload, then switch it back on."
+        Self.logger.error("Automatic injection switched off after \(Self.quickExitLimit, privacy: .public) quick exits in a row")
     }
 }

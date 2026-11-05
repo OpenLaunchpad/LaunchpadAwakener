@@ -96,6 +96,8 @@ struct MainView: View {
                 } else {
                     injectionCoordinator.stopAutomaticInjection()
                 }
+                // Launching at login only exists to inject again after login.
+                LaunchAtLogin.setEnabled(isEnabled)
             }
         )
     }
@@ -104,11 +106,21 @@ struct MainView: View {
 struct MenuBarContent: View {
     @Environment(PrivilegedDaemonController.self) private var daemonController
     @Environment(PayloadInjectionCoordinator.self) private var injectionCoordinator
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Text(daemonController.statusMessage)
 
+        if let lastErrorDescription = injectionCoordinator.lastErrorDescription {
+            Text(lastErrorDescription)
+        }
+
         Divider()
+
+        Button("Show Window") {
+            openWindow(id: "main")
+            NSApplication.shared.activate()
+        }
 
         Button("Inject Now") {
             Task { await injectionCoordinator.injectIntoRunningTargets() }

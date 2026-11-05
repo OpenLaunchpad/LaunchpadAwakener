@@ -179,7 +179,7 @@ final class SpringboardController {
    1. ✅ 结构：把原型的 InjectionScaffold 结构（App、daemon、payload 三个外壳与本地包）搬进功能分支，payload 按 `Host` / `Data` / `Interface` / `Integration` 分目录。InjectionScaffold 的两处绕过一并保留：依赖钉在 `exact: "0.1.4"`；App 每次启动后的第一次注入都重新暂存 payload。
    2. ✅ 宿主与集成：构建档案、宿主接口校验、两个入口 hook、`DockBar` 获取、窗口与层级、键盘焦点、保险机制。原型的界面作为过渡界面保留，到第 2 批换掉。
    3. ✅ 数据层：自己的库、旧库导入、App 的发现与变更监听，带单元测试。
-   4. App 侧：默认开启自动注入，并随登录启动。
+   4. ✅ App 侧：默认开启自动注入，并随登录启动。
    - 验证：重启 Dock 后自动注入；导入的页数、文件夹数与旧库一致。
 2. **主界面**：用 `EC*` 图层类重写网格、分页、页码指示与双指翻页，再加上搜索、键盘方向键导航与启动。验证：与 15 截图并排比较尺寸与间距。
 3. **文件夹与拖动整理**：文件夹的打开、关闭与改名，拖到图标上建文件夹，拖动重排与跨页拖动，全部写回自己的库。验证：改动在 Dock 重启后依然保留。
@@ -212,3 +212,5 @@ final class SpringboardController {
 | 2026-11-05 | App 只在确实卸载时才从布局里删除 | 搜索目录里没找到、书签也解析不到、LaunchServices 也不认识，三者都成立才删，避免装在别处的 App 被误删 |
 | 2026-11-05 | App 的变更只靠 FSEvents 监听应用目录，没有接 LaunchServices 的私有通知 | 目录监听已覆盖安装与删除；`_LSScheduleNotificationFunction` 的签名没有逆向确认，调错会让 Dock 崩溃 |
 | 2026-11-05 | 15.5 的 `LaunchPadLayout.plist` 放进测试资源，排除名单与默认首页以 Swift 常量随 payload 发布 | 注入的框架里用 `Bundle.module` 找不到资源时会直接让 Dock 崩溃；测试逐项核对常量与原文件一致 |
+| 2026-11-05 | 注入后 Dock 连续 3 次在 15 秒内退出，就自动关掉自动注入并说明原因 | 自动注入默认开启后，一个加载即崩溃的 payload 会让 Dock 反复崩溃；这条保护属于开发期的保险 |
+| 2026-11-05 | daemon 已就绪时 App 启动不弹主窗口，只留菜单栏图标 | 随登录启动后每次都弹窗口太打扰；菜单栏里加了「Show Window」 |
