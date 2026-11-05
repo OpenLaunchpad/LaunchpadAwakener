@@ -241,3 +241,4 @@ final class SpringboardController {
 | 2026-11-06 | 捏合手势不走 27 的 Dock 手势系统，改为在已有的事件 hook 里读原始 DockSwipe 事件，照搬 15 的状态机与弹簧；只在用户关掉 Spotlight 自己的捏合后才接管 | 逆向发现 27 的捏合由 Spotlight 进程识别，Dock 的手势系统里已经没有它，但 Dock 很可能仍收到原始事件；两边同时响应会一起打开，所以默认不接管 |
 | 2026-11-06 | 配套文档：写实现说明，不写使用指南；新术语登记进项目术语表 | 实现说明记下了代码看不出来的决策与新 Dock 构建的适配流程；没有面向调用方的契约，不需要使用指南。构建档案、DockSwipe、退回开关、离屏自检、Springboard 这几个词在本项目有特定含义 |
 | 2026-11-06 | 实现完成，待用户看过后收尾 | 5 批都已实现并在 MacBook 上做了非交互验证；需要看画面、动手操作的验证留给用户 |
+| 2026-11-06 | 用户同意在测试用的 MacBook 上关掉 Spotlight 自己的捏合 | 让复刻版接管捏合；Spotlight 当即撤掉了它的手势注册，删掉 `com.apple.spotlight` 的 `trackpadAppBrowseEnabled` 即可恢复 |
