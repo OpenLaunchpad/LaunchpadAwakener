@@ -25,6 +25,16 @@ enum DockLayerFactory {
     static let shadowTextLayerShadowOffset = DockMethodSignature(className: "ECShadowTextLayer", selectorName: "setTextShadowOffset:", typeEncoding: "v32@0:8{CGSize=dd}16")
     static let shadowTextLayerShadowBlur = DockMethodSignature(className: "ECShadowTextLayer", selectorName: "setTextShadowBlur:", typeEncoding: "v24@0:8d16")
     static let textLayerInitialiser = DockMethodSignature(className: "ECTextLayer", selectorName: "init", typeEncoding: "@16@0:8")
+    /// `-[ECImageGridLayer initWithLayerSource:rows:columns:spacing:scaleFactor:layoutRTL:]`: the grid
+    /// of a folder icon's thumbnails. Unlike `ECGridLayer` it asks for the item count again after
+    /// `layerSourceInvalidated:`.
+    static let imageGridLayerInitialiser = DockMethodSignature(
+        className: "ECImageGridLayer",
+        selectorName: "initWithLayerSource:rows:columns:spacing:scaleFactor:layoutRTL:",
+        typeEncoding: "@56@0:8@16q24q32Q40f48B52"
+    )
+    static let imageGridLayerLayout = DockMethodSignature(className: "ECImageGridLayer", selectorName: "layout", typeEncoding: "v16@0:8")
+    static let imageGridLayerInvalidate = DockMethodSignature(className: "ECImageGridLayer", selectorName: "layerSourceInvalidated:", typeEncoding: "v24@0:8@16")
     /// The Dock's category on `CALayer` that 15's selection highlight used (`setMaterialControl:3 appearance:1`).
     static let layerMaterialControl = DockMethodSignature(className: "CALayer", selectorName: "setMaterialControl:appearance:", typeEncoding: "v32@0:8Q16Q24")
 
@@ -37,6 +47,9 @@ enum DockLayerFactory {
         shadowTextLayerShadowBlur,
         textLayerInitialiser,
         layerMaterialControl,
+        imageGridLayerInitialiser,
+        imageGridLayerLayout,
+        imageGridLayerInvalidate,
     ]
 
     // MARK: - ECGridLayer
@@ -62,6 +75,34 @@ enum DockLayerFactory {
         let selector = gridLayerLayout.selector
         let implementation = unsafeBitCast(gridLayer.method(for: selector), to: LayoutFunction.self)
         implementation(gridLayer, selector)
+    }
+
+    // MARK: - ECImageGridLayer
+
+    static func makeImageGridLayer(source: NSObject, rowCount: Int, columnCount: Int, spacing: UInt, scaleFactor: Float) -> CALayer? {
+        typealias InitialiserFunction = @convention(c) (AnyObject, Selector, AnyObject, Int, Int, UInt, Float, Bool) -> Unmanaged<CALayer>?
+        let signature = imageGridLayerInitialiser
+        guard
+            let gridClass = NSClassFromString(signature.className) as? CALayer.Type,
+            let initialiserImplementation = class_getMethodImplementation(gridClass, signature.selector),
+            // alloc without init; the initialiser consumes this reference and returns +1.
+            let allocatedGrid = gridClass.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue()
+        else { return nil }
+        let initialiser = unsafeBitCast(initialiserImplementation, to: InitialiserFunction.self)
+        return initialiser(allocatedGrid, signature.selector, source, rowCount, columnCount, spacing, scaleFactor, false)?.takeRetainedValue()
+    }
+
+    static func layoutImageGridLayer(_ gridLayer: CALayer) {
+        typealias LayoutFunction = @convention(c) (AnyObject, Selector) -> Void
+        let selector = imageGridLayerLayout.selector
+        unsafeBitCast(gridLayer.method(for: selector), to: LayoutFunction.self)(gridLayer, selector)
+    }
+
+    /// Makes the grid ask its source for the item count and every item again, then lay out.
+    static func invalidateImageGridLayer(_ gridLayer: CALayer, source: NSObject) {
+        typealias InvalidateFunction = @convention(c) (AnyObject, Selector, AnyObject) -> Void
+        let selector = imageGridLayerInvalidate.selector
+        unsafeBitCast(gridLayer.method(for: selector), to: InvalidateFunction.self)(gridLayer, selector, source)
     }
 
     // MARK: - ECTextLayer and ECShadowTextLayer
@@ -113,6 +154,25 @@ enum QuartzCorePrivate {
         guard let symbolAddress = dlsym(defaultSymbolSearchHandle, symbolName) else { return nil }
         guard let stringPointer = symbolAddress.load(as: UnsafeRawPointer?.self) else { return nil }
         return Unmanaged<NSString>.fromOpaque(stringPointer).takeUnretainedValue() as String
+    }
+
+    /// A `CABackdropLayer`, which filters whatever lies behind it; a plain layer if the class is gone.
+    static func makeBackdropLayer() -> CALayer {
+        (NSClassFromString("CABackdropLayer") as? CALayer.Type)?.init() ?? CALayer()
+    }
+
+    /// An open folder's frosting: blur 30 with hard edges, then saturation 1.8 (15.5 `0x10004BE70`).
+    static func folderBackdropFilters() -> [Any]? {
+        guard
+            let blurFilterType = stringConstant(named: "kCAFilterGaussianBlur"),
+            let saturationFilterType = stringConstant(named: "kCAFilterColorSaturate"),
+            let blurFilter = makeFilter(type: blurFilterType),
+            let saturationFilter = makeFilter(type: saturationFilterType)
+        else { return nil }
+        blurFilter.setValue(30, forKey: "inputRadius")
+        blurFilter.setValue(true, forKey: "inputHardEdges")
+        saturationFilter.setValue(1.8, forKey: "inputAmount")
+        return [blurFilter, saturationFilter]
     }
 
     /// `+[CAFilter filterWithType:]`, for filters `CALayer.filters` accepts in the render server.

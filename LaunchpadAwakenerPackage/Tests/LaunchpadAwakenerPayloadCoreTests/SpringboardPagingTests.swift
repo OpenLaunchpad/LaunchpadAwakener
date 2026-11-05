@@ -69,3 +69,36 @@ struct SpringboardNavigationTests {
         #expect(SpringboardNavigation.selectedIndex(after: .up, from: 3, itemCount: 33, columnCount: 7) == 3)
     }
 }
+
+@Suite("Dragging by macOS 15's rules")
+struct SpringboardDraggingTests {
+    private static let cellSize = CGSize(width: 100, height: 100)
+
+    @Test("the cell under the point, counted row by row from the top left")
+    func plainHit() {
+        let index = SpringboardDragging.itemIndex(at: CGPoint(x: 250, y: 150), cellSize: Self.cellSize, columnCount: 7, itemCount: 35, currentIndex: nil, usesHysteresis: false)
+        #expect(index == 9)
+    }
+
+    @Test("with hysteresis the item stays until the point is half a cell beyond its cell")
+    func hysteresisKeepsTheCurrentCell() {
+        let nearby = SpringboardDragging.itemIndex(at: CGPoint(x: 140, y: 50), cellSize: Self.cellSize, columnCount: 7, itemCount: 35, currentIndex: 0, usesHysteresis: true)
+        let farEnough = SpringboardDragging.itemIndex(at: CGPoint(x: 160, y: 50), cellSize: Self.cellSize, columnCount: 7, itemCount: 35, currentIndex: 0, usesHysteresis: true)
+        #expect(nearby == 0)
+        #expect(farEnough == 1)
+    }
+
+    @Test("past the last item the last cell is the answer")
+    func pastTheLastItem() {
+        let index = SpringboardDragging.itemIndex(at: CGPoint(x: 650, y: 450), cellSize: Self.cellSize, columnCount: 7, itemCount: 10, currentIndex: nil, usesHysteresis: false)
+        #expect(index == 9)
+    }
+
+    @Test("75 points per second is where icons start responding")
+    func speed() {
+        let slow = SpringboardDragging.speed(from: .zero, to: CGPoint(x: 7, y: 0), elapsedNanoseconds: 100_000_000)
+        let fast = SpringboardDragging.speed(from: .zero, to: CGPoint(x: 8, y: 0), elapsedNanoseconds: 100_000_000)
+        #expect(slow < SpringboardDragging.settlingSpeedThreshold)
+        #expect(fast > SpringboardDragging.settlingSpeedThreshold)
+    }
+}

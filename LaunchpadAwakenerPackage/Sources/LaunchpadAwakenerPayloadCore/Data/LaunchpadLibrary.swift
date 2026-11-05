@@ -192,6 +192,8 @@ package enum LaunchpadEdit: Sendable, Equatable {
     case move(LaunchpadItemIdentifier, toIndex: Int, onPage: LaunchpadItemIdentifier)
     case makeFolder(merging: LaunchpadItemIdentifier, with: LaunchpadItemIdentifier, title: String)
     case moveIntoFolder(LaunchpadItemIdentifier, folder: LaunchpadItemIdentifier)
+    case moveOutOfFolder(LaunchpadItemIdentifier, toIndex: Int, onPage: LaunchpadItemIdentifier)
+    case moveToNewLastPage(LaunchpadItemIdentifier)
     case renameFolder(LaunchpadItemIdentifier, title: String)
 }
 
@@ -210,6 +212,10 @@ extension LaunchpadLibrary {
                 try store.makeFolder(merging: draggedItem, with: targetItem, title: title, itemsPerPage: itemsPerPage)
             case let .moveIntoFolder(itemIdentifier, folderIdentifier):
                 try store.moveItem(itemIdentifier, intoFolder: folderIdentifier, itemsPerPage: itemsPerPage)
+            case let .moveOutOfFolder(itemIdentifier, targetIndex, pageIdentifier):
+                try store.moveItem(itemIdentifier, outOfFolderTo: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
+            case let .moveToNewLastPage(itemIdentifier):
+                try store.moveItemToNewLastPage(itemIdentifier, itemsPerPage: itemsPerPage)
             case let .renameFolder(folderIdentifier, title):
                 try store.renameFolder(folderIdentifier, to: title)
             }

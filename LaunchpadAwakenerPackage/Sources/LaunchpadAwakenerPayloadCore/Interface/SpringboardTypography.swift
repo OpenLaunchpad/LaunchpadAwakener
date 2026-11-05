@@ -18,6 +18,8 @@ enum SpringboardTypography {
     nonisolated(unsafe) static let searchFont = systemFont(size: 16, weight: lightWeight)
     /// "No Results": Light 40.
     nonisolated(unsafe) static let noResultsFont = systemFont(size: 40, weight: lightWeight)
+    /// An open folder's title: Light 28 (`-[ECSBGroupLayer initWithGroup:groupPager:layoutRTL:]`).
+    nonisolated(unsafe) static let folderTitleFont = systemFont(size: 28, weight: lightWeight)
 
     static func systemFont(size: CGFloat, weight: CGFloat, hasMonospacedDigits: Bool = false) -> CTFont {
         let baseFont = CTFontCreateUIFontForLanguage(.system, size, nil) ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)

@@ -1,9 +1,10 @@
 import CoreGraphics
 import Foundation
+import ObjectiveC
 import OSToolbox
 import QuartzCore
 
-/// The main interface — pages, page dots, search — and what input does to it; macOS 15's
+/// The main interface — pages, page dots, search, folders — and what input does to it; macOS 15's
 /// `ECSBSpringboard` and `ECSBLayer`, with the behaviour of `Springboard` and `ECSBPager`.
 ///
 /// Points handed in are in the container layer: the full screen, origin at the bottom left, y up — the
@@ -18,48 +19,63 @@ final class SpringboardInterface {
         case launch(LaunchpadApplication, iconFrame: CGRect, iconImage: Any?)
     }
 
+    /// Where a press happened: the main pages, or the open folder's.
+    enum GridContext {
+        case main
+        case folder
+    }
+
     /// How long the typed search waits for the next key before searching (`-[ECSBLayer observeValueForKeyPath:…]`).
     private static let searchDelay: Duration = .milliseconds(150)
 
     let containerLayer = CALayer()
-    private let layout: LaunchpadLayout
-    private let metrics: SpringboardMetrics
-    private let scale: CGFloat
-    private let springboardLayer = CALayer()
-    private let scrollLayer = CAScrollLayer()
-    private let pagerControlLayer = SpringboardPagerControlLayer()
+    private(set) var layout: LaunchpadLayout
+    let metrics: SpringboardMetrics
+    let scale: CGFloat
+    /// Stores an edit; the new layout comes back through ``replaceLayout(_:)``.
+    let applyEdit: (LaunchpadEdit) -> Void
+    let springboardLayer = CALayer()
+    let mainPages: SpringboardPagedGrids
     private let searchFieldLayer = SpringboardSearchFieldLayer()
     private let noResultsLayer = SpringboardNoResultsLayer()
 
-    private var pageGrids: [SpringboardPageGrid] = []
-    private var currentPageIndex = 0
-    private var scrollValue: CGFloat = 0
     private var pageIndexBeforeSearch = 0
     private var selectedItemIndex: Int?
     private var searchText = ""
-    private var isShowingSearchResults = false
+    private(set) var isShowingSearchResults = false
     private var searchTask: Task<Void, Never>?
-    private var wheelSettleTask: Task<Void, Never>?
+
+    private(set) var folderPanel: SpringboardFolderPanel?
+    /// True while a folder opens or closes; input and layout changes wait.
+    private(set) var isAnimatingFolder = false
+    private var renamingTitle: String?
+    private var pendingLayout: LaunchpadLayout?
 
     private enum PointerTracking {
         case none
-        case icon(pageIndex: Int, itemIndex: Int, itemLayer: SpringboardItemLayer, startLocation: CGPoint)
-        case background(startLocation: CGPoint, startScrollValue: CGFloat, startTimestamp: UInt64, isDragging: Bool)
-        case pagerIndicator(pageIndex: Int)
+        case icon(context: GridContext, pageIndex: Int, itemIndex: Int, itemLayer: SpringboardItemLayer, startLocation: CGPoint, startTimestamp: UInt64)
+        case background(context: GridContext, startLocation: CGPoint, startScrollValue: CGFloat, startTimestamp: UInt64, isDragging: Bool)
+        case pagerIndicator(context: GridContext, pageIndex: Int)
         case clearButton
         case searchField
+        case folderTitle
     }
 
     private var pointerTracking: PointerTracking = .none
-    /// A trackpad scroll in progress: where it started and when.
-    private var trackpadScroll: (startScrollValue: CGFloat, startTimestamp: UInt64)?
-    /// A notched-wheel scroll waiting to settle: where it started.
-    private var wheelScrollStartValue: CGFloat?
+    /// Set while an icon is being dragged; see `SpringboardInterface+Dragging.swift`.
+    var dragSession: SpringboardDragSession?
 
-    init(layout: LaunchpadLayout, metrics: SpringboardMetrics, scale: CGFloat, rootLayer: CALayer) {
+    init(layout: LaunchpadLayout, metrics: SpringboardMetrics, scale: CGFloat, rootLayer: CALayer, applyEdit: @escaping (LaunchpadEdit) -> Void) {
         self.layout = layout
         self.metrics = metrics
         self.scale = scale
+        self.applyEdit = applyEdit
+        mainPages = SpringboardPagedGrids(
+            metrics: metrics,
+            scale: scale,
+            pageStride: metrics.springboardFrame.width,
+            pageFrame: { metrics.pageFrame(at: $0) }
+        )
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -70,71 +86,61 @@ final class SpringboardInterface {
 
         springboardLayer.frame = metrics.springboardFrame
         springboardLayer.masksToBounds = false
-        scrollLayer.frame = metrics.scrollFrame
-        scrollLayer.scrollMode = .horizontally
-        scrollLayer.masksToBounds = false
-        pagerControlLayer.frame = metrics.pagerControlFrame
+        mainPages.scrollLayer.frame = metrics.scrollFrame
+        mainPages.pagerControlLayer.frame = metrics.pagerControlFrame
         searchFieldLayer.frame = metrics.searchFieldFrame
         searchFieldLayer.configure(scale: scale)
         noResultsLayer.layout(in: metrics.pageFrame(at: 0).offsetBy(dx: metrics.scrollFrame.minX, dy: metrics.scrollFrame.minY), scale: scale)
 
         springboardLayer.addSublayer(noResultsLayer)
-        springboardLayer.addSublayer(scrollLayer)
-        springboardLayer.addSublayer(pagerControlLayer)
+        springboardLayer.addSublayer(mainPages.scrollLayer)
+        springboardLayer.addSublayer(mainPages.pagerControlLayer)
         springboardLayer.addSublayer(searchFieldLayer)
         containerLayer.addSublayer(springboardLayer)
         rootLayer.addSublayer(containerLayer)
         CATransaction.commit()
 
-        showPages(layout.pages.map(\.items), isSearchResults: false, pageIndex: 0)
+        mainPages.currentPageDidChange = { [weak self] in
+            self?.select(itemAt: nil)
+        }
+        showMainPages(pageIndex: 0)
     }
 
     func tearDown() {
         searchTask?.cancel()
-        wheelSettleTask?.cancel()
+        mainPages.tearDown()
+        folderPanel?.pages.tearDown()
+        dragSession?.cancelTimers()
         containerLayer.removeFromSuperlayer()
     }
 
     var pageCount: Int {
-        pageGrids.count
+        mainPages.pageGrids.count
+    }
+
+    /// Whether nothing is in motion that a new layout would disturb.
+    var isIdle: Bool {
+        dragSession == nil && !isAnimatingFolder
     }
 
     // MARK: - Pages
 
-    private func showPages(_ itemsByPage: [[LaunchpadItem]], isSearchResults: Bool, pageIndex: Int) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        pageGrids.forEach { $0.gridLayer.removeFromSuperlayer() }
-        pageGrids = itemsByPage.compactMap { pageItems in
-            SpringboardPageGrid(items: pageItems, metrics: metrics, scale: scale) { [weak self] itemLayer in
-                self?.putIcons(in: itemLayer)
-            }
+    func showMainPages(pageIndex: Int) {
+        mainPages.showPages(layout.pages.map(\.items), rowCount: metrics.input.rowCount, pageIndex: pageIndex) { [weak self] itemLayer in
+            self?.putIcons(in: itemLayer)
         }
-        if pageGrids.count != itemsByPage.count {
-            #log(.error, "The Dock's grid layer refused \(itemsByPage.count - self.pageGrids.count, privacy: .public) page(s)")
-        }
-        for (gridIndex, pageGrid) in pageGrids.enumerated() {
-            scrollLayer.addSublayer(pageGrid.gridLayer)
-            let centeredRowOffset = isSearchResults ? metrics.centeredRowOffset(forItemCount: pageGrid.items.count) : 0
-            pageGrid.layout(in: metrics.pageFrame(at: gridIndex), centeredRowOffset: centeredRowOffset)
-        }
-        isShowingSearchResults = isSearchResults
-        currentPageIndex = min(max(pageIndex, 0), max(pageGrids.count - 1, 0))
+        isShowingSearchResults = false
         selectedItemIndex = nil
-        pagerControlLayer.configure(pageCount: pageGrids.count, currentPageIndex: currentPageIndex, metrics: metrics)
-        CATransaction.commit()
-        setScrollValue(metrics.scrollValue(forPageAt: currentPageIndex), animated: false)
     }
 
-    private func putIcons(in itemLayer: SpringboardItemLayer) {
+    func putIcons(in itemLayer: SpringboardItemLayer) {
         guard let item = itemLayer.item else { return }
-        let iconProvider = SpringboardIconProvider.shared
         switch item {
         case .application(let application):
-            itemLayer.setApplicationIcon(icon(for: application, side: metrics.iconSide), compositingFilterName: iconProvider.glassCompositingFilterName)
+            itemLayer.setApplicationIcon(icon(for: application, side: metrics.iconSide), compositingFilterName: SpringboardIconProvider.shared.glassCompositingFilterName)
         case .folder(let folder):
-            let thumbnailSide = (metrics.iconSide / 3).rounded()
-            itemLayer.setFolderThumbnails(folder.applications.prefix(9).map { icon(for: $0, side: thumbnailSide) })
+            let thumbnailSide = SpringboardItemLayer.thumbnailSide(forIconSide: metrics.iconSide)
+            itemLayer.setFolderThumbnails((folder.pages.first?.applications ?? []).map { icon(for: $0, side: thumbnailSide) })
         }
     }
 
@@ -147,11 +153,12 @@ final class SpringboardInterface {
 
     /// Puts a newly rendered icon into every item that shows it.
     func iconDidBecomeAvailable(forApplicationAt bundleURL: URL) {
-        for itemLayer in pageGrids.flatMap(\.itemLayers) {
+        let itemLayers = mainPages.itemLayers + (folderPanel?.pages.itemLayers ?? [])
+        for itemLayer in itemLayers {
             switch itemLayer.item {
             case .application(let application) where application.bundleURL == bundleURL:
                 putIcons(in: itemLayer)
-            case .folder(let folder) where folder.applications.prefix(9).contains(where: { $0.bundleURL == bundleURL }):
+            case .folder(let folder) where (folder.pages.first?.applications ?? []).contains(where: { $0.bundleURL == bundleURL }):
                 putIcons(in: itemLayer)
             default:
                 break
@@ -159,53 +166,189 @@ final class SpringboardInterface {
         }
     }
 
-    // MARK: - Scrolling
-
-    private var pageAnimationDuration: CFTimeInterval {
-        SpringboardPreferences.pageAnimationDuration
+    /// Takes the layout as stored after an edit or a reconciliation. Waits while something is moving.
+    func replaceLayout(_ newLayout: LaunchpadLayout) {
+        guard isIdle else {
+            pendingLayout = newLayout
+            return
+        }
+        pendingLayout = nil
+        guard newLayout != layout else { return }
+        layout = newLayout
+        if isShowingSearchResults {
+            showSearchResults()
+        } else {
+            showMainPages(pageIndex: mainPages.currentPageIndex)
+        }
+        guard let folderPanel else { return }
+        guard let updatedFolder = newLayout.folders.first(where: { $0.identifier == folderPanel.folder.identifier }) else {
+            // The folder is gone — emptied or dissolved by the edit.
+            folderPanel.folderLayer.removeFromSuperlayer()
+            folderPanel.pages.tearDown()
+            self.folderPanel = nil
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            springboardLayer.opacity = 1
+            springboardLayer.transform = CATransform3DIdentity
+            CATransaction.commit()
+            return
+        }
+        folderPanel.update(with: updatedFolder) { [weak self] itemLayer in
+            self?.putIcons(in: itemLayer)
+        }
+        hideFolderIcon(of: updatedFolder)
     }
 
-    private func setScrollValue(_ newScrollValue: CGFloat, animated: Bool) {
-        scrollValue = newScrollValue
-        CATransaction.begin()
-        if animated {
-            CATransaction.setAnimationDuration(pageAnimationDuration)
-            let controlPoints = SpringboardPaging.pageAnimationControlPoints
-            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: controlPoints.0, controlPoints.1, controlPoints.2, controlPoints.3))
-        } else {
-            CATransaction.setDisableActions(true)
+    func applyPendingLayoutIfIdle() {
+        if let pendingLayout, isIdle {
+            replaceLayout(pendingLayout)
         }
-        let displayedScrollValue = SpringboardPaging.rubberBandedScrollValue(newScrollValue, pageWidth: metrics.springboardFrame.width, pageCount: pageGrids.count)
-        scrollLayer.scroll(to: CGPoint(x: displayedScrollValue, y: 0))
-        pagerControlLayer.setCurrentPageIndex(currentPageIndex)
+    }
+
+    private func folderItemLayer(of folder: LaunchpadFolder) -> SpringboardItemLayer? {
+        mainPages.itemLayers.first { $0.item?.identifier == folder.identifier }
+    }
+
+    private func hideFolderIcon(of folder: LaunchpadFolder) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        folderItemLayer(of: folder)?.opacity = 0
         CATransaction.commit()
     }
 
-    private func turn(toPageAt pageIndex: Int) {
-        guard !pageGrids.isEmpty else { return }
-        currentPageIndex = min(max(pageIndex, 0), pageGrids.count - 1)
-        setScrollValue(metrics.scrollValue(forPageAt: currentPageIndex), animated: true)
-    }
-
-    private func follow(scrollValue newScrollValue: CGFloat) {
-        setScrollValue(newScrollValue, animated: false)
+    func pages(for context: GridContext) -> SpringboardPagedGrids {
+        switch context {
+        case .main: mainPages
+        case .folder: folderPanel?.pages ?? mainPages
+        }
     }
 
     // MARK: - Selection
 
     private func select(itemAt itemIndex: Int?) {
-        currentItemLayers.enumerated().forEach { index, itemLayer in
+        for (index, itemLayer) in currentItemLayers.enumerated() {
             itemLayer.isSelected = index == itemIndex
         }
         selectedItemIndex = itemIndex
     }
 
     private var currentItemLayers: [SpringboardItemLayer] {
-        pageGrids.indices.contains(currentPageIndex) ? pageGrids[currentPageIndex].itemLayers : []
+        mainPages.currentPageGrid?.itemLayers ?? []
     }
 
     private var currentItems: [LaunchpadItem] {
-        pageGrids.indices.contains(currentPageIndex) ? pageGrids[currentPageIndex].items : []
+        mainPages.currentPageGrid?.items ?? []
+    }
+
+    // MARK: - Folders
+
+    func openFolder(_ folder: LaunchpadFolder, from folderItemLayer: SpringboardItemLayer, completion: (@MainActor () -> Void)? = nil) {
+        guard folderPanel == nil, !isAnimatingFolder else { return }
+        select(itemAt: nil)
+        let newFolderPanel = SpringboardFolderPanel(folder: folder, metrics: metrics, scale: scale) { [weak self] itemLayer in
+            self?.putIcons(in: itemLayer)
+        }
+        folderPanel = newFolderPanel
+        isAnimatingFolder = true
+        newFolderPanel.animateOpen(from: folderItemLayer, springboardLayer: springboardLayer, containerLayer: containerLayer) { [weak self] in
+            self?.isAnimatingFolder = false
+            completion?()
+            self?.applyPendingLayoutIfIdle()
+        }
+    }
+
+    func closeFolder(animated: Bool = true, completion: (@MainActor () -> Void)? = nil) {
+        guard let folderPanel, !isAnimatingFolder else { return }
+        commitRenaming()
+        let folderItemLayer = folderItemLayer(of: folderPanel.folder)
+        isAnimatingFolder = true
+        let finish: @MainActor () -> Void = { [weak self] in
+            guard let self else { return }
+            self.folderPanel = nil
+            self.isAnimatingFolder = false
+            completion?()
+            self.applyPendingLayoutIfIdle()
+        }
+        guard animated else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            folderPanel.folderLayer.removeFromSuperlayer()
+            folderItemLayer?.opacity = 1
+            springboardLayer.opacity = 1
+            springboardLayer.transform = CATransform3DIdentity
+            CATransaction.commit()
+            folderPanel.pages.tearDown()
+            finish()
+            return
+        }
+        folderPanel.animateClose(to: folderItemLayer, springboardLayer: springboardLayer, completion: finish)
+    }
+
+    // MARK: - Renaming
+
+    private func startRenaming() {
+        guard let folderPanel, renamingTitle == nil else { return }
+        renamingTitle = folderPanel.folder.title
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        folderPanel.titleLayer.isHidden = true
+        folderPanel.titleEditorLayer.isHidden = false
+        folderPanel.titleEditorLayer.setText(folderPanel.folder.title)
+        folderPanel.titleEditorLayer.startBlinking()
+        CATransaction.commit()
+    }
+
+    /// Ends renaming and stores the new name; an empty name keeps the old one, as in 15.
+    private func commitRenaming() {
+        guard let folderPanel, let renamingTitle else { return }
+        self.renamingTitle = nil
+        let newTitle = renamingTitle.trimmingCharacters(in: .whitespaces)
+        endRenaming(in: folderPanel)
+        guard !newTitle.isEmpty, newTitle != folderPanel.folder.title else { return }
+        folderPanel.setTitle(newTitle)
+        folderItemLayer(of: folderPanel.folder)?.labelLayer.setString(newTitle, contentsScale: scale)
+        applyEdit(.renameFolder(folderPanel.folder.identifier, title: newTitle))
+    }
+
+    private func cancelRenaming() {
+        guard let folderPanel, renamingTitle != nil else { return }
+        renamingTitle = nil
+        endRenaming(in: folderPanel)
+    }
+
+    private func endRenaming(in folderPanel: SpringboardFolderPanel) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        folderPanel.titleEditorLayer.isHidden = true
+        folderPanel.titleLayer.isHidden = false
+        CATransaction.commit()
+    }
+
+    private func handleRenamingKeyDown(keyCode: Int64, characters: String, modifierFlags: CGEventFlags) {
+        guard let folderPanel, var title = renamingTitle else { return }
+        switch keyCode {
+        case SpringboardKeyCode.returnKey, SpringboardKeyCode.keypadEnter:
+            commitRenaming()
+            return
+        case SpringboardKeyCode.escape:
+            cancelRenaming()
+            return
+        case SpringboardKeyCode.delete:
+            guard !title.isEmpty else { return }
+            title.removeLast()
+        default:
+            guard Self.isTypedText(characters, modifierFlags: modifierFlags) else { return }
+            title += characters
+        }
+        renamingTitle = title
+        folderPanel.titleEditorLayer.setText(title)
+    }
+
+    private static func isTypedText(_ characters: String, modifierFlags: CGEventFlags) -> Bool {
+        !modifierFlags.contains(.maskCommand)
+            && !modifierFlags.contains(.maskControl)
+            && !characters.isEmpty
+            && !characters.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) || (0xF700...0xF8FF).contains($0.value) }
     }
 
     // MARK: - Search
@@ -226,16 +369,25 @@ final class SpringboardInterface {
 
     private func showSearchResults() {
         if !isShowingSearchResults {
-            pageIndexBeforeSearch = currentPageIndex
+            pageIndexBeforeSearch = mainPages.currentPageIndex
         }
         let results = SpringboardSearch.applications(matching: searchText, in: layout) { $0.fileName }
         let itemsPerPage = metrics.input.rowCount * metrics.input.columnCount
         let resultPages = stride(from: 0, to: results.count, by: itemsPerPage).map { pageStart in
             results[pageStart..<min(pageStart + itemsPerPage, results.count)].map(LaunchpadItem.application)
         }
-        showPages(resultPages, isSearchResults: true, pageIndex: 0)
+        mainPages.showPages(
+            resultPages,
+            rowCount: metrics.input.rowCount,
+            pageIndex: 0,
+            centeredRowOffset: { [metrics] itemCount in metrics.centeredRowOffset(forItemCount: itemCount) }
+        ) { [weak self] itemLayer in
+            self?.putIcons(in: itemLayer)
+        }
+        isShowingSearchResults = true
+        selectedItemIndex = nil
         CATransaction.begin()
-        CATransaction.setDisableActions(results.isEmpty == false)
+        CATransaction.setDisableActions(!results.isEmpty)
         noResultsLayer.opacity = results.isEmpty ? 1 : 0
         CATransaction.commit()
         if !results.isEmpty {
@@ -249,7 +401,7 @@ final class SpringboardInterface {
         CATransaction.setDisableActions(true)
         noResultsLayer.opacity = 0
         CATransaction.commit()
-        showPages(layout.pages.map(\.items), isSearchResults: false, pageIndex: pageIndexBeforeSearch)
+        showMainPages(pageIndex: pageIndexBeforeSearch)
     }
 
     private func clearSearch() {
@@ -260,21 +412,39 @@ final class SpringboardInterface {
     // MARK: - Keys
 
     func handleKeyDown(keyCode: Int64, characters: String, modifierFlags: CGEventFlags) -> Action {
-        let hasCommand = modifierFlags.contains(.maskCommand)
-        switch keyCode {
-        case SpringboardKeyCode.escape:
-            // 15's order: close a folder, clear the search, then close Launchpad.
+        guard !isAnimatingFolder else { return .none }
+        if renamingTitle != nil {
+            handleRenamingKeyDown(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags)
+            return .none
+        }
+        // 15's order for Escape: cancel a drag, close a folder, clear the search, then close Launchpad.
+        if keyCode == SpringboardKeyCode.escape {
+            if dragSession != nil {
+                cancelDrag()
+                return .none
+            }
+            if folderPanel != nil {
+                closeFolder()
+                return .none
+            }
             guard searchText.isEmpty else {
                 clearSearch()
                 return .none
             }
             return .dismiss(reason: "escape")
+        }
+        guard folderPanel == nil, dragSession == nil else { return .none }
+
+        let hasCommand = modifierFlags.contains(.maskCommand)
+        switch keyCode {
         case SpringboardKeyCode.returnKey, SpringboardKeyCode.keypadEnter:
             return actionForSelectedItem()
         case SpringboardKeyCode.leftArrow where hasCommand:
             turnPageKeepingSelection(by: -1)
         case SpringboardKeyCode.rightArrow where hasCommand:
             turnPageKeepingSelection(by: 1)
+        case SpringboardKeyCode.downArrow where hasCommand:
+            return actionForSelectedItem(opensFoldersOnly: true)
         case SpringboardKeyCode.leftArrow:
             navigate(.left)
         case SpringboardKeyCode.rightArrow:
@@ -290,12 +460,7 @@ final class SpringboardInterface {
         case SpringboardKeyCode.tab:
             break
         default:
-            guard
-                !hasCommand,
-                !modifierFlags.contains(.maskControl),
-                !characters.isEmpty,
-                !characters.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) || (0xF700...0xF8FF).contains($0.value) })
-            else { return .none }
+            guard Self.isTypedText(characters, modifierFlags: modifierFlags) else { return .none }
             searchText += characters
             searchTextDidChange()
         }
@@ -303,65 +468,68 @@ final class SpringboardInterface {
     }
 
     private func navigate(_ direction: SpringboardNavigation.Direction) {
-        let newIndex = SpringboardNavigation.selectedIndex(
+        select(itemAt: SpringboardNavigation.selectedIndex(
             after: direction,
             from: selectedItemIndex,
             itemCount: currentItems.count,
             columnCount: metrics.input.columnCount
-        )
-        select(itemAt: newIndex)
+        ))
     }
 
     /// Command-arrows turn the page; a selection moves to the new page's first item.
     private func turnPageKeepingSelection(by pageOffset: Int) {
         let hadSelection = selectedItemIndex != nil
-        select(itemAt: nil)
-        turn(toPageAt: currentPageIndex + pageOffset)
+        mainPages.turn(toPageAt: mainPages.currentPageIndex + pageOffset)
         if hadSelection, !currentItems.isEmpty {
             select(itemAt: 0)
         }
     }
 
-    private func actionForSelectedItem() -> Action {
-        guard let selectedItemIndex, currentItems.indices.contains(selectedItemIndex) else { return .none }
-        guard case .application(let application) = currentItems[selectedItemIndex] else { return .none }
-        let itemLayer = currentItemLayers.indices.contains(selectedItemIndex) ? currentItemLayers[selectedItemIndex] : nil
-        return .launch(application, iconFrame: itemLayer.map(iconFrameInContainer(of:)) ?? .zero, iconImage: itemLayer?.imageLayer.contents)
+    /// Return launches the selected application or opens the selected folder; Command-Down only opens.
+    private func actionForSelectedItem(opensFoldersOnly: Bool = false) -> Action {
+        guard let selectedItemIndex, currentItems.indices.contains(selectedItemIndex), currentItemLayers.indices.contains(selectedItemIndex) else { return .none }
+        let itemLayer = currentItemLayers[selectedItemIndex]
+        switch currentItems[selectedItemIndex] {
+        case .application(let application):
+            guard !opensFoldersOnly else { return .none }
+            return launchAction(for: application, itemLayer: itemLayer)
+        case .folder(let folder):
+            openFolder(folder, from: itemLayer)
+            return .none
+        }
+    }
+
+    private func launchAction(for application: LaunchpadApplication, itemLayer: SpringboardItemLayer) -> Action {
+        .launch(application, iconFrame: itemLayer.imageLayer.convert(itemLayer.imageLayer.bounds, to: containerLayer), iconImage: itemLayer.imageLayer.contents)
     }
 
     // MARK: - Pointer
 
-    private func pointInSpringboard(_ containerPoint: CGPoint) -> CGPoint {
-        CGPoint(x: containerPoint.x - metrics.springboardFrame.minX, y: containerPoint.y - metrics.springboardFrame.minY)
-    }
-
-    /// The current page's grid layer and `containerPoint` in it.
-    private func pointInCurrentGrid(_ containerPoint: CGPoint) -> (SpringboardPageGrid, CGPoint)? {
-        guard pageGrids.indices.contains(currentPageIndex) else { return nil }
-        let pageGrid = pageGrids[currentPageIndex]
-        let springboardPoint = pointInSpringboard(containerPoint)
-        let scrollContentPoint = CGPoint(
-            x: springboardPoint.x - metrics.scrollFrame.minX + scrollValue,
-            y: springboardPoint.y - metrics.scrollFrame.minY
-        )
-        let gridFrame = pageGrid.gridLayer.frame
-        return (pageGrid, CGPoint(x: scrollContentPoint.x - gridFrame.minX, y: scrollContentPoint.y - gridFrame.minY))
-    }
-
-    private func iconFrameInContainer(of itemLayer: SpringboardItemLayer) -> CGRect {
-        guard pageGrids.indices.contains(currentPageIndex) else { return .zero }
-        let gridFrame = pageGrids[currentPageIndex].gridLayer.frame
-        return itemLayer.iconFrame.offsetBy(
-            dx: metrics.springboardFrame.minX + metrics.scrollFrame.minX - scrollValue + gridFrame.minX + itemLayer.frame.minX,
-            dy: metrics.springboardFrame.minY + metrics.scrollFrame.minY + gridFrame.minY + itemLayer.frame.minY
-        )
-    }
-
     func handleMouseDown(at containerPoint: CGPoint, timestamp: UInt64) -> Action {
-        wheelSettleTask?.cancel()
-        let springboardPoint = pointInSpringboard(containerPoint)
+        guard !isAnimatingFolder else { return .none }
+        mainPages.cancelPendingWheelSettle()
+        folderPanel?.pages.cancelPendingWheelSettle()
+
+        if let folderPanel {
+            if renamingTitle != nil, !folderPanel.isOnTitle(containerPoint) {
+                commitRenaming()
+            }
+            if folderPanel.isOnTitle(containerPoint) {
+                pointerTracking = .folderTitle
+                return .none
+            }
+            guard folderPanel.isInsidePanel(containerPoint) else {
+                // 15 closed an open folder as soon as the press landed outside it.
+                closeFolder()
+                pointerTracking = .none
+                return .none
+            }
+            return beginPress(at: containerPoint, timestamp: timestamp, context: .folder)
+        }
+
+        let springboardPoint = springboardLayer.convert(containerPoint, from: containerLayer)
         if metrics.searchFieldFrame.contains(springboardPoint) {
-            let fieldPoint = CGPoint(x: springboardPoint.x - metrics.searchFieldFrame.minX, y: springboardPoint.y - metrics.searchFieldFrame.minY)
+            let fieldPoint = springboardLayer.convert(springboardPoint, to: searchFieldLayer)
             if searchFieldLayer.isOnClearButton(fieldPoint) {
                 searchFieldLayer.isClearButtonPressed = true
                 pointerTracking = .clearButton
@@ -370,87 +538,96 @@ final class SpringboardInterface {
             }
             return .none
         }
-        let pagerPoint = CGPoint(x: springboardPoint.x - metrics.pagerControlFrame.minX, y: springboardPoint.y - metrics.pagerControlFrame.minY)
-        if let pageIndex = pagerControlLayer.pageIndex(at: pagerPoint) {
-            pointerTracking = .pagerIndicator(pageIndex: pageIndex)
+        return beginPress(at: containerPoint, timestamp: timestamp, context: .main)
+    }
+
+    private func beginPress(at containerPoint: CGPoint, timestamp: UInt64, context: GridContext) -> Action {
+        let pages = pages(for: context)
+        let pointInPagesSuperlayer = containerLayer.convert(containerPoint, to: pages.scrollLayer.superlayer)
+        if let pageIndex = pages.pageIndexOfIndicator(at: pointInPagesSuperlayer) {
+            pointerTracking = .pagerIndicator(context: context, pageIndex: pageIndex)
             return .none
         }
-        if let (pageGrid, gridPoint) = pointInCurrentGrid(containerPoint), let hit = pageGrid.item(at: gridPoint), hit.isOnIcon {
+        if let (pageGrid, gridPoint) = pages.pointInCurrentGrid(pointInPagesSuperlayer), let hit = pageGrid.item(at: gridPoint), hit.isOnIcon {
             hit.itemLayer.isDarkened = true
-            pointerTracking = .icon(pageIndex: currentPageIndex, itemIndex: hit.index, itemLayer: hit.itemLayer, startLocation: containerPoint)
+            pointerTracking = .icon(context: context, pageIndex: pages.currentPageIndex, itemIndex: hit.index, itemLayer: hit.itemLayer, startLocation: containerPoint, startTimestamp: timestamp)
             return .none
         }
-        pointerTracking = .background(startLocation: containerPoint, startScrollValue: scrollValue, startTimestamp: timestamp, isDragging: false)
+        pointerTracking = .background(context: context, startLocation: containerPoint, startScrollValue: pages.scrollValue, startTimestamp: timestamp, isDragging: false)
         return .none
     }
 
     func handleMouseDragged(to containerPoint: CGPoint, timestamp: UInt64) -> Action {
+        if dragSession != nil {
+            continueDrag(to: containerPoint, timestamp: timestamp)
+            return .none
+        }
         switch pointerTracking {
-        case let .icon(_, _, itemLayer, startLocation):
-            // Rearranging comes with folders and dragging; until then a drag from an icon pages.
-            guard hypot(containerPoint.x - startLocation.x, containerPoint.y - startLocation.y) >= SpringboardPaging.dragThreshold else { return .none }
-            itemLayer.isDarkened = false
-            pointerTracking = .background(startLocation: startLocation, startScrollValue: scrollValue, startTimestamp: timestamp, isDragging: true)
-            return handleMouseDragged(to: containerPoint, timestamp: timestamp)
-        case let .background(startLocation, startScrollValue, startTimestamp, isDragging):
+        case let .icon(context, pageIndex, itemIndex, itemLayer, startLocation, _):
+            // 15 started dragging an icon after 3 points in either direction, no long press needed.
+            guard
+                abs(containerPoint.x - startLocation.x) >= SpringboardPaging.dragThreshold
+                    || abs(containerPoint.y - startLocation.y) >= SpringboardPaging.dragThreshold
+            else { return .none }
+            pointerTracking = .none
+            beginDrag(of: itemLayer, context: context, pageIndex: pageIndex, itemIndex: itemIndex, startLocation: startLocation, location: containerPoint, timestamp: timestamp)
+            return .none
+        case let .background(context, startLocation, startScrollValue, startTimestamp, isDragging):
             let horizontalMovement = containerPoint.x - startLocation.x
             let hasStartedDragging = isDragging || abs(horizontalMovement) >= SpringboardPaging.dragThreshold
-            pointerTracking = .background(startLocation: startLocation, startScrollValue: startScrollValue, startTimestamp: startTimestamp, isDragging: hasStartedDragging)
+            pointerTracking = .background(context: context, startLocation: startLocation, startScrollValue: startScrollValue, startTimestamp: startTimestamp, isDragging: hasStartedDragging)
             if hasStartedDragging {
-                follow(scrollValue: startScrollValue - horizontalMovement)
+                pages(for: context).follow(scrollValue: startScrollValue - horizontalMovement)
             }
             return .none
         case .clearButton:
-            let springboardPoint = pointInSpringboard(containerPoint)
-            let fieldPoint = CGPoint(x: springboardPoint.x - metrics.searchFieldFrame.minX, y: springboardPoint.y - metrics.searchFieldFrame.minY)
+            let fieldPoint = containerLayer.convert(containerPoint, to: searchFieldLayer)
             searchFieldLayer.isClearButtonPressed = searchFieldLayer.isOnClearButton(fieldPoint)
             return .none
-        case .none, .pagerIndicator, .searchField:
+        case .none, .pagerIndicator, .searchField, .folderTitle:
             return .none
         }
     }
 
     func handleMouseUp(at containerPoint: CGPoint, timestamp: UInt64) -> Action {
+        if dragSession != nil {
+            endDrag(at: containerPoint, timestamp: timestamp)
+            return .none
+        }
         defer { pointerTracking = .none }
         switch pointerTracking {
-        case let .icon(pageIndex, itemIndex, itemLayer, _):
+        case let .icon(context, pageIndex, itemIndex, itemLayer, _, _):
             itemLayer.isDarkened = false
+            let pages = pages(for: context)
             guard
-                pageIndex == currentPageIndex,
-                let (pageGrid, gridPoint) = pointInCurrentGrid(containerPoint),
+                pageIndex == pages.currentPageIndex,
+                let (pageGrid, gridPoint) = pages.pointInCurrentGrid(containerLayer.convert(containerPoint, to: pages.scrollLayer.superlayer)),
                 let hit = pageGrid.item(at: gridPoint),
                 hit.index == itemIndex,
                 hit.isOnIcon
             else { return .none }
             switch hit.itemLayer.item {
             case .application(let application):
-                return .launch(application, iconFrame: iconFrameInContainer(of: hit.itemLayer), iconImage: hit.itemLayer.imageLayer.contents)
-            case .folder, .none:
-                // Opening folders comes with the folder step.
+                return launchAction(for: application, itemLayer: hit.itemLayer)
+            case .folder(let folder):
+                openFolder(folder, from: hit.itemLayer)
+                return .none
+            case .none:
                 return .none
             }
-        case let .background(startLocation, startScrollValue, startTimestamp, isDragging):
+        case let .background(context, startLocation, startScrollValue, startTimestamp, isDragging):
             guard isDragging else {
+                guard context == .main else { return .none }
                 // 15 closed on a click on the background, search or not (`cancelActionWithEvent:sender:`).
                 let movement = hypot(containerPoint.x - startLocation.x, containerPoint.y - startLocation.y)
                 return movement < SpringboardPaging.dragThreshold ? .dismiss(reason: "clicked outside the icons") : .none
             }
-            let settledPageIndex = SpringboardPaging.settledPageIndex(
-                currentPageIndex: currentPageIndex,
-                pageCount: pageGrids.count,
-                startScrollValue: startScrollValue,
-                endScrollValue: scrollValue,
-                elapsedNanoseconds: timestamp > startTimestamp ? timestamp - startTimestamp : 0
-            )
-            select(itemAt: nil)
-            turn(toPageAt: settledPageIndex)
+            pages(for: context).settleDrag(startScrollValue: startScrollValue, startTimestamp: startTimestamp, endTimestamp: timestamp)
             return .none
-        case .pagerIndicator(let pageIndex):
-            let springboardPoint = pointInSpringboard(containerPoint)
-            let pagerPoint = CGPoint(x: springboardPoint.x - metrics.pagerControlFrame.minX, y: springboardPoint.y - metrics.pagerControlFrame.minY)
-            if pagerControlLayer.pageIndex(at: pagerPoint) == pageIndex {
-                select(itemAt: nil)
-                turn(toPageAt: pageIndex)
+        case let .pagerIndicator(context, pageIndex):
+            let pages = pages(for: context)
+            if pages.pageIndexOfIndicator(at: containerLayer.convert(containerPoint, to: pages.scrollLayer.superlayer)) == pageIndex {
+                pages.turn(toPageAt: pageIndex)
             }
             return .none
         case .clearButton:
@@ -458,6 +635,11 @@ final class SpringboardInterface {
             searchFieldLayer.isClearButtonPressed = false
             if wasPressed {
                 clearSearch()
+            }
+            return .none
+        case .folderTitle:
+            if let folderPanel, folderPanel.isOnTitle(containerPoint), SpringboardPreferences.allowsRenamingFolders {
+                startRenaming()
             }
             return .none
         case .none, .searchField:
@@ -468,66 +650,16 @@ final class SpringboardInterface {
     // MARK: - Scroll wheel and trackpad
 
     func handleScrollWheel(_ scrollWheel: SpringboardInputEvent.ScrollWheel, timestamp: UInt64) -> Action {
-        // 15 ignored momentum: the content stops when the fingers lift.
-        guard scrollWheel.momentumPhase == 0, !pageGrids.isEmpty else { return .none }
-        let distance = SpringboardPaging.scrollDistance(
-            horizontalLineDelta: scrollWheel.horizontalLineDelta,
-            verticalLineDelta: scrollWheel.verticalLineDelta,
-            reversesScrollGesture: SpringboardPreferences.reversesScrollGesture
-        )
-
-        let phaseBegan: Int64 = 1
-        let phaseEnded: Int64 = 4
-        let phaseCancelled: Int64 = 8
-        if scrollWheel.isContinuous, scrollWheel.scrollPhase != 0 {
-            switch scrollWheel.scrollPhase {
-            case phaseBegan:
-                select(itemAt: nil)
-                trackpadScroll = (scrollValue, timestamp)
-                follow(scrollValue: scrollValue + distance)
-            case phaseEnded, phaseCancelled:
-                guard let trackpadScroll else { return .none }
-                self.trackpadScroll = nil
-                let settledPageIndex = SpringboardPaging.settledPageIndex(
-                    currentPageIndex: currentPageIndex,
-                    pageCount: pageGrids.count,
-                    startScrollValue: trackpadScroll.startScrollValue,
-                    endScrollValue: scrollValue,
-                    elapsedNanoseconds: timestamp > trackpadScroll.startTimestamp ? timestamp - trackpadScroll.startTimestamp : 0
-                )
-                turn(toPageAt: settledPageIndex)
-            default:
-                guard trackpadScroll != nil else { return .none }
-                follow(scrollValue: scrollValue + distance)
-            }
-            return .none
-        }
-
-        // A notched wheel: follow, and settle on one page once the wheel pauses.
-        guard distance != 0 else { return .none }
-        select(itemAt: nil)
-        if wheelScrollStartValue == nil {
-            wheelScrollStartValue = scrollValue
-        }
-        follow(scrollValue: scrollValue + distance)
-        wheelSettleTask?.cancel()
-        wheelSettleTask = Task { [weak self] in
-            try? await Task.sleep(for: SpringboardPaging.wheelSettleDelay)
-            guard !Task.isCancelled, let self, let startScrollValue = self.wheelScrollStartValue else { return }
-            self.wheelScrollStartValue = nil
-            self.turn(toPageAt: SpringboardPaging.wheelSettledPageIndex(
-                currentPageIndex: self.currentPageIndex,
-                pageCount: self.pageGrids.count,
-                startScrollValue: startScrollValue,
-                endScrollValue: self.scrollValue
-            ))
-        }
+        guard !isAnimatingFolder, dragSession == nil else { return .none }
+        pages(for: folderPanel == nil ? .main : .folder).handleScrollWheel(scrollWheel, timestamp: timestamp)
         return .none
     }
 
+    // MARK: - Log
+
     /// What the Dock's grid made of the first page, for the log: classes, counts and a few frames.
     var firstPageSummary: String {
-        guard let firstGrid = pageGrids.first else { return "no pages" }
+        guard let firstGrid = mainPages.pageGrids.first else { return "no pages" }
         let itemLayers = firstGrid.itemLayers
         itemLayers.forEach { $0.layoutIfNeeded() }
         func describe(_ itemLayer: SpringboardItemLayer?) -> String {
@@ -537,11 +669,14 @@ final class SpringboardInterface {
         let gridClassName = String(cString: object_getClassName(firstGrid.gridLayer))
         let textClassName = String(cString: object_getClassName(itemLayers.first?.labelLayer.textLayer ?? CATextLayer()))
         let iconCount = itemLayers.filter { $0.imageLayer.contents != nil }.count
-        return "grid \(gridClassName) \(NSStringFromRect(firstGrid.gridLayer.frame)), \(itemLayers.count)/\(firstGrid.items.count) items, titles \(textClassName), \(iconCount) with an image; first \(describe(itemLayers.first)); eighth \(describe(itemLayers.count > 7 ? itemLayers[7] : nil)); last \(describe(itemLayers.last))"
+        let folderSummary = itemLayers.first(where: \.isFolder).map { folderLayer in
+            "folder \"\(folderLayer.item?.title ?? "")\" square \(NSStringFromRect(folderLayer.folderBackdropFrame)) with \(folderLayer.thumbnailLayers.count) thumbnail layer(s), first \(folderLayer.thumbnailLayers.first.map { NSStringFromRect($0.frame) } ?? "none")"
+        } ?? "no folder"
+        return "grid \(gridClassName) \(NSStringFromRect(firstGrid.gridLayer.frame)), \(itemLayers.count)/\(firstGrid.items.count) items, titles \(textClassName), \(iconCount) with an image; first \(describe(itemLayers.first)); last \(describe(itemLayers.last)); \(folderSummary)"
     }
 
     /// The geometry, for the log.
     var geometryDescription: String {
-        "page \(Int(metrics.pageSize.width))×\(Int(metrics.pageSize.height)), cell \(Int(metrics.cellSize.width))×\(Int(metrics.cellSize.height)), icon \(Int(metrics.iconSide)), \(pageGrids.count) page(s), Dock \(metrics.input.dockOrientation.rawValue) \(Int(metrics.input.dockThickness)), notch \(Int(metrics.input.notchHeight))"
+        "page \(Int(metrics.pageSize.width))×\(Int(metrics.pageSize.height)), cell \(Int(metrics.cellSize.width))×\(Int(metrics.cellSize.height)), icon \(Int(metrics.iconSide)), \(pageCount) page(s), Dock \(metrics.input.dockOrientation.rawValue) \(Int(metrics.input.dockThickness)), notch \(Int(metrics.input.notchHeight))"
     }
 }

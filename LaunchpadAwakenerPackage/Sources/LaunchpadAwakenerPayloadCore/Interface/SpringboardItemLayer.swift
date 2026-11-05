@@ -4,20 +4,28 @@ import Foundation
 import ImageIO
 import QuartzCore
 
-/// An icon title; macOS 15's `ECSBLabelLayer`, which drew with the Dock's `ECShadowTextLayer`.
+/// A title; macOS 15's `ECSBLabelLayer`, which drew with the Dock's `ECShadowTextLayer`.
 ///
-/// White Medium 13, middle truncation, a black 20 % shadow 1 point down with a 2-point blur
+/// White, middle truncation, a black 20 % shadow 1 point down with a 2-point blur
 /// (15.5 `-[ECSBLabelLayer initWithString:andScaleFactor:]`, `0x10001FD60`). The text sits 2 points
-/// inside the label on every side.
+/// inside the label on every side. Icons use Medium 13, an open folder's title Light 28.
 final class SpringboardLabelLayer: CALayer {
     static let textInset: CGFloat = 2
 
     let textLayer: CATextLayer = DockLayerFactory.makeTextLayer(withShadow: true)
+    private var font: CTFont = SpringboardTypography.labelFont
+
+    convenience init(font: CTFont) {
+        self.init()
+        self.font = font
+        textLayer.font = font
+        textLayer.fontSize = CTFontGetSize(font)
+    }
 
     override init() {
         super.init()
-        textLayer.font = SpringboardTypography.labelFont
-        textLayer.fontSize = CTFontGetSize(SpringboardTypography.labelFont)
+        textLayer.font = font
+        textLayer.fontSize = CTFontGetSize(font)
         textLayer.foregroundColor = CGColor(gray: 1, alpha: 1)
         textLayer.truncationMode = .middle
         textLayer.alignmentMode = .center
@@ -33,6 +41,10 @@ final class SpringboardLabelLayer: CALayer {
         nil
     }
 
+    var string: String {
+        (textLayer.string as? String) ?? ""
+    }
+
     func setString(_ string: String, contentsScale scale: CGFloat) {
         textLayer.string = string
         textLayer.contentsScale = scale
@@ -41,11 +53,15 @@ final class SpringboardLabelLayer: CALayer {
 
     /// `(text width + 4, line height + 7)`: the inset on both sides, plus room for the blur and the
     /// downward offset of the shadow (`-[ECSBLabelLayer preferredFrameSize]`, `0x1000210F0`).
-    static func preferredSize(of string: String) -> CGSize {
+    static func preferredSize(of string: String, font: CTFont = SpringboardTypography.labelFont) -> CGSize {
         CGSize(
-            width: SpringboardTypography.width(of: string, in: SpringboardTypography.labelFont) + 2 * textInset,
-            height: SpringboardTypography.lineHeight(of: SpringboardTypography.labelFont) + 7
+            width: SpringboardTypography.width(of: string, in: font) + 2 * textInset,
+            height: SpringboardTypography.lineHeight(of: font) + 7
         )
+    }
+
+    var preferredSize: CGSize {
+        Self.preferredSize(of: string, font: font)
     }
 
     override func layoutSublayers() {
@@ -57,18 +73,57 @@ final class SpringboardLabelLayer: CALayer {
     }
 }
 
-/// One cell of a page: an application or a folder with its title; macOS 15's `ECSBItemLayer`.
+/// Feeds a folder icon's thumbnails to the Dock's `ECImageGridLayer`, as 15's `ECSBGroup` did.
+final class SpringboardThumbnailSource: NSObject {
+    var images: [CGImage?] = []
+    var scale: CGFloat = 2
+
+    @objc(numberOfItemsForLayer:)
+    func numberOfItems(forLayer gridLayer: CALayer) -> UInt {
+        UInt(images.count)
+    }
+
+    @objc(makeLayerForLayer:)
+    func makeLayer(forLayer gridLayer: CALayer) -> CALayer {
+        let thumbnailLayer = CALayer()
+        thumbnailLayer.contentsGravity = .resizeAspect
+        thumbnailLayer.contentsScale = scale
+        return thumbnailLayer
+    }
+
+    @objc(setContentInLayers:withDataRange:forLayer:usingScaleFactor:)
+    func setContent(inLayers layers: NSArray, withDataRange dataRange: NSRange, forLayer gridLayer: CALayer, usingScaleFactor scaleFactor: Float) {
+        for (offset, layer) in layers.enumerated() {
+            let imageIndex = dataRange.location + offset
+            guard let thumbnailLayer = layer as? CALayer, images.indices.contains(imageIndex) else { continue }
+            thumbnailLayer.contents = images[imageIndex]
+        }
+    }
+}
+
+/// One cell of a page: an application or a folder with its title; macOS 15's `ECSBItemLayer` and
+/// `ECSBGroupItemLayer`.
 ///
 /// Positioned by the Dock's `ECGridLayer`, which sets each item's bounds to a whole cell; this lays the
-/// icon and title out inside the cell (`-[ECSBItemLayer layout]`, 15.5 `0x100020A14`).
+/// icon and title out inside the cell (`-[ECSBItemLayer layout]`, 15.5 `0x100020A14`). A folder has no
+/// icon image: a frosted square (white 97 % at half opacity, no blur) with a 3 × 3 grid of its first
+/// page's icons on the Dock's `ECImageGridLayer`.
 final class SpringboardItemLayer: CALayer {
+    static let folderBackdropColor = CGColor(gray: 0.9686, alpha: 0.5)
+    /// The darker square behind a target while something is dragged over it.
+    static let dropTargetTintColor = CGColor(gray: 0.9412, alpha: 1)
+
     private(set) var item: LaunchpadItem?
     private var metrics: SpringboardMetrics?
 
     let imageLayer = CALayer()
     let labelLayer = SpringboardLabelLayer()
     private var selectionLayer: CALayer?
-    private var folderThumbnailLayers: [CALayer] = []
+    /// A folder's frosted square, or an application's while something is dragged onto it.
+    private var backdropLayer: CALayer?
+    private var dropTargetTintLayer: CALayer?
+    private var thumbnailGridLayer: CALayer?
+    private let thumbnailSource = SpringboardThumbnailSource()
 
     override init() {
         super.init()
@@ -88,6 +143,35 @@ final class SpringboardItemLayer: CALayer {
     /// The icon, in this layer: only a press on it counts as a press on the item, as in 15.
     private(set) var iconFrame: CGRect = .zero
 
+    /// The folder's frosted square, in this layer.
+    var folderBackdropFrame: CGRect {
+        guard let metrics else { return iconFrame }
+        let inset = SpringboardFolderMetrics.folderBackdropInset(forIconSide: metrics.iconSide)
+        return iconFrame.insetBy(dx: inset, dy: inset)
+    }
+
+    var folderCornerRadius: CGFloat {
+        Self.cornerRadius(forIconSide: metrics?.iconSide ?? iconFrame.width)
+    }
+
+    /// The thumbnail layers of a folder, in reading order: top row first, left to right.
+    var thumbnailLayers: [CALayer] {
+        guard let thumbnailGridLayer else { return [] }
+        // ECImageGridLayer keeps its item layers in a scroll layer inside it, in no promised order.
+        return (thumbnailGridLayer.sublayers ?? [])
+            .flatMap { $0.sublayers ?? [] }
+            .sorted { firstLayer, secondLayer in
+                if firstLayer.frame.midY != secondLayer.frame.midY {
+                    return firstLayer.frame.midY > secondLayer.frame.midY
+                }
+                return firstLayer.frame.midX < secondLayer.frame.midX
+            }
+    }
+
+    var isFolder: Bool {
+        if case .folder = item { true } else { false }
+    }
+
     var isSelected = false {
         didSet {
             guard isSelected != oldValue else { return }
@@ -95,22 +179,31 @@ final class SpringboardItemLayer: CALayer {
         }
     }
 
-    /// Pressed: the icon dims to 40 % (`-[ECSBItemLayer setDarkened:]`, `0x100060DA8`).
+    /// Pressed: the icon dims to 40 % (`-[ECSBItemLayer setDarkened:]`, `0x100060DA8`); a folder dims its
+    /// square and thumbnails (`-[ECSBGroupItemLayer setDarkened:]`, `0x100076CEC`).
     var isDarkened = false {
         didSet {
             guard isDarkened != oldValue else { return }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            if isDarkened, let multiplyFilterType = QuartzCorePrivate.stringConstant(named: "kCAFilterMultiplyColor"),
-               let darkeningFilter = QuartzCorePrivate.makeFilter(type: multiplyFilterType)
-            {
-                darkeningFilter.setValue(CGColor(gray: 0.4, alpha: 1), forKey: "inputColor")
-                imageLayer.filters = [darkeningFilter]
+            let filters = isDarkened ? Self.darkeningFilters() : nil
+            if isFolder {
+                backdropLayer?.filters = filters
+                thumbnailGridLayer?.filters = filters
             } else {
-                imageLayer.filters = nil
+                imageLayer.filters = filters
             }
             CATransaction.commit()
         }
+    }
+
+    private static func darkeningFilters() -> [Any]? {
+        guard
+            let multiplyFilterType = QuartzCorePrivate.stringConstant(named: "kCAFilterMultiplyColor"),
+            let darkeningFilter = QuartzCorePrivate.makeFilter(type: multiplyFilterType)
+        else { return nil }
+        darkeningFilter.setValue(CGColor(gray: 0.4, alpha: 1), forKey: "inputColor")
+        return [darkeningFilter]
     }
 
     func configure(with item: LaunchpadItem, metrics: SpringboardMetrics, scale: CGFloat) {
@@ -119,25 +212,49 @@ final class SpringboardItemLayer: CALayer {
         contentsScale = scale
         imageLayer.contentsScale = scale
         labelLayer.setString(item.title, contentsScale: scale)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         switch item {
         case .application:
-            folderThumbnailLayers.forEach { $0.removeFromSuperlayer() }
-            folderThumbnailLayers = []
-        case .folder(let folder):
-            imageLayer.contents = SpringboardTextures.image(named: "ecsb_group", scale: scale)
-            let thumbnailCount = min(folder.applications.count, 9)
-            while folderThumbnailLayers.count < thumbnailCount {
-                let thumbnailLayer = CALayer()
-                thumbnailLayer.contentsGravity = .resizeAspect
-                thumbnailLayer.contentsScale = scale
-                addSublayer(thumbnailLayer)
-                folderThumbnailLayers.append(thumbnailLayer)
-            }
-            while folderThumbnailLayers.count > thumbnailCount {
-                folderThumbnailLayers.removeLast().removeFromSuperlayer()
-            }
+            removeFolderLayers()
+        case .folder:
+            imageLayer.contents = nil
+            makeFolderLayersIfNeeded(scale: scale)
         }
+        CATransaction.commit()
         setNeedsLayout()
+    }
+
+    private func makeFolderLayersIfNeeded(scale: CGFloat) {
+        if backdropLayer == nil {
+            let newBackdropLayer = CALayer()
+            newBackdropLayer.backgroundColor = Self.folderBackdropColor
+            newBackdropLayer.cornerCurve = .continuous
+            insertSublayer(newBackdropLayer, below: imageLayer)
+            backdropLayer = newBackdropLayer
+        }
+        guard thumbnailGridLayer == nil else { return }
+        thumbnailSource.scale = scale
+        guard let newThumbnailGridLayer = DockLayerFactory.makeImageGridLayer(
+            source: thumbnailSource,
+            rowCount: 3,
+            columnCount: 3,
+            spacing: 4,
+            scaleFactor: Float(scale)
+        ) else { return }
+        newThumbnailGridLayer.masksToBounds = true
+        newThumbnailGridLayer.allowsEdgeAntialiasing = false
+        addSublayer(newThumbnailGridLayer)
+        thumbnailGridLayer = newThumbnailGridLayer
+    }
+
+    private func removeFolderLayers() {
+        backdropLayer?.removeFromSuperlayer()
+        backdropLayer = nil
+        dropTargetTintLayer?.removeFromSuperlayer()
+        dropTargetTintLayer = nil
+        thumbnailGridLayer?.removeFromSuperlayer()
+        thumbnailGridLayer = nil
     }
 
     /// An application's icon, with the compositing filter the Dock gives icons in the current style.
@@ -149,14 +266,22 @@ final class SpringboardItemLayer: CALayer {
         CATransaction.commit()
     }
 
-    /// The icons of a folder's first nine applications, in reading order.
+    /// The icons of a folder's first page, in reading order; the grid shows the first nine.
     func setFolderThumbnails(_ thumbnails: [CGImage?]) {
+        guard let thumbnailGridLayer else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for (thumbnailLayer, thumbnail) in zip(folderThumbnailLayers, thumbnails) {
-            thumbnailLayer.contents = thumbnail
-        }
+        thumbnailSource.images = thumbnails
+        DockLayerFactory.invalidateImageGridLayer(thumbnailGridLayer, source: thumbnailSource)
         CATransaction.commit()
+    }
+
+    /// The point size to render a folder's thumbnails at: the grid's row height less the spacing,
+    /// clamped to 1…32 as `+[ECSBGroupItemLayer miniIconSizeForBounds:andScaleFactor:]` clamped it.
+    static func thumbnailSide(forIconSide iconSide: CGFloat) -> CGFloat {
+        let backdropSide = iconSide - 2 * SpringboardFolderMetrics.folderBackdropInset(forIconSide: iconSide)
+        let gridSide = backdropSide - 2 * SpringboardFolderMetrics.thumbnailGridInset(forBackdropSide: backdropSide)
+        return min(max(CGFloat(Int(gridSide) / 3) - 4, 1), 32)
     }
 
     override func layoutSublayers() {
@@ -176,8 +301,7 @@ final class SpringboardItemLayer: CALayer {
         )
         imageLayer.frame = iconFrame
 
-        let preferredLabelSize = SpringboardLabelLayer.preferredSize(of: item.title)
-        let labelWidth = min(preferredLabelSize.width, metrics.labelMaximumWidth)
+        let labelWidth = min(SpringboardLabelLayer.preferredSize(of: item.title).width, metrics.labelMaximumWidth)
         labelLayer.frame = CGRect(
             x: Self.centered(cellWidth / 2 - labelWidth / 2, isEven: Int(labelWidth).isMultiple(of: 2)),
             y: bottomPadding,
@@ -185,10 +309,25 @@ final class SpringboardItemLayer: CALayer {
             height: metrics.labelHeight
         )
 
-        layoutFolderThumbnails()
+        if isFolder {
+            let backdropFrame = folderBackdropFrame
+            backdropLayer?.frame = backdropFrame
+            backdropLayer?.cornerRadius = folderCornerRadius
+            if let thumbnailGridLayer {
+                let gridInset = SpringboardFolderMetrics.thumbnailGridInset(forBackdropSide: backdropFrame.width)
+                thumbnailGridLayer.frame = backdropFrame.insetBy(dx: gridInset, dy: gridInset)
+                DockLayerFactory.layoutImageGridLayer(thumbnailGridLayer)
+            }
+        } else if let backdropLayer {
+            // An application showing the drop-target preview: a folder square 10 % larger than a folder's.
+            backdropLayer.frame = folderBackdropFrame
+            backdropLayer.cornerRadius = folderCornerRadius
+            dropTargetTintLayer?.frame = folderBackdropFrame
+            dropTargetTintLayer?.cornerRadius = folderCornerRadius
+        }
         if let selectionLayer {
             selectionLayer.frame = selectionFrame
-            selectionLayer.cornerRadius = Self.selectionCornerRadius(forIconSide: iconSide)
+            selectionLayer.cornerRadius = Self.cornerRadius(forIconSide: iconSide)
         }
         CATransaction.commit()
     }
@@ -198,21 +337,81 @@ final class SpringboardItemLayer: CALayer {
         isEven ? origin.rounded(.towardZero) : origin.rounded()
     }
 
-    private func layoutFolderThumbnails() {
-        guard !folderThumbnailLayers.isEmpty else { return }
-        let inset = (iconFrame.width * 0.14).rounded()
-        let cellSide = (iconFrame.width - 2 * inset) / 3
-        let thumbnailSide = (cellSide * 0.82).rounded()
-        for (thumbnailIndex, thumbnailLayer) in folderThumbnailLayers.enumerated() {
-            let row = thumbnailIndex / 3
-            let column = thumbnailIndex % 3
-            thumbnailLayer.frame = CGRect(
-                x: iconFrame.minX + inset + CGFloat(column) * cellSide + (cellSide - thumbnailSide) / 2,
-                y: iconFrame.maxY - inset - CGFloat(row + 1) * cellSide + (cellSide - thumbnailSide) / 2,
-                width: thumbnailSide,
-                height: thumbnailSide
-            )
+    /// `round(icon side × 0.15625)`, rounding half down as 15's `sub_10006AF28` did.
+    static func cornerRadius(forIconSide iconSide: CGFloat) -> CGFloat {
+        ceil(iconSide * 0.15625 - 0.5)
+    }
+
+    // MARK: - Dragging
+
+    /// Picked up: 1.1 times larger, title at 90 % (`-[ECSBItemLayer setMagnified:]`, `0x100061244`).
+    var isMagnified = false {
+        didSet {
+            guard isMagnified != oldValue else { return }
+            transform = isMagnified ? CATransform3DMakeScale(1.1, 1.1, 1) : CATransform3DIdentity
+            labelLayer.opacity = isMagnified ? 0.9 : 1
         }
+    }
+
+    /// Something is held over this item: an application shows a folder square behind it, 10 % larger,
+    /// and dims; both blink twice after 0.65 s (`-[ECSBItemLayer setHighlighted:]`, `0x1000608F8`, and
+    /// `-[ECSBGroupItemLayer setHighlighted:]`, `0x1000771C4`).
+    var isDropTarget = false {
+        didSet {
+            guard isDropTarget != oldValue else { return }
+            updateDropTarget()
+        }
+    }
+
+    private func updateDropTarget() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        labelLayer.opacity = isDropTarget ? 0 : 1
+        if isFolder {
+            backdropLayer?.removeAnimation(forKey: "blink")
+            backdropLayer?.frame = isDropTarget ? iconFrame : folderBackdropFrame
+            backdropLayer?.transform = isDropTarget ? CATransform3DMakeScale(1.1, 1.1, 1) : CATransform3DIdentity
+            if isDropTarget, let backdropLayer {
+                Self.addBlinkAnimation(to: backdropLayer)
+            }
+        } else if isDropTarget {
+            imageLayer.filters = Self.darkeningFilters()
+            let newBackdropLayer = CALayer()
+            newBackdropLayer.backgroundColor = Self.folderBackdropColor
+            newBackdropLayer.cornerCurve = .continuous
+            let newTintLayer = CALayer()
+            newTintLayer.backgroundColor = Self.dropTargetTintColor
+            newTintLayer.compositingFilter = QuartzCorePrivate.stringConstant(named: "kCAFilterDarkenBlendMode")
+            newTintLayer.cornerCurve = .continuous
+            for layer in [newBackdropLayer, newTintLayer] {
+                layer.frame = folderBackdropFrame
+                layer.cornerRadius = folderCornerRadius
+                layer.transform = CATransform3DMakeScale(1.1, 1.1, 1)
+                insertSublayer(layer, below: imageLayer)
+                Self.addBlinkAnimation(to: layer)
+            }
+            backdropLayer = newBackdropLayer
+            dropTargetTintLayer = newTintLayer
+        } else {
+            imageLayer.filters = isDarkened ? Self.darkeningFilters() : nil
+            backdropLayer?.removeFromSuperlayer()
+            backdropLayer = nil
+            dropTargetTintLayer?.removeFromSuperlayer()
+            dropTargetTintLayer = nil
+        }
+        CATransaction.commit()
+    }
+
+    /// Opacity 1 → 0.4 and back, twice, 0.11 s each way, starting 0.65 s from now.
+    private static func addBlinkAnimation(to layer: CALayer) {
+        let blinkAnimation = CABasicAnimation(keyPath: "opacity")
+        blinkAnimation.fromValue = 1
+        blinkAnimation.toValue = 0.4
+        blinkAnimation.duration = 0.11
+        blinkAnimation.autoreverses = true
+        blinkAnimation.repeatCount = 2
+        blinkAnimation.beginTime = CACurrentMediaTime() + 0.65
+        layer.add(blinkAnimation, forKey: "blink")
     }
 
     // MARK: - Selection
@@ -233,11 +432,6 @@ final class SpringboardItemLayer: CALayer {
         var frame = imageLayer.frame.union(labelLayer.frame).insetBy(dx: -horizontalOutset, dy: -5)
         frame.size.height += 10
         return frame
-    }
-
-    /// `round(icon height × 0.15625)`, rounding half down as 15's `sub_10006AF28` did.
-    private static func selectionCornerRadius(forIconSide iconSide: CGFloat) -> CGFloat {
-        ceil(iconSide * 0.15625 - 0.5)
     }
 
     private func updateSelection() {

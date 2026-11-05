@@ -58,18 +58,25 @@ final class SpringboardGridSource: NSObject {
 final class SpringboardPageGrid {
     let gridLayer: CALayer
     let source: SpringboardGridSource
+    let rowCount: Int
+    let columnCount: Int
+    let cellSize: CGSize
 
-    init?(items: [LaunchpadItem], metrics: SpringboardMetrics, scale: CGFloat, itemLayerWasFilled: @escaping (SpringboardItemLayer) -> Void) {
+    /// `rowCount` is the main grid's for pages, fewer for a small open folder.
+    init?(items: [LaunchpadItem], metrics: SpringboardMetrics, rowCount: Int, scale: CGFloat, itemLayerWasFilled: @escaping (SpringboardItemLayer) -> Void) {
         let source = SpringboardGridSource(items: items, metrics: metrics, scale: scale)
         source.itemLayerWasFilled = itemLayerWasFilled
         guard let gridLayer = DockLayerFactory.makeGridLayer(
             source: source,
-            rowCount: metrics.input.rowCount,
+            rowCount: rowCount,
             columnCount: metrics.input.columnCount,
             scaleFactor: Float(scale)
         ) else { return nil }
         self.gridLayer = gridLayer
         self.source = source
+        self.rowCount = rowCount
+        self.columnCount = metrics.input.columnCount
+        self.cellSize = metrics.cellSize
     }
 
     var items: [LaunchpadItem] {
@@ -88,6 +95,29 @@ final class SpringboardPageGrid {
         gridLayer.frame = pageFrame.offsetBy(dx: centeredRowOffset, dy: 0)
         DockLayerFactory.layoutGridLayer(gridLayer)
         CATransaction.commit()
+    }
+
+    /// The cell of item `itemIndex`, in the grid layer, as `ECGridLayer` lays it out: from the top left,
+    /// row by row, no gaps.
+    func cellFrame(at itemIndex: Int) -> CGRect {
+        let row = itemIndex / columnCount
+        let column = itemIndex % columnCount
+        return CGRect(
+            x: CGFloat(column) * cellSize.width,
+            y: CGFloat(Int(gridLayer.bounds.height)) - CGFloat(row + 1) * cellSize.height,
+            width: cellSize.width,
+            height: cellSize.height
+        )
+    }
+
+    /// How many items the grid shows; further ones are hidden until they spill over to the next page.
+    var capacity: Int {
+        rowCount * columnCount
+    }
+
+    /// `point`, in the grid layer, measured from its top-left corner.
+    func pointFromTopLeft(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: point.x, y: CGFloat(Int(gridLayer.bounds.height)) - point.y)
     }
 
     /// The item under `point`, a point in the grid layer, and whether it is on the item's icon.

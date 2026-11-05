@@ -103,6 +103,34 @@ extension LaunchpadStore {
         }
     }
 
+    /// Moves an application out of its folder to `targetIndex` on `pageIdentifier`; a folder left with
+    /// one application or none is dissolved, its last application taking the folder's place, as 15
+    /// dissolved it when the second-to-last one was dragged out.
+    package func moveItem(_ itemIdentifier: LaunchpadItemIdentifier, outOfFolderTo targetIndex: Int, onPage pageIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
+        try performTransaction {
+            let folderIdentifier = try parent(of: try parent(of: itemIdentifier))
+            try moveItem(itemIdentifier, toIndex: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
+            guard (try? type(of: folderIdentifier)) == .folder else { return }
+            let remainingApplications = try children(of: folderIdentifier).flatMap { try children(of: $0) }
+            guard remainingApplications.count <= 1 else { return }
+            let folderPage = try parent(of: folderIdentifier)
+            if let lastApplication = remainingApplications.first {
+                let folderIndex = try children(of: folderPage).firstIndex(of: folderIdentifier) ?? 0
+                try moveItem(lastApplication, toIndex: folderIndex, onPage: folderPage, itemsPerPage: itemsPerPage)
+            }
+            try removeItem(folderIdentifier)
+            try tidyUp(itemsPerPage: itemsPerPage)
+        }
+    }
+
+    /// Moves an item onto a new page after the last one, as dragging past the last page did.
+    package func moveItemToNewLastPage(_ itemIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
+        try performTransaction {
+            let newPage = try appendPage(to: rootIdentifier)
+            try moveItem(itemIdentifier, toIndex: 0, onPage: newPage, itemsPerPage: itemsPerPage)
+        }
+    }
+
     package func renameFolder(_ folderIdentifier: LaunchpadItemIdentifier, to title: String) throws {
         try database.run("UPDATE groups SET title = ? WHERE item_id = ?", [.text(title), .integer(folderIdentifier.rowIdentifier)])
     }

@@ -145,3 +145,59 @@ struct LaunchpadStoreEditingTests {
         }
     }
 }
+
+@Suite("Dragging out of folders")
+struct LaunchpadStoreFolderExitTests {
+    @Test("dragging the second-to-last application out dissolves the folder into its place")
+    func dissolveOnDragOut() throws {
+        try withTemporaryDirectory { directoryURL in
+            let store = try LaunchpadStore(databaseURL: directoryURL.appendingPathComponent("Launchpad.db"))
+            let pageIdentifier = try store.appendPage(to: store.rootIdentifier)
+            var identifiers: [String: LaunchpadItemIdentifier] = [:]
+            for title in ["A", "B", "C"] {
+                identifiers[title] = try store.appendApplication(LaunchpadApplicationRecord(title: title, bundleIdentifier: "com.example.\(title.lowercased())"), to: pageIdentifier)
+            }
+            try store.makeFolder(merging: try #require(identifiers["B"]), with: try #require(identifiers["A"]), title: "Tools", itemsPerPage: 35)
+
+            try store.moveItem(try #require(identifiers["B"]), outOfFolderTo: 2, onPage: pageIdentifier, itemsPerPage: 35)
+
+            let layout = try store.layout()
+            #expect(layout.folders.isEmpty)
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["A", "C", "B"]])
+        }
+    }
+
+    @Test("a folder with more left stays")
+    func folderWithMoreStays() throws {
+        try withTemporaryDirectory { directoryURL in
+            let store = try LaunchpadStore(databaseURL: directoryURL.appendingPathComponent("Launchpad.db"))
+            let pageIdentifier = try store.appendPage(to: store.rootIdentifier)
+            var identifiers: [String: LaunchpadItemIdentifier] = [:]
+            for title in ["A", "B", "C"] {
+                identifiers[title] = try store.appendApplication(LaunchpadApplicationRecord(title: title, bundleIdentifier: "com.example.\(title.lowercased())"), to: pageIdentifier)
+            }
+            let folderIdentifier = try store.makeFolder(merging: try #require(identifiers["B"]), with: try #require(identifiers["A"]), title: "Tools", itemsPerPage: 35)
+            try store.moveItem(try #require(identifiers["C"]), intoFolder: folderIdentifier, itemsPerPage: 35)
+
+            try store.moveItem(try #require(identifiers["C"]), outOfFolderTo: 1, onPage: pageIdentifier, itemsPerPage: 35)
+
+            let layout = try store.layout()
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["Tools", "C"]])
+            #expect(layout.folders.first?.applications.map(\.title) == ["A", "B"])
+        }
+    }
+
+    @Test("an item dragged past the last page gets a new page")
+    func newLastPage() throws {
+        try withTemporaryDirectory { directoryURL in
+            let store = try LaunchpadStore(databaseURL: directoryURL.appendingPathComponent("Launchpad.db"))
+            let pageIdentifier = try store.appendPage(to: store.rootIdentifier)
+            let alphaIdentifier = try store.appendApplication(LaunchpadApplicationRecord(title: "A", bundleIdentifier: "com.example.a"), to: pageIdentifier)
+            try store.appendApplication(LaunchpadApplicationRecord(title: "B", bundleIdentifier: "com.example.b"), to: pageIdentifier)
+
+            try store.moveItemToNewLastPage(alphaIdentifier, itemsPerPage: 35)
+
+            #expect(try store.layout().pages.map { page in page.items.map(\.title) } == [["B"], ["A"]])
+        }
+    }
+}

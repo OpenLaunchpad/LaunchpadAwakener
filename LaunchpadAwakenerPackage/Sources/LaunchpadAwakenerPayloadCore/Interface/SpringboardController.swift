@@ -68,7 +68,12 @@ final class SpringboardController {
             layout: layout,
             metrics: metrics,
             scale: newWindow.backingScaleFactor,
-            rootLayer: newWindow.rootLayer
+            rootLayer: newWindow.rootLayer,
+            applyEdit: { edit in
+                Task {
+                    await LaunchpadServices.library.apply(edit)
+                }
+            }
         )
         window = newWindow
         interface = newInterface
@@ -87,10 +92,11 @@ final class SpringboardController {
         #log(.info, "Hidden (\(reason, privacy: .public))")
     }
 
-    /// Takes a new layout from the library and renders its icons ahead of the next showing. A showing
-    /// springboard keeps the layout it opened with.
+    /// Takes a new layout from the library — after an edit, or after applications came or went — and
+    /// renders its icons ahead of time. A showing springboard takes it once nothing is moving.
     func updateLayout(_ newLayout: LaunchpadLayout) {
         layout = newLayout
+        interface?.replaceLayout(newLayout)
         let displayIdentifier = CGMainDisplayID()
         let metrics = Self.metrics(forScreenSize: CGDisplayBounds(displayIdentifier).size)
         let scale = Self.backingScaleFactor(of: displayIdentifier)
@@ -160,7 +166,7 @@ final class SpringboardController {
             perform(interface.handleMouseDragged(to: containerPoint, timestamp: inputEvent.timestamp))
             return true
         case .mouseUp(.left):
-            guard !isInsideDockBar(inputEvent.location) else {
+            guard interface.dragSession != nil || !isInsideDockBar(inputEvent.location) else {
                 // Whatever the click on the Dock opens takes key focus, so close afterwards, as
                 // macOS 15's Launchpad closed when something was opened from the Dock.
                 DispatchQueue.main.async {

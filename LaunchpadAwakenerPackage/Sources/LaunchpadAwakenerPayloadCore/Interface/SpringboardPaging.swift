@@ -104,3 +104,58 @@ package enum SpringboardNavigation {
         return (0..<itemCount).contains(candidateIndex) ? candidateIndex : currentIndex
     }
 }
+
+/// Where a dragged icon lands, by macOS 15.5's rules.
+package enum SpringboardDragging {
+    /// Faster than this the dragged icon makes nothing move yet (`-[ECSBDragCapture leftMouseDragged:in:]`,
+    /// 15.5 `0x1000B6058`): about 75 points per second.
+    package static let settlingSpeedThreshold: Double = 0.75
+    /// How long the dragged icon must slow down or rest before anything responds.
+    package static let settlingDelay: Duration = .milliseconds(150)
+    /// How long the other icons take to make room.
+    package static let makeRoomDuration: CFTimeInterval = 0.4
+    /// Holding over an edge turns the page after this long, then again at the repeat interval.
+    package static let edgePageTurnDelay: Duration = .milliseconds(700)
+    package static let edgePageTurnRepeatInterval: Duration = .milliseconds(750)
+    /// Holding over a folder this long opens it (`OpenGroupDragState_hoverTimerFired_1s`).
+    package static let springLoadingDelay: Duration = .seconds(1)
+
+    /// The speed 15 compared with ``settlingSpeedThreshold``: points per nanosecond, times 10⁷.
+    package static func speed(from previousLocation: CGPoint, to location: CGPoint, elapsedNanoseconds: UInt64) -> Double {
+        guard elapsedNanoseconds > 0 else { return .infinity }
+        return Double(hypot(location.x - previousLocation.x, location.y - previousLocation.y)) / Double(elapsedNanoseconds) * 10_000_000
+    }
+
+    /// The cell under `point` — measured from the grid's top-left corner — as
+    /// `-[ECSBGridLayer itemIndexWithFrame:relativeToItemIndex:usingHysteresis:]` (`0x10011E8AC`) found it.
+    ///
+    /// With hysteresis the current cell keeps the item until the point leaves a zone reaching half a cell
+    /// beyond it on every side. Past the last item the answer is the last cell, so no gap is left.
+    package static func itemIndex(
+        at point: CGPoint,
+        cellSize: CGSize,
+        columnCount: Int,
+        itemCount: Int,
+        currentIndex: Int?,
+        usesHysteresis: Bool
+    ) -> Int {
+        guard itemCount > 0, cellSize.width > 0, cellSize.height > 0 else { return 0 }
+        let column = min(max(Int(floor(point.x / cellSize.width)), 0), columnCount - 1)
+        let row = max(Int(floor(point.y / cellSize.height)), 0)
+        var index = column + columnCount * row
+        if usesHysteresis, let currentIndex, index != currentIndex {
+            let currentRow = currentIndex / columnCount
+            let currentColumn = currentIndex % columnCount
+            let keepZone = CGRect(
+                x: CGFloat(currentColumn) * cellSize.width,
+                y: CGFloat(currentRow) * cellSize.height,
+                width: cellSize.width,
+                height: cellSize.height
+            ).insetBy(dx: -ceil(cellSize.width / 2), dy: -ceil(cellSize.height / 2))
+            if keepZone.contains(point) {
+                index = currentIndex
+            }
+        }
+        return min(index, itemCount - 1)
+    }
+}

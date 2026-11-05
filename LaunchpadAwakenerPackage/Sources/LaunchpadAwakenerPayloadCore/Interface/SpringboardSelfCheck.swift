@@ -20,7 +20,7 @@ enum SpringboardSelfCheck {
         hasRun = true
         let detachedRootLayer = CALayer()
         detachedRootLayer.frame = CGRect(origin: .zero, size: metrics.input.screenSize)
-        let interface = SpringboardInterface(layout: layout, metrics: metrics, scale: scale, rootLayer: detachedRootLayer)
+        let interface = SpringboardInterface(layout: layout, metrics: metrics, scale: scale, rootLayer: detachedRootLayer, applyEdit: { _ in })
         defer { interface.tearDown() }
 
         #log(.info, "Self-check: \(interface.geometryDescription, privacy: .public)")

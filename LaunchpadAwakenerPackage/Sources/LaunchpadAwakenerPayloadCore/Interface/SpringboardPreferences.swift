@@ -35,6 +35,11 @@ enum SpringboardPreferences {
         UserDefaults.standard.object(forKey: "springboard-reverse-scroll-gesture") as? Bool ?? true
     }
 
+    /// `springboard-edit-group-title`: whether clicking an open folder's title renames it. On unless set.
+    static var allowsRenamingFolders: Bool {
+        UserDefaults.standard.object(forKey: "springboard-edit-group-title") as? Bool ?? true
+    }
+
     private static func clampedGridCount(forKey key: String, defaultCount: Int) -> Int {
         guard UserDefaults.standard.object(forKey: key) != nil else { return defaultCount }
         return min(max(UserDefaults.standard.integer(forKey: key), 2), 100)
