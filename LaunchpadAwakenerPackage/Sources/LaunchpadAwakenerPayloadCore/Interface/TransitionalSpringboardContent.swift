@@ -19,7 +19,7 @@ enum SpringboardContentAction: Sendable, Equatable {
 final class TransitionalSpringboardContent {
     private struct ItemHitArea {
         let frame: CGRect
-        let pageItem: LaunchpadDatabase.PageItem
+        let item: LaunchpadItem
     }
 
     private static let columnCount = 7
@@ -28,8 +28,8 @@ final class TransitionalSpringboardContent {
     private let rootLayer: CALayer
     private let size: CGSize
     private let backingScaleFactor: CGFloat
-    private let firstPageItems: [LaunchpadDatabase.PageItem]
-    private let allApplications: [LaunchpadDatabase.PageItem]
+    private let firstPageItems: [LaunchpadItem]
+    private let allApplications: [LaunchpadApplication]
     private var pageLayer: CALayer?
     private var searchText = ""
     private var itemHitAreas: [ItemHitArea] = []
@@ -37,12 +37,12 @@ final class TransitionalSpringboardContent {
     var itemCount: Int { firstPageItems.count }
     var applicationCount: Int { allApplications.count }
 
-    init(rootLayer: CALayer, size: CGSize, backingScaleFactor: CGFloat) {
+    init(layout: LaunchpadLayout, rootLayer: CALayer, size: CGSize, backingScaleFactor: CGFloat) {
         self.rootLayer = rootLayer
         self.size = size
         self.backingScaleFactor = backingScaleFactor
-        self.firstPageItems = LaunchpadDatabase.firstPageItems()
-        self.allApplications = LaunchpadDatabase.allApplications()
+        self.firstPageItems = layout.pages.first?.items ?? []
+        self.allApplications = layout.applications.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         render()
     }
 
@@ -63,7 +63,7 @@ final class TransitionalSpringboardContent {
             searchText.removeLast()
             render()
         case SpringboardKeyCode.returnKey, SpringboardKeyCode.keypadEnter:
-            if let firstApplication = visibleItems.first(where: { $0.kind == .application }) {
+            for case .application(let firstApplication) in visibleItems {
                 return launchAction(for: firstApplication)
             }
         default:
@@ -82,30 +82,28 @@ final class TransitionalSpringboardContent {
         guard let hitArea = itemHitAreas.first(where: { $0.frame.contains(windowPoint) }) else {
             return .dismiss(reason: "clicked outside the icons")
         }
-        switch hitArea.pageItem.kind {
-        case .application:
-            return launchAction(for: hitArea.pageItem)
+        switch hitArea.item {
+        case .application(let application):
+            return launchAction(for: application)
         case .folder:
             return .none
         }
     }
 
-    private func launchAction(for pageItem: LaunchpadDatabase.PageItem) -> SpringboardContentAction {
-        guard let bundleIdentifier = pageItem.bundleIdentifier else { return .none }
-        return .launch(bundleIdentifier: bundleIdentifier, title: pageItem.title)
+    private func launchAction(for application: LaunchpadApplication) -> SpringboardContentAction {
+        .launch(bundleIdentifier: application.bundleIdentifier, title: application.title)
     }
 
     // MARK: - Drawing
 
     /// The first page, or the applications matching the search text.
-    private var visibleItems: [LaunchpadDatabase.PageItem] {
+    private var visibleItems: [LaunchpadItem] {
         let maximumItemCount = Self.columnCount * Self.rowCount
         guard !searchText.isEmpty else { return Array(firstPageItems.prefix(maximumItemCount)) }
-        return Array(
-            allApplications
-                .filter { $0.title.localizedCaseInsensitiveContains(searchText) }
-                .prefix(maximumItemCount)
-        )
+        return allApplications
+            .filter { $0.title.localizedCaseInsensitiveContains(searchText) }
+            .prefix(maximumItemCount)
+            .map(LaunchpadItem.application)
     }
 
     private func render() {
@@ -140,7 +138,7 @@ final class TransitionalSpringboardContent {
         let iconSide = min(cellWidth, cellHeight) * 0.62
 
         var newItemHitAreas: [ItemHitArea] = []
-        for (itemIndex, pageItem) in visibleItems.enumerated() {
+        for (itemIndex, item) in visibleItems.enumerated() {
             let cellOrigin = CGPoint(
                 x: horizontalMargin + CGFloat(itemIndex % Self.columnCount) * cellWidth,
                 y: topMargin + CGFloat(itemIndex / Self.columnCount) * cellHeight
@@ -152,19 +150,20 @@ final class TransitionalSpringboardContent {
             iconLayer.frame = iconFrame
             iconLayer.contentsGravity = .resizeAspect
             iconLayer.contentsScale = backingScaleFactor
-            if let iconImage = pageItem.iconPNGData.flatMap(Self.makeImage(fromPNGData:)) {
+            if case .application(let application) = item, let iconImage = application.legacyIconPNGData.flatMap(Self.makeImage(fromPNGData:)) {
                 iconLayer.contents = iconImage
             } else {
-                iconLayer.backgroundColor = CGColor(gray: 1, alpha: pageItem.kind == .folder ? 0.25 : 0.12)
+                let isFolder = if case .folder = item { true } else { false }
+                iconLayer.backgroundColor = CGColor(gray: 1, alpha: isFolder ? 0.25 : 0.12)
                 iconLayer.cornerRadius = iconSide * 0.22
             }
             newPageLayer.addSublayer(iconLayer)
 
-            let titleLayer = makeTextLayer(text: pageItem.title, fontSize: 13, opacity: 1)
+            let titleLayer = makeTextLayer(text: item.title, fontSize: 13, opacity: 1)
             titleLayer.frame = titleFrame
             newPageLayer.addSublayer(titleLayer)
 
-            newItemHitAreas.append(ItemHitArea(frame: iconFrame.union(titleFrame), pageItem: pageItem))
+            newItemHitAreas.append(ItemHitArea(frame: iconFrame.union(titleFrame), item: item))
         }
         itemHitAreas = newItemHitAreas
         return newPageLayer

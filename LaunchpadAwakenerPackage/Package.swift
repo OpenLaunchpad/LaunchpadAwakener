@@ -82,5 +82,23 @@ let package = Package(
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
             ]
         ),
+
+        // Shared test infrastructure: fixtures and helpers. Not a product, so nothing outside the
+        // package can link it and it never ends up in a shipped binary.
+        .target(
+            name: "TestingSupport",
+            dependencies: ["LaunchpadAwakenerPayloadCore"],
+            path: "Tests/TestingSupport"
+        ),
+        .testTarget(name: "TestingSupportTests", dependencies: ["TestingSupport"]),
+
+        // Only the payload's pure logic is tested here — the data layer and anything else that does not
+        // need a live Dock. Nothing in these tests creates a window or touches the Dock.
+        .testTarget(
+            name: "LaunchpadAwakenerPayloadCoreTests",
+            dependencies: ["LaunchpadAwakenerPayloadCore", "TestingSupport"],
+            // macOS 15.5's own copy, which the exclusion list and default layout are checked against.
+            resources: [.copy("Resources/LaunchPadLayout.plist")]
+        ),
     ]
 )

@@ -26,6 +26,8 @@ final class SpringboardController {
 
     private var window: SpringboardWindow?
     private var content: TransitionalSpringboardContent?
+    /// The latest layout from ``LaunchpadServices/library``; empty until the library has loaded.
+    private var layout: LaunchpadLayout = .empty
     /// Bumped on every input and every hide, so a stale idle timer cannot hide a later showing.
     private var idleGeneration = 0
 
@@ -48,6 +50,7 @@ final class SpringboardController {
             return
         }
         let newContent = TransitionalSpringboardContent(
+            layout: layout,
             rootLayer: newWindow.rootLayer,
             size: newWindow.displayBounds.size,
             backingScaleFactor: newWindow.backingScaleFactor
@@ -57,6 +60,11 @@ final class SpringboardController {
         newWindow.orderIn()
         restartIdleTimer()
         #log(.info, "Shown (\(reason, privacy: .public)): \(newContent.itemCount, privacy: .public) first-page item(s), \(newContent.applicationCount, privacy: .public) application(s)")
+    }
+
+    /// Takes a new layout from the library. A showing springboard keeps the layout it opened with.
+    func updateLayout(_ newLayout: LaunchpadLayout) {
+        layout = newLayout
     }
 
     func hide(reason: String) {

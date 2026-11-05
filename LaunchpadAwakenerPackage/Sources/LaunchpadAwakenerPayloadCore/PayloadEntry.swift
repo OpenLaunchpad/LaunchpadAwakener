@@ -73,6 +73,7 @@ public enum PayloadEntry {
         do {
             try MethodHookInstaller.installAtomically(hooks)
             logger.info("Installed \(hooks.count, privacy: .public) hook(s)")
+            LaunchpadServices.start()
         } catch {
             // Deliberately terminal-but-harmless: the payload stays loaded and does nothing.
             // Leaving the host untouched is always better than half-hooking it, and the log line

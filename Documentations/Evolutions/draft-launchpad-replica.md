@@ -178,7 +178,7 @@ final class SpringboardController {
 1. **基础与入口**，分四步提交：
    1. ✅ 结构：把原型的 InjectionScaffold 结构（App、daemon、payload 三个外壳与本地包）搬进功能分支，payload 按 `Host` / `Data` / `Interface` / `Integration` 分目录。InjectionScaffold 的两处绕过一并保留：依赖钉在 `exact: "0.1.4"`；App 每次启动后的第一次注入都重新暂存 payload。
    2. ✅ 宿主与集成：构建档案、宿主接口校验、两个入口 hook、`DockBar` 获取、窗口与层级、键盘焦点、保险机制。原型的界面作为过渡界面保留，到第 2 批换掉。
-   3. 数据层：自己的库、旧库导入、App 的发现与变更监听，带单元测试。
+   3. ✅ 数据层：自己的库、旧库导入、App 的发现与变更监听，带单元测试。
    4. App 侧：默认开启自动注入，并随登录启动。
    - 验证：重启 Dock 后自动注入；导入的页数、文件夹数与旧库一致。
 2. **主界面**：用 `EC*` 图层类重写网格、分页、页码指示与双指翻页，再加上搜索、键盘方向键导航与启动。验证：与 15 截图并排比较尺寸与间距。
@@ -208,3 +208,7 @@ final class SpringboardController {
 | 2026-11-05 | 代码继续放在 LaunchpadAwakener 仓库 | 原型与注入基础设施都已在这里 |
 | 2026-11-05 | 捏合手势做成跟手渐进 | 与 15 的体验一致；需要额外逆向 27 的手势系统 |
 | 2026-11-05 | 用户批准，开始实现 | 实现放在 `feature/launchpad-replica`；第 1 批拆成四步，各自能构建通过 |
+| 2026-11-05 | 自己的库直接沿用 15 的表与触发器，旧库按树导入 | 排序靠 15 的触发器维护，行为与 15 一致；导入只走从根出发能到达的页，跳过 `HOLDINGPAGE` 一类的隐藏页、断了父项的页、正在下载的 App、空页与空文件夹 |
+| 2026-11-05 | App 只在确实卸载时才从布局里删除 | 搜索目录里没找到、书签也解析不到、LaunchServices 也不认识，三者都成立才删，避免装在别处的 App 被误删 |
+| 2026-11-05 | App 的变更只靠 FSEvents 监听应用目录，没有接 LaunchServices 的私有通知 | 目录监听已覆盖安装与删除；`_LSScheduleNotificationFunction` 的签名没有逆向确认，调错会让 Dock 崩溃 |
+| 2026-11-05 | 15.5 的 `LaunchPadLayout.plist` 放进测试资源，排除名单与默认首页以 Swift 常量随 payload 发布 | 注入的框架里用 `Bundle.module` 找不到资源时会直接让 Dock 崩溃；测试逐项核对常量与原文件一致 |
