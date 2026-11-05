@@ -161,11 +161,63 @@ package actor LaunchpadLibrary {
         #log(.info, "Reconciled: added \(reconciliation.applicationsToAdd.map(\.bundleIdentifier), privacy: .public), removed \(reconciliation.itemsToRemove.count, privacy: .public) item(s)")
     }
 
+    var currentStore: LaunchpadStore? {
+        store
+    }
+
+    var itemsPerPage: Int {
+        configuration.itemsPerPage
+    }
+
+    func publishCurrentLayout() async throws {
+        guard let store else { return }
+        try await publish(store)
+    }
+
+    func logEditFailure(_ edit: LaunchpadEdit, error: any Error) {
+        #log(.error, "Could not apply \(String(describing: edit), privacy: .public): \(String(describing: error), privacy: .public)")
+    }
+
     private func publish(_ store: LaunchpadStore) async throws {
         let newLayout = try store.layout().locatingBundles { bundleURL(for: $0) }
         guard newLayout != layout else { return }
         layout = newLayout
         #log(.info, "Layout: \(newLayout.pages.count, privacy: .public) page(s), \(newLayout.folders.count, privacy: .public) folder(s), \(newLayout.applications.count, privacy: .public) application(s)")
         await layoutHandler(newLayout)
+    }
+}
+
+/// One change made by hand — dragging or renaming — to apply to the stored layout.
+package enum LaunchpadEdit: Sendable, Equatable {
+    case move(LaunchpadItemIdentifier, toIndex: Int, onPage: LaunchpadItemIdentifier)
+    case makeFolder(merging: LaunchpadItemIdentifier, with: LaunchpadItemIdentifier, title: String)
+    case moveIntoFolder(LaunchpadItemIdentifier, folder: LaunchpadItemIdentifier)
+    case renameFolder(LaunchpadItemIdentifier, title: String)
+}
+
+extension LaunchpadLibrary {
+    /// Applies `edit` to the stored layout and publishes the result. Returns whether it was stored;
+    /// a failed edit leaves the layout as it was.
+    @discardableResult
+    package func apply(_ edit: LaunchpadEdit) async -> Bool {
+        guard let store = currentStore else { return false }
+        let itemsPerPage = itemsPerPage
+        do {
+            switch edit {
+            case let .move(itemIdentifier, targetIndex, pageIdentifier):
+                try store.moveItem(itemIdentifier, toIndex: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
+            case let .makeFolder(draggedItem, targetItem, title):
+                try store.makeFolder(merging: draggedItem, with: targetItem, title: title, itemsPerPage: itemsPerPage)
+            case let .moveIntoFolder(itemIdentifier, folderIdentifier):
+                try store.moveItem(itemIdentifier, intoFolder: folderIdentifier, itemsPerPage: itemsPerPage)
+            case let .renameFolder(folderIdentifier, title):
+                try store.renameFolder(folderIdentifier, to: title)
+            }
+            try await publishCurrentLayout()
+            return true
+        } catch {
+            logEditFailure(edit, error: error)
+            return false
+        }
     }
 }

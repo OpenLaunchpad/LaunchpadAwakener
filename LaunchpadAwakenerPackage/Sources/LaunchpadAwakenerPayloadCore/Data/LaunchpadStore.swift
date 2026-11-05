@@ -46,7 +46,8 @@ package enum LaunchpadStoreError: Error, Equatable {
 package final class LaunchpadStore {
     package let databaseURL: URL
     package let rootIdentifier: LaunchpadItemIdentifier
-    private let database: SQLiteDatabase
+    /// Shared with the editing extension; nothing outside the store touches it.
+    let database: SQLiteDatabase
 
     /// Opens the database at `databaseURL`, creating it — and its directory — with an empty root when
     /// it does not exist yet.
@@ -258,7 +259,7 @@ package final class LaunchpadStore {
         try database.run("DELETE FROM items WHERE rowid = ?", [.integer(itemIdentifier.rowIdentifier)])
     }
 
-    private func insertItem(
+    func insertItem(
         type: LaunchpadDatabaseSchema.ItemType,
         parent parentIdentifier: LaunchpadItemIdentifier,
         itemUUID: String?,

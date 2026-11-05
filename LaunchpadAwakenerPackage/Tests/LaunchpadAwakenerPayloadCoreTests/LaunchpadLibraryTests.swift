@@ -142,3 +142,39 @@ struct LaunchpadLibraryTests {
         }
     }
 }
+
+@Suite("Editing through the library")
+struct LaunchpadLibraryEditingTests {
+    @Test("an edit is stored and the new layout is published")
+    func editIsStoredAndPublished() async throws {
+        try await withTemporaryDirectory { directoryURL in
+            for (name, bundleIdentifier) in [("Alpha", "com.example.alpha"), ("Beta", "com.example.beta")] {
+                try ApplicationBundleFixture(name: name, bundleIdentifier: bundleIdentifier)
+                    .write(in: directoryURL.appendingPathComponent("Applications", isDirectory: true))
+            }
+            let legacyDatabaseURL = directoryURL.appendingPathComponent("legacy.db")
+            try LegacyLaunchpadDatabaseFixture(pages: [[
+                .application(title: "Alpha", bundleIdentifier: "com.example.alpha"),
+                .application(title: "Beta", bundleIdentifier: "com.example.beta"),
+            ]]).write(to: legacyDatabaseURL)
+            let configuration = LaunchpadLibrary.Configuration(
+                databaseURL: directoryURL.appendingPathComponent("Store/Launchpad.db"),
+                legacyDatabaseURL: legacyDatabaseURL,
+                searchDirectories: [directoryURL.appendingPathComponent("Applications", isDirectory: true)],
+                exclusionList: .standard,
+                itemsPerPage: 35,
+                isStillInstalled: { _ in false }
+            )
+            let library = LaunchpadLibrary(configuration: configuration, layoutHandler: { _ in })
+            await library.start(watchesApplicationDirectories: false)
+            let applications = await library.layout.applications
+
+            let isStored = await library.apply(.makeFolder(merging: applications[1].identifier, with: applications[0].identifier, title: "Pair"))
+
+            #expect(isStored)
+            #expect(await library.layout.folders.map(\.title) == ["Pair"])
+            let reopenedStore = try LaunchpadStore(databaseURL: configuration.databaseURL)
+            #expect(try reopenedStore.layout().folders.first?.applications.map(\.title) == ["Alpha", "Beta"])
+        }
+    }
+}
