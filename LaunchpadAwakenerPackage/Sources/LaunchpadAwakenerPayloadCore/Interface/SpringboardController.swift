@@ -29,14 +29,21 @@ final class SpringboardController {
     /// (`-[Springboard performOpenAnimationForRunnable:withImage:atFrame:toFrame:]`, `0x1000918C8`).
     private static let launchAnimationDuration: CFTimeInterval = 0.25
 
+    /// The springboard on screen and taking input; nil once it starts to hide.
     private var window: SpringboardWindow?
     private var interface: SpringboardInterface?
+    /// A springboard fading out: no longer taking input, removed once its exit animation ends.
+    private var hidingWindow: SpringboardWindow?
+    private var hidingInterface: SpringboardInterface?
     /// The latest layout from ``LaunchpadServices/library``; empty until the library has loaded.
     private var layout: LaunchpadLayout = .empty
     /// Bumped on every input and every hide, so a stale idle timer cannot hide a later showing.
     private var idleGeneration = 0
-    /// The window an application was just launched from; input is ignored until it closes.
-    private weak var launchingWindow: SpringboardWindow?
+
+    /// A pinch in progress: whether it opens, and how visible it has made the springboard.
+    private var pinch: (isOpening: Bool, visibility: Double)?
+    private var visibilitySpring: SpringboardVisibilitySpring?
+    private var springTimer: DispatchSourceTimer?
 
     private init() {
         SpringboardIconProvider.shared.iconDidBecomeAvailable = { bundleURL in
@@ -56,9 +63,14 @@ final class SpringboardController {
         }
     }
 
-    func show(reason: String) {
+    // MARK: - Showing and hiding
+
+    /// Shows the springboard; `animated` false leaves it fully transparent for a pinch to reveal.
+    func show(reason: String, animated: Bool = true) {
         guard !isVisible else { return }
-        guard let newWindow = SpringboardWindow(displayIdentifier: CGMainDisplayID()) else {
+        finishHiding()
+        let displayIdentifier = CGMainDisplayID()
+        guard let newWindow = SpringboardWindow(displayIdentifier: displayIdentifier) else {
             #log(.error, "Could not create the springboard window")
             return
         }
@@ -69,27 +81,54 @@ final class SpringboardController {
             metrics: metrics,
             scale: newWindow.backingScaleFactor,
             rootLayer: newWindow.rootLayer,
+            desktopImage: WallpaperSnapshot.captureWallpaperImage(onDisplay: displayIdentifier),
             applyEdit: { edit in
                 Task {
                     await LaunchpadServices.library.apply(edit)
                 }
             }
         )
+        newInterface.setVisibility(0)
         window = newWindow
         interface = newInterface
         newWindow.orderIn()
+        if animated {
+            newInterface.animateEntrance(duration: SpringboardPreferences.showAnimationDuration)
+        }
         restartIdleTimer()
         #log(.info, "Shown (\(reason, privacy: .public)): \(newInterface.geometryDescription, privacy: .public)")
     }
 
-    func hide(reason: String) {
-        guard let currentWindow = window else { return }
-        idleGeneration += 1
-        currentWindow.orderOut()
-        interface?.tearDown()
-        interface = nil
+    /// Hides the springboard. Input goes back at once, as in 15; the window leaves when the exit
+    /// animation ends.
+    func hide(reason: String, animated: Bool = true) {
+        guard let currentWindow = window, let currentInterface = interface else { return }
         window = nil
+        interface = nil
+        idleGeneration += 1
+        stopPinch()
+        currentInterface.prepareForHiding()
+        currentWindow.releaseKeyFocus()
+        hidingWindow = currentWindow
+        hidingInterface = currentInterface
+        if animated {
+            currentInterface.animateExit(duration: SpringboardPreferences.hideAnimationDuration) { [weak self] in
+                guard let self, self.hidingWindow === currentWindow else { return }
+                self.finishHiding()
+            }
+        } else {
+            finishHiding()
+        }
         #log(.info, "Hidden (\(reason, privacy: .public))")
+    }
+
+    /// Removes a springboard that is fading out, now.
+    private func finishHiding() {
+        guard let hidingWindow else { return }
+        hidingWindow.orderOut()
+        hidingInterface?.tearDown()
+        self.hidingWindow = nil
+        hidingInterface = nil
     }
 
     /// Takes a new layout from the library — after an edit, or after applications came or went — and
@@ -135,15 +174,21 @@ final class SpringboardController {
     /// Called for every event the Dock receives. Returns whether the springboard consumed it; anything
     /// not consumed goes on to the Dock as usual.
     func handle(_ inputEvent: SpringboardInputEvent) -> Bool {
-        guard isVisible, let window, let interface else { return false }
-        if Self.isDisabledByKillSwitch {
-            hide(reason: "kill switch")
+        switch inputEvent.kind {
+        case .dockSwipe(let dockSwipe):
+            handlePinch(dockSwipe)
             return false
+        case .systemGestureCancelled:
+            endPinch(isCancelled: true, intendedProgress: 0, velocity: 0)
+            return false
+        default:
+            break
         }
 
-        guard launchingWindow !== window else {
-            // The launch animation is playing; the window closes when it ends.
-            return !isInsideDockBar(inputEvent.location)
+        guard isVisible, let window, let interface else { return false }
+        if Self.isDisabledByKillSwitch {
+            hide(reason: "kill switch", animated: false)
+            return false
         }
 
         let windowPoint = window.windowPoint(fromGlobalPoint: inputEvent.location)
@@ -185,7 +230,7 @@ final class SpringboardController {
             return true
         case .mouseDown, .mouseUp, .mouseDragged:
             return !isInsideDockBar(inputEvent.location)
-        case .mouseMoved, .other:
+        case .mouseMoved, .other, .dockSwipe, .systemGestureCancelled:
             return false
         }
     }
@@ -201,48 +246,39 @@ final class SpringboardController {
         }
     }
 
+    /// Opens the application and closes the springboard, with 15's icon animation playing over the exit.
     private func launch(_ application: LaunchpadApplication, iconFrame: CGRect, iconImage: Any?) {
         if let bundleURL = application.bundleURL {
             ApplicationLauncher.launchApplication(at: bundleURL)
         } else {
             ApplicationLauncher.launchApplication(withBundleIdentifier: application.bundleIdentifier)
         }
-        guard let interface, iconImage != nil, !iconFrame.isEmpty else {
-            hide(reason: "launching \(application.title)")
-            return
+        if let window, let interface, iconImage != nil, !iconFrame.isEmpty {
+            // On the window's root layer, so the springboard fading out does not take it along.
+            let launchingIconLayer = CALayer()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            launchingIconLayer.frame = interface.containerLayer.convert(iconFrame, to: window.rootLayer)
+            launchingIconLayer.contents = iconImage
+            launchingIconLayer.contentsGravity = .resizeAspect
+            launchingIconLayer.opacity = 0.1
+            launchingIconLayer.transform = CATransform3DMakeScale(2, 2, 1)
+            window.rootLayer.addSublayer(launchingIconLayer)
+            CATransaction.commit()
+
+            let scaleAnimation = CABasicAnimation(keyPath: "transform.scale")
+            scaleAnimation.fromValue = 1
+            scaleAnimation.toValue = 2
+            let opacityAnimation = CABasicAnimation(keyPath: "opacity")
+            opacityAnimation.fromValue = 0.9
+            opacityAnimation.toValue = 0.1
+            let launchAnimation = CAAnimationGroup()
+            launchAnimation.animations = [scaleAnimation, opacityAnimation]
+            launchAnimation.duration = Self.launchAnimationDuration
+            launchAnimation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            launchingIconLayer.add(launchAnimation, forKey: "launch")
         }
-
-        let launchingIconLayer = CALayer()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        launchingIconLayer.frame = iconFrame
-        launchingIconLayer.contents = iconImage
-        launchingIconLayer.contentsGravity = .resizeAspect
-        launchingIconLayer.opacity = 0.1
-        launchingIconLayer.transform = CATransform3DMakeScale(2, 2, 1)
-        interface.containerLayer.addSublayer(launchingIconLayer)
-        CATransaction.commit()
-
-        let scaleAnimation = CABasicAnimation(keyPath: "transform.scale")
-        scaleAnimation.fromValue = 1
-        scaleAnimation.toValue = 2
-        let opacityAnimation = CABasicAnimation(keyPath: "opacity")
-        opacityAnimation.fromValue = 0.9
-        opacityAnimation.toValue = 0.1
-        let launchAnimation = CAAnimationGroup()
-        launchAnimation.animations = [scaleAnimation, opacityAnimation]
-        launchAnimation.duration = Self.launchAnimationDuration
-        launchAnimation.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        launchingIconLayer.add(launchAnimation, forKey: "launch")
-
-        launchingWindow = window
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.launchAnimationDuration) {
-            MainActor.assumeIsolated {
-                let controller = SpringboardController.shared
-                guard let launchingWindow = controller.launchingWindow, launchingWindow === controller.window else { return }
-                controller.hide(reason: "launched \(application.title)")
-            }
-        }
+        hide(reason: "launching \(application.title)")
     }
 
     private func isInsideDockBar(_ location: CGPoint) -> Bool {
@@ -261,5 +297,103 @@ final class SpringboardController {
             }
         }
         #endif
+    }
+
+    // MARK: - Pinch
+
+    /// The thumb-and-three-fingers pinch, read from the DockSwipe events the Dock still receives. macOS 27
+    /// recognises this pinch in Spotlight, so the springboard only takes it over once Spotlight's own is
+    /// turned off; otherwise both would open.
+    private func handlePinch(_ dockSwipe: SpringboardInputEvent.DockSwipe) {
+        guard dockSwipe.motion == SpringboardInputEvent.DockSwipe.pinchMotion else { return }
+        #if DEBUG
+        #log(.info, "Pinch event: phase \(dockSwipe.phase, privacy: .public), progress \(dockSwipe.progress, privacy: .public), velocity \(dockSwipe.velocity, privacy: .public), direction flag \(dockSwipe.directionFlag, privacy: .public)")
+        #endif
+        guard SpringboardPreferences.isSpotlightPinchDisabled, !Self.isDisabledByKillSwitch else { return }
+
+        let intendedProgress = SpringboardPinch.intendedProgress(rawProgress: dockSwipe.progress, directionFlag: dockSwipe.directionFlag)
+        if dockSwipe.hasEnded {
+            endPinch(isCancelled: dockSwipe.isCancelled, intendedProgress: intendedProgress, velocity: dockSwipe.velocity)
+            return
+        }
+        if dockSwipe.hasBegun, pinch == nil {
+            beginPinch(isPinchingIn: SpringboardPinch.isPinchingIn(rawProgress: dockSwipe.progress, directionFlag: dockSwipe.directionFlag))
+        }
+        guard var currentPinch = pinch, let interface else { return }
+        currentPinch.visibility = SpringboardPinch.visibility(forIntendedProgress: intendedProgress, isOpening: currentPinch.isOpening)
+        pinch = currentPinch
+        interface.setVisibility(currentPinch.visibility)
+    }
+
+    /// Pinching in opens a hidden springboard; spreading closes a shown one. Anything else is ignored,
+    /// as is a new gesture while the last one is still settling.
+    private func beginPinch(isPinchingIn: Bool) {
+        guard springTimer == nil else { return }
+        if isPinchingIn, !isVisible {
+            show(reason: "pinch", animated: false)
+            guard isVisible else { return }
+            pinch = (isOpening: true, visibility: 0)
+        } else if !isPinchingIn, isVisible, interface?.dragSession == nil {
+            pinch = (isOpening: false, visibility: 1)
+        }
+    }
+
+    /// Lets go: a completed pinch springs the rest of the way; an abandoned opening leaves with the
+    /// normal exit animation, an abandoned closing snaps back (`-[LPSpringboard fluidGestureEnd:]`, `0x1000B12A4`).
+    private func endPinch(isCancelled: Bool, intendedProgress: Double, velocity: Double) {
+        guard let currentPinch = pinch else { return }
+        pinch = nil
+        let completes = SpringboardPinch.completes(isCancelled: isCancelled, intendedProgress: intendedProgress, isOpening: currentPinch.isOpening)
+        switch (currentPinch.isOpening, completes) {
+        case (true, true):
+            runVisibilitySpring(from: currentPinch.visibility, velocity: velocity, target: 1) {}
+        case (true, false):
+            hide(reason: "pinch abandoned")
+        case (false, true):
+            window?.releaseKeyFocus()
+            runVisibilitySpring(from: currentPinch.visibility, velocity: velocity, target: 0) { [weak self] in
+                self?.hide(reason: "spread", animated: false)
+            }
+        case (false, false):
+            interface?.setVisibility(1)
+        }
+    }
+
+    /// Steps the spring 60 times a second until it settles, then runs `completion`.
+    private func runVisibilitySpring(from visibility: Double, velocity: Double, target: Double, completion: @escaping @MainActor () -> Void) {
+        stopSpring()
+        visibilitySpring = SpringboardVisibilitySpring(visibility: visibility, velocity: velocity, target: target)
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: .nanoseconds(16_666_666))
+        timer.setEventHandler {
+            MainActor.assumeIsolated {
+                let controller = SpringboardController.shared
+                guard var spring = controller.visibilitySpring, let interface = controller.interface else {
+                    controller.stopSpring()
+                    return
+                }
+                spring.step()
+                controller.visibilitySpring = spring
+                interface.setVisibility(spring.visibility)
+                CATransaction.flush()
+                if spring.isFinished {
+                    controller.stopSpring()
+                    completion()
+                }
+            }
+        }
+        springTimer = timer
+        timer.resume()
+    }
+
+    private func stopSpring() {
+        springTimer?.cancel()
+        springTimer = nil
+        visibilitySpring = nil
+    }
+
+    private func stopPinch() {
+        pinch = nil
+        stopSpring()
     }
 }

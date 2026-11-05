@@ -75,13 +75,17 @@ final class SpringboardWindow {
         #log(.info, "Ordered in window \(self.windowIdentifier, privacy: .public): level result \(levelResult ?? -1, privacy: .public), key focus result \(keyFocusResult ?? -1, privacy: .public), raised \(self.raisedDockWindowIdentifiers.count, privacy: .public) Dock window(s)")
     }
 
+    /// Gives key focus back without closing, as 15 did the moment its exit animation started.
+    func releaseKeyFocus() {
+        guard hasKeyFocus else { return }
+        SkyLightBridge.releaseKeyFocus(onConnection: connectionIdentifier)
+        hasKeyFocus = false
+    }
+
     func orderOut() {
         guard isOrderedIn else { return }
         DockHostInterface.order(window, ordering: 0)
-        if hasKeyFocus {
-            SkyLightBridge.releaseKeyFocus(onConnection: connectionIdentifier)
-            hasKeyFocus = false
-        }
+        releaseKeyFocus()
         for raisedDockWindowIdentifier in raisedDockWindowIdentifiers {
             SkyLightBridge.setWindowLevel(
                 Self.dockWindowLevel,

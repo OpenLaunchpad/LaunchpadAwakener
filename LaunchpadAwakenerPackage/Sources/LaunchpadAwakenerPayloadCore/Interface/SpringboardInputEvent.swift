@@ -27,6 +27,25 @@ struct SpringboardInputEvent: Sendable {
         let momentumPhase: Int64
     }
 
+    /// A system gesture as the Dock receives it: CGEvent type 30 with HID type 23 (DockSwipe).
+    struct DockSwipe: Sendable, Equatable {
+        /// 1 horizontal, 2 vertical, 3 pinch or spread, 6 double tap, 7 window switch.
+        let motion: UInt16
+        /// Accumulated, signed by direction.
+        let progress: Double
+        let velocity: Double
+        /// Bit 0 began, bit 2 ended, bit 3 cancelled.
+        let phase: Int64
+        /// Bit 0 of field 136; flips which sign of progress is which direction.
+        let directionFlag: Bool
+
+        static let pinchMotion: UInt16 = 3
+
+        var hasBegun: Bool { phase & 0x1 != 0 }
+        var hasEnded: Bool { phase & 0xC != 0 }
+        var isCancelled: Bool { phase & 0x8 != 0 }
+    }
+
     enum Kind: Sendable, Equatable {
         case keyDown(keyCode: Int64, characters: String, isRepeat: Bool)
         case keyUp(keyCode: Int64)
@@ -36,6 +55,9 @@ struct SpringboardInputEvent: Sendable {
         case mouseDragged(MouseButton)
         case mouseMoved
         case scrollWheel(ScrollWheel)
+        case dockSwipe(DockSwipe)
+        /// The system called a gesture off (type 29, field 110 = 60).
+        case systemGestureCancelled
         /// Gestures, system-defined keys and everything else.
         case other(eventType: UInt32)
     }

@@ -175,6 +175,28 @@ enum QuartzCorePrivate {
         return [blurFilter, saturationFilter]
     }
 
+    /// The desktop behind Launchpad: blur 30 with hard edges, saturation 1.8, then every channel at 55 %
+    /// plus 5.3 % (`-[Springboard init]`, 15.5 `0x100007C48`). There is no other dimming.
+    static func desktopBackgroundFilters() -> [Any]? {
+        guard
+            let colorMatrixFilterType = stringConstant(named: "kCAFilterColorMatrix"),
+            let colorMatrixFilter = makeFilter(type: colorMatrixFilterType),
+            let blurAndSaturationFilters = folderBackdropFilters()
+        else { return nil }
+        let colorMatrixEntries: [Float] = [
+            0.55, 0, 0, 0, 0.05292,
+            0, 0.55, 0, 0, 0.05292,
+            0, 0, 0.55, 0, 0.05292,
+            0, 0, 0, 1, 0,
+        ]
+        // `+[NSValue valueWithCAColorMatrix:]` is exactly this.
+        let colorMatrixValue = colorMatrixEntries.withUnsafeBytes { entryBytes in
+            NSValue(bytes: entryBytes.baseAddress!, objCType: "{CAColorMatrix=ffffffffffffffffffff}")
+        }
+        colorMatrixFilter.setValue(colorMatrixValue, forKey: "inputColorMatrix")
+        return blurAndSaturationFilters + [colorMatrixFilter]
+    }
+
     /// `+[CAFilter filterWithType:]`, for filters `CALayer.filters` accepts in the render server.
     static func makeFilter(type filterType: String) -> NSObject? {
         guard

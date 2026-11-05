@@ -35,6 +35,32 @@ enum SpringboardPreferences {
         UserDefaults.standard.object(forKey: "springboard-reverse-scroll-gesture") as? Bool ?? true
     }
 
+    /// `springboard-show-duration` and `springboard-hide-duration`, in seconds; 0.25 unless set.
+    static var showAnimationDuration: CFTimeInterval {
+        positiveDuration(forKey: "springboard-show-duration") ?? 0.25
+    }
+
+    static var hideAnimationDuration: CFTimeInterval {
+        positiveDuration(forKey: "springboard-hide-duration") ?? 0.25
+    }
+
+    /// Accessibility's Reduce Motion: 15 then faded without scaling.
+    static var reducesMotion: Bool {
+        CFPreferencesCopyAppValue("reduceMotion" as CFString, "com.apple.universalaccess" as CFString) as? Bool ?? false
+    }
+
+    /// Whether Spotlight has stopped answering the pinch itself. Only then does the Dock take it over —
+    /// otherwise both would open together. `defaults write com.apple.spotlight trackpadAppBrowseEnabled -bool NO`
+    /// turns Spotlight's off.
+    static var isSpotlightPinchDisabled: Bool {
+        CFPreferencesCopyAppValue("trackpadAppBrowseEnabled" as CFString, "com.apple.spotlight" as CFString) as? Bool == false
+    }
+
+    private static func positiveDuration(forKey key: String) -> CFTimeInterval? {
+        let duration = UserDefaults.standard.double(forKey: key)
+        return duration > 0 ? duration : nil
+    }
+
     /// `springboard-edit-group-title`: whether clicking an open folder's title renames it. On unless set.
     static var allowsRenamingFolders: Bool {
         UserDefaults.standard.object(forKey: "springboard-edit-group-title") as? Bool ?? true

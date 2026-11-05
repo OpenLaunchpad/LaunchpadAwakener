@@ -35,6 +35,8 @@ final class SpringboardInterface {
     /// Stores an edit; the new layout comes back through ``replaceLayout(_:)``.
     let applyEdit: (LaunchpadEdit) -> Void
     let springboardLayer = CALayer()
+    /// 15's `_desktopContainerLayer`: the wallpaper, filtered and rasterized once.
+    private let desktopContainerLayer = CALayer()
     let mainPages: SpringboardPagedGrids
     private let searchFieldLayer = SpringboardSearchFieldLayer()
     private let noResultsLayer = SpringboardNoResultsLayer()
@@ -65,7 +67,15 @@ final class SpringboardInterface {
     /// Set while an icon is being dragged; see `SpringboardInterface+Dragging.swift`.
     var dragSession: SpringboardDragSession?
 
-    init(layout: LaunchpadLayout, metrics: SpringboardMetrics, scale: CGFloat, rootLayer: CALayer, applyEdit: @escaping (LaunchpadEdit) -> Void) {
+    /// - Parameter desktopImage: The wallpaper as captured on opening; nil falls back to 15's own gradient.
+    init(
+        layout: LaunchpadLayout,
+        metrics: SpringboardMetrics,
+        scale: CGFloat,
+        rootLayer: CALayer,
+        desktopImage: CGImage? = nil,
+        applyEdit: @escaping (LaunchpadEdit) -> Void
+    ) {
         self.layout = layout
         self.metrics = metrics
         self.scale = scale
@@ -82,7 +92,13 @@ final class SpringboardInterface {
         containerLayer.frame = rootLayer.bounds
         // Keep y up inside, whatever the window's root layer does.
         containerLayer.isGeometryFlipped = rootLayer.contentsAreFlipped()
-        containerLayer.backgroundColor = CGColor(gray: 0, alpha: 0.6)
+
+        desktopContainerLayer.frame = containerLayer.bounds
+        desktopContainerLayer.shouldRasterize = true
+        desktopContainerLayer.rasterizationScale = scale
+        desktopContainerLayer.filters = QuartzCorePrivate.desktopBackgroundFilters()
+        desktopContainerLayer.addSublayer(Self.makeDesktopLayer(image: desktopImage, frame: containerLayer.bounds))
+        containerLayer.addSublayer(desktopContainerLayer)
 
         springboardLayer.frame = metrics.springboardFrame
         springboardLayer.masksToBounds = false
@@ -104,6 +120,88 @@ final class SpringboardInterface {
             self?.select(itemAt: nil)
         }
         showMainPages(pageIndex: 0)
+    }
+
+    /// The wallpaper, stretched over the screen; 15's radial gradient when there is no picture
+    /// (`-[Springboard _newDesktopLayer]`, 15.5 `0x100090670`).
+    private static func makeDesktopLayer(image: CGImage?, frame: CGRect) -> CALayer {
+        guard let image else {
+            let gradientLayer = CAGradientLayer()
+            gradientLayer.type = .radial
+            gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.6)
+            gradientLayer.endPoint = CGPoint(x: 1.2, y: 1.5)
+            gradientLayer.colors = [
+                CGColor(red: 0.251, green: 0.254, blue: 0.284, alpha: 1),
+                CGColor(red: 0.132, green: 0.132, blue: 0.147, alpha: 1),
+            ]
+            gradientLayer.frame = frame
+            return gradientLayer
+        }
+        let desktopLayer = CALayer()
+        desktopLayer.frame = frame
+        desktopLayer.contents = image
+        return desktopLayer
+    }
+
+    // MARK: - Showing and hiding
+
+    /// What grows and shrinks as the springboard appears: the open folder if there is one, else the pages.
+    private var scalingLayer: CALayer {
+        folderPanel?.folderLayer ?? springboardLayer
+    }
+
+    /// Sets how far shown the springboard is, without animation: the whole thing fades with it while the
+    /// pages shrink from 1.05 to their size (`-[LPSpringboard _animateToVisibility:]`, 15.5 `0x1000B209C`).
+    func setVisibility(_ visibility: Double) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        containerLayer.opacity = Float(min(max(visibility, 0), 1))
+        if !SpringboardPreferences.reducesMotion {
+            let gridScale = SpringboardPinch.gridScale(forVisibility: visibility)
+            scalingLayer.transform = CATransform3DMakeScale(gridScale, gridScale, 1)
+        }
+        CATransaction.commit()
+    }
+
+    /// 15's entrance: from hidden, fade in while the pages shrink from 1.05, ease-in
+    /// (`-[Springboard performEnterAnimation:]`, `0x10002E1C8`).
+    func animateEntrance(duration: CFTimeInterval) {
+        setVisibility(0)
+        CATransaction.flush()
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(duration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeIn))
+        containerLayer.opacity = 1
+        scalingLayer.transform = CATransform3DIdentity
+        CATransaction.commit()
+    }
+
+    /// 15's exit: fade out while the pages grow to 1.05, ease-out (`-[Springboard performExitAnimation:]`,
+    /// `0x1000303C4`).
+    func animateExit(duration: CFTimeInterval, completion: @escaping @MainActor () -> Void) {
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(duration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        CATransaction.setCompletionBlock {
+            MainActor.assumeIsolated {
+                completion()
+            }
+        }
+        if !SpringboardPreferences.reducesMotion {
+            scalingLayer.transform = CATransform3DMakeScale(1.05, 1.05, 1)
+        }
+        containerLayer.opacity = 0
+        CATransaction.commit()
+    }
+
+    /// Ends whatever is in progress as the springboard starts to go: a drag is cancelled, a new name
+    /// is kept, a pending search is dropped.
+    func prepareForHiding() {
+        if dragSession != nil {
+            cancelDrag()
+        }
+        commitRenaming()
+        searchTask?.cancel()
     }
 
     func tearDown() {
@@ -299,7 +397,7 @@ final class SpringboardInterface {
     }
 
     /// Ends renaming and stores the new name; an empty name keeps the old one, as in 15.
-    private func commitRenaming() {
+    func commitRenaming() {
         guard let folderPanel, let renamingTitle else { return }
         self.renamingTitle = nil
         let newTitle = renamingTitle.trimmingCharacters(in: .whitespaces)

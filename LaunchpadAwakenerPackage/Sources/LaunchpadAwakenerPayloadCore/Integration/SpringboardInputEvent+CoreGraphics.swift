@@ -60,7 +60,31 @@ extension SpringboardInputEvent {
                 )
             )
         default:
-            kind = .other(eventType: eventType)
+            kind = Self.gestureKind(of: event, eventType: eventType) ?? .other(eventType: eventType)
         }
+    }
+
+    /// The DockSwipe fields the Dock's own gesture code reads (`-[DOCKGestureEvent initWithEvent:display:gesture:]`);
+    /// they are not in the public `CGEventField`.
+    private static func gestureKind(of event: CGEvent, eventType: UInt32) -> Kind? {
+        func field(_ rawField: UInt32) -> CGEventField {
+            unsafeBitCast(rawField, to: CGEventField.self)
+        }
+        let hidEventType = event.getIntegerValueField(field(110))
+        if eventType == 29, hidEventType == 60 {
+            return .systemGestureCancelled
+        }
+        guard eventType == 30, hidEventType == 23 else { return nil }
+        let progress = event.getDoubleValueField(field(124))
+        let velocity = event.getDoubleValueField(field(129))
+        return .dockSwipe(
+            DockSwipe(
+                motion: UInt16(truncatingIfNeeded: event.getIntegerValueField(field(123))),
+                progress: progress.isInfinite ? 1 : progress,
+                velocity: velocity.isInfinite ? 0 : velocity,
+                phase: event.getIntegerValueField(field(132)),
+                directionFlag: event.getIntegerValueField(field(136)) & 1 != 0
+            )
+        )
     }
 }
