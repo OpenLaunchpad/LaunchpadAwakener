@@ -8,6 +8,7 @@ extension SpringboardInputEvent {
     init(event: CGEvent, eventType: UInt32) {
         location = event.location
         modifierFlags = event.flags
+        timestamp = event.timestamp
         switch CGEventType(rawValue: eventType) {
         case .keyDown?:
             var characterCount = 0
@@ -51,6 +52,8 @@ extension SpringboardInputEvent {
                 ScrollWheel(
                     horizontalDelta: event.getDoubleValueField(.scrollWheelEventPointDeltaAxis2),
                     verticalDelta: event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1),
+                    horizontalLineDelta: event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2),
+                    verticalLineDelta: event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1),
                     isContinuous: event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0,
                     scrollPhase: event.getIntegerValueField(.scrollWheelEventScrollPhase),
                     momentumPhase: event.getIntegerValueField(.scrollWheelEventMomentumPhase)

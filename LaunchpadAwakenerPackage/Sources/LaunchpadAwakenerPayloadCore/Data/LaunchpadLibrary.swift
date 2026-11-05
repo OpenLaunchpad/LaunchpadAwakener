@@ -59,6 +59,8 @@ package actor LaunchpadLibrary {
     private let layoutHandler: @Sendable (LaunchpadLayout) async -> Void
     private var store: LaunchpadStore?
     private var directoryMonitor: ApplicationDirectoryMonitor?
+    /// Bundle locations from the latest discovery, by bundle identifier.
+    private var discoveredBundleURLs: [String: URL] = [:]
     private var pendingReconciliation: Task<Void, Never>?
 
     package private(set) var layout: LaunchpadLayout = .empty
@@ -115,7 +117,22 @@ package actor LaunchpadLibrary {
     }
 
     private func discoverApplications() -> [DiscoveredApplication] {
-        ApplicationDiscovery.discoverApplications(in: configuration.searchDirectories, exclusionList: configuration.exclusionList)
+        let discoveredApplications = ApplicationDiscovery.discoverApplications(in: configuration.searchDirectories, exclusionList: configuration.exclusionList)
+        discoveredBundleURLs = [:]
+        for discoveredApplication in discoveredApplications where discoveredBundleURLs[discoveredApplication.bundleIdentifier] == nil {
+            discoveredBundleURLs[discoveredApplication.bundleIdentifier] = discoveredApplication.url
+        }
+        return discoveredApplications
+    }
+
+    /// Where an application's bundle is: where discovery found it, or else where its bookmark points.
+    private func bundleURL(for application: LaunchpadApplication) -> URL? {
+        if let discoveredBundleURL = discoveredBundleURLs[application.bundleIdentifier] {
+            return discoveredBundleURL
+        }
+        guard let bookmarkData = application.bookmarkData else { return nil }
+        var isStale = false
+        return try? URL(resolvingBookmarkData: bookmarkData, options: [.withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &isStale)
     }
 
     private func populate(_ store: LaunchpadStore, discoveredApplications: [DiscoveredApplication]) throws {
@@ -145,7 +162,7 @@ package actor LaunchpadLibrary {
     }
 
     private func publish(_ store: LaunchpadStore) async throws {
-        let newLayout = try store.layout()
+        let newLayout = try store.layout().locatingBundles { bundleURL(for: $0) }
         guard newLayout != layout else { return }
         layout = newLayout
         #log(.info, "Layout: \(newLayout.pages.count, privacy: .public) page(s), \(newLayout.folders.count, privacy: .public) folder(s), \(newLayout.applications.count, privacy: .public) application(s)")

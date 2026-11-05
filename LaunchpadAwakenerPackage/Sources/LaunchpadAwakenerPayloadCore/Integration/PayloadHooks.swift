@@ -81,7 +81,7 @@ public enum PayloadHooks {
                 let callOriginal = unsafeBitCast(originalImplementation, to: OriginalFunction.self)
                 let replacement: @convention(block) (AnyObject, AnyObject?, UInt32) -> Void = { receiver, eventObject, eventType in
                     if let eventObject, Thread.isMainThread {
-                        let inputEvent = SpringboardInputEvent(event: unsafeBitCast(eventObject, to: CGEvent.self), eventType: eventType)
+                        let inputEvent = SpringboardInputEvent(event: unsafeDowncast(eventObject, to: CGEvent.self), eventType: eventType)
                         let isConsumed = MainActor.assumeIsolated {
                             SpringboardController.shared.handle(inputEvent)
                         }

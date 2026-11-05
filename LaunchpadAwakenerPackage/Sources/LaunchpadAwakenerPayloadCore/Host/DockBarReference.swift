@@ -14,12 +14,20 @@ import OSToolbox
 enum DockBarReference {
     private static weak var cachedDockBar: NSObject?
 
+    /// The Dock's `DockBar`; nil when it cannot be found.
+    static var dockBar: NSObject? {
+        if let cachedDockBar {
+            return cachedDockBar
+        }
+        let resolvedDockBar = readDockBarGlobal()
+        cachedDockBar = resolvedDockBar
+        return resolvedDockBar
+    }
+
     /// The bar's current rectangle in global coordinates with a top-left origin; nil when the
     /// `DockBar` cannot be found.
     static var currentBarRect: CGRect? {
-        guard let dockBar = cachedDockBar ?? readDockBarGlobal() else { return nil }
-        cachedDockBar = dockBar
-        return DockHostInterface.rect(of: dockBar)
+        dockBar.map(DockHostInterface.rect(of:))
     }
 
     /// Reads the global named by the running Dock's profile, and accepts what it holds only when that

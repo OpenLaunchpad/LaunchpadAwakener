@@ -62,7 +62,7 @@ enum DockHostInterface {
         layerKitWindowIdentifier,
         layerKitWindowOrder,
         dockBarRect,
-    ]
+    ] + DockLayerFactory.requiredMethods + DockEnvironment.requiredMethods
 
     /// Whether every method the payload calls exists with the expected signature.
     ///

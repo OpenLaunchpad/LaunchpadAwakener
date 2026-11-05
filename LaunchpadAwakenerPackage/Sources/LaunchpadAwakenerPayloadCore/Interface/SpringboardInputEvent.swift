@@ -15,6 +15,10 @@ struct SpringboardInputEvent: Sendable {
         /// Point deltas as the system delivers them, natural scrolling already applied.
         let horizontalDelta: Double
         let verticalDelta: Double
+        /// The same movement in lines, with fractions (`kCGScrollWheelEventFixedPtDeltaAxis*`) — what
+        /// macOS 15's Launchpad scrolled by.
+        let horizontalLineDelta: Double
+        let verticalLineDelta: Double
         /// True for trackpads and other pixel-precise devices, false for notched wheels.
         let isContinuous: Bool
         /// `kCGScrollPhase*`; zero for wheels and momentum events.
@@ -40,6 +44,8 @@ struct SpringboardInputEvent: Sendable {
     /// Global coordinates with a top-left origin, the space of `-[DockBar rect]`.
     let location: CGPoint
     let modifierFlags: CGEventFlags
+    /// `CGEventGetTimestamp`, in nanoseconds.
+    let timestamp: UInt64
 
     var hasCommandModifier: Bool {
         modifierFlags.contains(.maskCommand)
