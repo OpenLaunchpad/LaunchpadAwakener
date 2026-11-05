@@ -205,8 +205,11 @@ public final class PayloadInjectionCoordinator {
             }
 
             do {
-                try await inject(intoProcessIdentifier: processIdentifier)
-                newlyInjectedProcessIdentifiers.append(processIdentifier)
+                if try await inject(intoProcessIdentifier: processIdentifier) {
+                    newlyInjectedProcessIdentifiers.append(processIdentifier)
+                } else {
+                    previouslyInjectedProcessIdentifiers.append(processIdentifier)
+                }
             } catch {
                 failureDescriptions.append(error.localizedDescription)
             }
@@ -230,7 +233,7 @@ public final class PayloadInjectionCoordinator {
         guard !injectedProcessIdentifiers.contains(processIdentifier) else { return }
 
         do {
-            try await inject(intoProcessIdentifier: processIdentifier)
+            _ = try await inject(intoProcessIdentifier: processIdentifier)
         } catch {
             lastErrorDescription = error.localizedDescription
             Self.logger.error(
@@ -239,18 +242,46 @@ public final class PayloadInjectionCoordinator {
         }
     }
 
-    /// Whether this run of the app has staged its own payload yet.
+    /// This run's staging of its own payload, shared by every injection that needs it.
     ///
-    /// A staged copy left by an earlier build still exists on disk, so `isPayloadStaged` alone
-    /// would keep injecting that old build after every rebuild.
-    private var hasStagedPayloadInThisRun = false
+    /// A staged copy left by an earlier build still exists on disk, so `isPayloadStaged` alone would
+    /// keep injecting that old build after every rebuild. Sharing one task also keeps two injections
+    /// that start together — the launch-time one and the process monitor's — from staging at once,
+    /// one deleting the framework while the other is loading it.
+    private var payloadStagingTask: Task<Void, any Error>?
 
-    /// Stages the payload if needed and injects it into one process. Throws so callers can report.
-    private func inject(intoProcessIdentifier processIdentifier: pid_t) async throws {
-        if !hasStagedPayloadInThisRun || !isPayloadStaged {
-            try await stagePayload()
-            hasStagedPayloadInThisRun = true
+    /// Processes an injection is under way for, so a second request for the same process waits its
+    /// turn out instead of injecting again.
+    private var processIdentifiersBeingInjected: Set<pid_t> = []
+
+    private func stagePayloadOncePerRun() async throws {
+        if let payloadStagingTask {
+            // This run's staging, finished or still under way. Reused while its copy is on disk; a
+            // failed or since-deleted staging is done again below.
+            if (try? await payloadStagingTask.value) != nil, isPayloadStaged {
+                return
+            }
         }
+        let newStagingTask = Task { try await self.stagePayload() }
+        payloadStagingTask = newStagingTask
+        do {
+            try await newStagingTask.value
+        } catch {
+            payloadStagingTask = nil
+            throw error
+        }
+    }
+
+    /// Stages the payload if needed and injects it into one process. Returns false when this session
+    /// already injected that process or is injecting it right now. Throws so callers can report.
+    private func inject(intoProcessIdentifier processIdentifier: pid_t) async throws -> Bool {
+        guard
+            !injectedProcessIdentifiers.contains(processIdentifier),
+            processIdentifiersBeingInjected.insert(processIdentifier).inserted
+        else { return false }
+        defer { processIdentifiersBeingInjected.remove(processIdentifier) }
+
+        try await stagePayloadOncePerRun()
 
         let payloadURL = stagedPayloadExecutableURL
         switch injectionMethod {
@@ -272,6 +303,7 @@ public final class PayloadInjectionCoordinator {
         injectionDatesByProcessIdentifier[processIdentifier] = Date()
         lastErrorDescription = nil
         Self.logger.info("Injected into \(processIdentifier, privacy: .public)")
+        return true
     }
 
     private func record(outcome: InjectionOutcome) -> InjectionOutcome {
