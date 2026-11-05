@@ -177,7 +177,7 @@ final class SpringboardController {
 
 1. **基础与入口**，分四步提交：
    1. ✅ 结构：把原型的 InjectionScaffold 结构（App、daemon、payload 三个外壳与本地包）搬进功能分支，payload 按 `Host` / `Data` / `Interface` / `Integration` 分目录。InjectionScaffold 的两处绕过一并保留：依赖钉在 `exact: "0.1.4"`；App 每次启动后的第一次注入都重新暂存 payload。
-   2. 宿主与集成：构建档案、宿主接口校验、两个入口 hook、`DockBar` 获取、窗口与层级、键盘焦点、保险机制。原型的界面作为过渡界面保留，到第 2 批换掉。
+   2. ✅ 宿主与集成：构建档案、宿主接口校验、两个入口 hook、`DockBar` 获取、窗口与层级、键盘焦点、保险机制。原型的界面作为过渡界面保留，到第 2 批换掉。
    3. 数据层：自己的库、旧库导入、App 的发现与变更监听，带单元测试。
    4. App 侧：默认开启自动注入，并随登录启动。
    - 验证：重启 Dock 后自动注入；导入的页数、文件夹数与旧库一致。

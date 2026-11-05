@@ -32,6 +32,9 @@ let package = Package(
         // To develop against a local checkout, replace this line with:
         //   .package(path: "../../swift-helper-service")
         .package(url: "https://github.com/Mx-Iris/swift-helper-service", exact: "0.1.4"),
+        // `@Loggable` and `#log` for the payload's logging. Already in the graph through
+        // swift-helper-service; named here because the payload uses it directly.
+        .package(url: "https://github.com/Mx-Iris/FrameworkToolbox", from: "0.17.0"),
     ],
     targets: [
         // Names, versions and paths shared by all three binaries. No dependencies on purpose —
@@ -76,6 +79,7 @@ let package = Package(
             dependencies: [
                 "LaunchpadAwakenerShared",
                 "LaunchpadAwakenerHookKit",
+                .product(name: "OSToolbox", package: "FrameworkToolbox"),
             ]
         ),
     ]

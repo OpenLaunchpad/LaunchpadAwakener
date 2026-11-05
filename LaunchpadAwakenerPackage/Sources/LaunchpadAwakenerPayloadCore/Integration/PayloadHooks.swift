@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 import ObjectiveC
-import OSLog
+import OSToolbox
 import LaunchpadAwakenerHookKit
 
 /// Declares every method this payload replaces in the host process.
@@ -47,86 +47,30 @@ import LaunchpadAwakenerHookKit
 ///     }
 /// )
 /// ```
+@Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "PayloadHooks")
 public enum PayloadHooks {
-    private static let logger = Logger(subsystem: "com.MxIris.LaunchpadAwakener", category: "PayloadHooks")
-
     /// The hooks to install, validated and applied as one atomic batch.
     ///
-    /// Returning an empty array is a valid state: the payload attaches, logs, and changes nothing.
-    /// That is the right first milestone for a new project — prove injection works before changing
-    /// any behaviour.
+    /// Returning an empty array is a valid state: the payload attaches, logs, and changes nothing. That
+    /// is what happens on a Dock build this payload does not know, or whose methods no longer match —
+    /// every entry then keeps opening the system's Apps.
     public static func descriptors() -> [MethodHookDescriptor] {
-        // The overlay calls into the Dock's window class; if that no longer matches, taking over
-        // the Launchpad key would leave it doing nothing, so install no hook at all.
-        guard DockHostInterface.isCompatible else {
-            logger.error("The Dock's window interface does not match this payload; installing no hooks")
+        guard DockBuildProfile.current != nil else {
+            #log(.error, "Unknown Dock build; installing no hooks")
             return []
         }
-        return [launchAppsBrowsingHook, dockBarEventHook, dockBarRectHook, dockBarRollTileHook]
-    }
-
-    private static let dockBarRollTileSelectorName = "setRollTile:"
-
-    /// Only observes, like `dockBarRectHook`. The Dock calls this whenever the pointer moves onto a
-    /// different tile, so the `DockBar` is known before any click on it — `rect` alone is called too
-    /// rarely on macOS 27.2 to be relied on.
-    private static var dockBarRollTileHook: MethodHookDescriptor {
-        MethodHookDescriptor(
-            className: "DockBar",
-            selector: NSSelectorFromString(dockBarRollTileSelectorName),
-            expectedTypeEncoding: "v24@0:8@16",
-            makeReplacement: { originalImplementation in
-                typealias OriginalFunction = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
-                let callOriginal = unsafeBitCast(originalImplementation, to: OriginalFunction.self)
-                let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { receiver, rollTile in
-                    callOriginal(receiver, NSSelectorFromString(dockBarRollTileSelectorName), rollTile)
-                    if Thread.isMainThread {
-                        // Already on the main thread, where the Dock owns its `DockBar`; nothing crosses threads.
-                        nonisolated(unsafe) let dockBar = receiver
-                        MainActor.assumeIsolated {
-                            DockBarReference.remember(dockBar: dockBar)
-                        }
-                    }
-                }
-                return imp_implementationWithBlock(replacement)
-            }
-        )
-    }
-
-    private static let dockBarRectSelectorName = "rect"
-
-    /// Only observes: remembers the Dock's `DockBar`, which nothing exported leads to, so the overlay
-    /// can ask for the bar's rectangle the way macOS 15's `-[DockAppEventHandler
-    /// handleSpringboardEvent:type:]` did to let clicks on the Dock through.
-    private static var dockBarRectHook: MethodHookDescriptor {
-        MethodHookDescriptor(
-            className: "DockBar",
-            selector: NSSelectorFromString(dockBarRectSelectorName),
-            expectedTypeEncoding: "{CGRect={CGPoint=dd}{CGSize=dd}}16@0:8",
-            makeReplacement: { originalImplementation in
-                typealias OriginalFunction = @convention(c) (AnyObject, Selector) -> CGRect
-                let callOriginal = unsafeBitCast(originalImplementation, to: OriginalFunction.self)
-                let replacement: @convention(block) (AnyObject) -> CGRect = { receiver in
-                    let barRect = callOriginal(receiver, NSSelectorFromString(dockBarRectSelectorName))
-                    if Thread.isMainThread {
-                        // Already on the main thread, where the Dock owns its `DockBar`; nothing crosses threads.
-                        nonisolated(unsafe) let dockBar = receiver
-                        MainActor.assumeIsolated {
-                            DockBarReference.remember(dockBar: dockBar)
-                        }
-                    }
-                    return barRect
-                }
-                return imp_implementationWithBlock(replacement)
-            }
-        )
+        guard DockHostInterface.isCompatible else {
+            #log(.error, "The Dock's methods do not match this payload; installing no hooks")
+            return []
+        }
+        return [launchAppsBrowsingHook, dockBarEventHook]
     }
 
     private static let dockBarEventSelectorName = "handleDockBarEvent:type:"
 
     /// On macOS 27.2 every event the Dock receives passes through here, from
     /// `-[DockAppEventHandler handleMachMessage:size:]` — the same funnel where macOS 15 offered each
-    /// event to Launchpad before the Dock bar. While the overlay is hidden this only forwards.
+    /// event to Launchpad before the Dock bar. While the springboard is hidden this only forwards.
     private static var dockBarEventHook: MethodHookDescriptor {
         MethodHookDescriptor(
             className: "DockAppEventHandler",
@@ -137,9 +81,9 @@ public enum PayloadHooks {
                 let callOriginal = unsafeBitCast(originalImplementation, to: OriginalFunction.self)
                 let replacement: @convention(block) (AnyObject, AnyObject?, UInt32) -> Void = { receiver, eventObject, eventType in
                     if let eventObject, Thread.isMainThread {
-                        let inputEvent = OverlayInputEvent(event: unsafeBitCast(eventObject, to: CGEvent.self), eventType: eventType)
+                        let inputEvent = SpringboardInputEvent(event: unsafeBitCast(eventObject, to: CGEvent.self), eventType: eventType)
                         let isConsumed = MainActor.assumeIsolated {
-                            LaunchpadPrototypeOverlay.shared.handle(inputEvent)
+                            SpringboardController.shared.handle(inputEvent)
                         }
                         if isConsumed { return }
                     }
@@ -152,8 +96,8 @@ public enum PayloadHooks {
 
     private static let launchAppsBrowsingSelectorName = "sendLaunchAppsBrowsing"
 
-    /// On macOS 27.2 every path that opens Apps — the Launchpad key among them — ends in this one
-    /// method, so replacing it takes them all over at once.
+    /// On macOS 27.2 every path that opens Apps — the Launchpad key, the pinch gesture, the Apps
+    /// application — ends in this one method, so replacing it takes them all over at once.
     private static var launchAppsBrowsingHook: MethodHookDescriptor {
         MethodHookDescriptor(
             className: "Spotlight",
@@ -163,13 +107,13 @@ public enum PayloadHooks {
                 typealias OriginalFunction = @convention(c) (AnyObject, Selector) -> Void
                 let callOriginal = unsafeBitCast(originalImplementation, to: OriginalFunction.self)
                 let replacement: @convention(block) (AnyObject) -> Void = { receiver in
-                    guard !LaunchpadPrototypeOverlay.isDisabledByKillSwitch else {
+                    guard !SpringboardController.isDisabledByKillSwitch else {
                         callOriginal(receiver, NSSelectorFromString(launchAppsBrowsingSelectorName))
                         return
                     }
                     DispatchQueue.main.async {
                         MainActor.assumeIsolated {
-                            LaunchpadPrototypeOverlay.shared.toggle()
+                            SpringboardController.shared.toggle(reason: "launch apps browsing")
                         }
                     }
                 }
