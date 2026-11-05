@@ -33,6 +33,18 @@ payload 注入 macOS 27.2 的 Dock，接管所有「打开 Apps」的入口，�
 
 **Dock 的厚度取 27 的 Dock 栏矩形。** 15 的公式用「图标大小 + 上下留白」（约 59 点），27 的 Dock 外面多了一圈玻璃（MacBook 上栏高 82 点）。沿用 15 的算法会让网格压到 Dock 上；代价是小屏幕上图标比 15 小一档。
 
+**文件夹照 15 用图层画，缩略图交给 Dock 的 `ECImageGridLayer`。** 15.5 根本不引用 Dock.app 里的 `ecsb_group`、`ecsb_arrow_*` 等贴图（10.7–10.9 时代的遗留），文件夹图标是半透明浅色方圆加 3×3 缩略图。`ECImageGridLayer` 与 `ECGridLayer` 不同，`layerSourceInvalidated:` 之后会重新问条目数，所以换内容不必重建；它不保证子图层顺序，取缩略图时按位置排序。
+
+**拖动时自己摆放图标，不经 `ECGridLayer` 布局。** `ECGridLayer` 的布局在内部关掉隐式动画，借它没法做出 15 那种 0.4 秒的让位动画；拖动期间按「排列」（当前页的条目按新顺序排好、被拖的那个占一格）逐个设图标的 frame。被拖的图层离开网格挂到容器最上层跟手。松手时一次性写库，库发布的新布局再重建页面；拖动或文件夹开合期间到达的新布局先存着，动作结束后才换上（`replaceLayout` / `applyPendingLayoutIfIdle`）。
+
+**打开的文件夹是另一个翻页器。** 15 的 `ECSBGroupLayer` 本身就是 `ECPagerLayer`，所以主界面与文件夹共用 `SpringboardPagedGrids`（滚动层、页码、跟手、回弹、滚轮停顿）。面板是 `CABackdropLayer` 加私有的 `CAFilter`；开合动画只让面板的形状与图标在动，承载内容的容器始终铺满，靠遮罩裁出面板。
+
+**背景截 WindowManager 的壁纸窗口，不用 `CABackdropLayer`。** 27 的壁纸窗口归 WindowManager（每个空间一扇叫 `Wallpaper` 的窗口），Dock 手里已经没有桌面图层；`CABackdropLayer` 会把 App 的窗口一起采进来，而 15 的背景只有壁纸。截图用 15 同样的 `SLSHWCaptureWindowList(…, 0x11944)`，Dock 有截屏权限，注入的代码继承了它；截好的图放进栅格化的容器，滤镜只算一次。
+
+**捏合读原始 DockSwipe 事件，且默认不接管。** 27 的「拇指加三指捏合」由 Spotlight 进程识别，Dock 的手势系统里已经没有它，`sendLaunchAppsBrowsing` 也不在这条路上；但 WindowServer 仍把 DockSwipe 事件送到 Dock 的连接上。payload 在已有的事件 hook 里照 15 的状态机读这些事件，跟手设可见度，松手后跑 15 的 60 Hz 弹簧。Spotlight 也会响应同一组事件，所以只有 `com.apple.spotlight` 的 `trackpadAppBrowseEnabled` 为 NO 时才接管；不要用系统设置里的「更多手势」开关代替，它很可能让 HID 层不再产生捏合事件。
+
+**收起时先交还输入，再放退场动画。** 与 15 一样：退场一开始就归还键盘焦点、事件不再拦截，正在退场的窗口另存一份，动画结束后才移出屏幕；此时再打开会先立刻结束旧的那份。点图标启动的放大淡出放在窗口根图层上，不随界面一起淡出。
+
 **自动注入的两道保护。** 同一个 Dock 进程的注入与 payload 的暂存都只进行一次（App 启动时的注入与进程监视的注入会同时开始）；注入后 Dock 连续 3 次在 15 秒内退出，就自动关掉自动注入并说明原因，免得一个加载即崩溃的 payload 让 Dock 循环崩溃。
 
 ## 模块结构
@@ -47,6 +59,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── DockEnvironment.swift           # Dock 的方向、厚度、刘海、图标样式
 │   ├── DockLayerFactory.swift          # ECGridLayer、ECTextLayer、ECShadowTextLayer、材质；CA 私有滤镜
 │   ├── IconServicesBridge.swift        # IconServices 取图
+│   ├── WallpaperSnapshot.swift         # 截 WindowManager 的壁纸窗口
 │   └── SkyLightBridge.swift            # 连接、窗口层级、键盘焦点
 ├── Data/                               # 布局库，可脱离 Dock 测试
 │   ├── LaunchpadStore*.swift           # 自己的库：读、追加、编辑、整理
@@ -56,15 +69,21 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── LayoutReconciliation.swift      # 与已安装的 App 对账
 │   └── LaunchpadLibrary.swift          # 把以上串起来的 actor；发布布局、接受编辑
 ├── Interface/                          # 界面层，按 15.5 的 ECSB* 划分
-│   ├── SpringboardController.swift     # 显示、隐藏、事件分派、启动动画、保险机制
+│   ├── SpringboardController.swift     # 显示、隐藏与进出场、事件分派、启动动画、捏合、保险机制
 │   ├── SpringboardWindow.swift         # 全屏窗口、27/29 层、键盘焦点
-│   ├── SpringboardInterface.swift      # 页面、搜索、翻页、选中、点击（ECSBSpringboard + ECSBLayer）
+│   ├── SpringboardInterface.swift      # 页面、搜索、选中、点击、文件夹开合与改名、背景（ECSBSpringboard + ECSBLayer）
+│   ├── SpringboardInterface+Dragging.swift # 拖动整理（ECSBDragCapture 与各 DragState）
+│   ├── SpringboardPagedGrids.swift     # 主界面与文件夹共用的翻页器（ECPagerLayer）
+│   ├── SpringboardFolderPanel.swift    # 打开的文件夹（ECSBGroupLayer）与改名编辑框
 │   ├── SpringboardPageGrid.swift       # 每页一个 ECGridLayer 及其数据源
-│   ├── SpringboardItemLayer.swift      # 图标与标题（ECSBItemLayer、ECSBLabelLayer）
+│   ├── SpringboardItemLayer.swift      # 图标、文件夹图标与标题（ECSBItemLayer、ECSBGroupItemLayer、ECSBLabelLayer）
 │   ├── SpringboardControlLayers.swift  # 页码、搜索框、无结果
-│   ├── SpringboardMetrics.swift        # 15.5 的几何公式（纯计算）
+│   ├── SpringboardMetrics.swift        # 15.5 的主界面几何（纯计算）
+│   ├── SpringboardFolderMetrics.swift  # 15.5 的文件夹几何（纯计算）
 │   ├── SpringboardSearch.swift         # 15.5 的搜索规则（纯计算）
-│   └── SpringboardPaging.swift         # 15.5 的翻页与方向键规则（纯计算）
+│   ├── SpringboardPaging.swift         # 15.5 的翻页、方向键与拖动命中规则（纯计算）
+│   ├── SpringboardPinch.swift          # 15.5 的捏合映射与弹簧（纯计算）
+│   └── SpringboardSelfCheck.swift      # 开发构建的离屏自检
 └── Integration/                        # hook 声明与入口、事件的接管
 ```
 
@@ -80,17 +99,23 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 搜索框不接输入法：直接把 Dock 收到的按键当文字，所以打不出中文；标题匹配不上时仍按 App 文件名匹配。
 - 触控板翻页用滚动事件自带的阶段判断开始与结束；三指轻扫翻页暂不支持。
 - 15.5 的 `LaunchPadLayout.plist` 没有作为资源随 payload 发布，改为 Swift 常量（原因见上）。
+- 文件夹改名同样不接输入法；Esc 取消改名、保留原名（15 的行为没能查清）。
+- 拖到 App 上停住不会先弹开一个新文件夹，松手时才建；拖到 Dock 上、拖动搜索结果、文件夹里的方向键导航都不支持；拖动时文件夹不额外加一行。
+- 捏合没有接入 27 的 Dock 手势系统（那里已经没有它），而是读原始 DockSwipe 事件，并且要用户先关掉 Spotlight 的捏合。
+- 背景截不到时直接退到 15 的径向渐变，跳过「读壁纸图片文件」那一级（要用 AppKit）。
 
 ## 验证
 
-- 单元测试（`swift test`，只在开发机上跑，不碰 Dock）：库的建立、追加、编辑与整理；旧库导入（含隐藏页、断了父项的页、下载中的 App、空页）；App 发现、排除名单与 15.5 原文件的逐项核对；对账；网格几何（以 15.5 规格里 1470×956 屏的手算示例为准）；搜索规则；翻页与方向键规则。
-- MacBook 上的非交互验证：部署后与 Dock 重启后各注入一次、hook 装上；导入 3 页、2 个文件夹、149 个 App 与旧库一致；开发构建启动时离屏建一次界面，日志核对 Dock 的 `ECGridLayer` 建出的图标数量与位置。
-- 需要用户亲自看、亲手操作的部分（打开后的观感、翻页与搜索的手感等）不在 agent 的验证范围内。
+- 单元测试（`swift test`，只在开发机上跑，不碰 Dock）：库的建立、追加、编辑（移动、溢出、建文件夹、放入、拖出后解散、新的末页）与整理；旧库导入（含隐藏页、断了父项的页、下载中的 App、空页）；App 发现、排除名单与 15.5 原文件的逐项核对；对账；主界面与文件夹的几何（以 15.5 规格里 1470×956 屏的手算示例为准）；搜索规则；翻页、方向键与拖动命中规则；捏合映射与弹簧。
+- MacBook 上的非交互验证：部署后与 Dock 重启后各注入一次、hook 装上、19 个 Dock 方法签名全部吻合；导入 3 页、2 个文件夹、149 个 App 与旧库一致；开发构建的离屏自检核对 Dock 的 `ECGridLayer` 建出的图标数量与位置、文件夹图标的方圆与 `ECImageGridLayer` 缩略图、壁纸截图（2338×1434 像素，5 毫秒）。
+- 需要用户亲自看、亲手操作的部分（打开后的观感、翻页、搜索、文件夹、拖动、进出场与 15 的逐帧比较、捏合）不在 agent 的验证范围内。
 
 ## 已知降级
 
 - 透明与着色图标样式下，Dock 在图标背后画的玻璃底没有复刻。
-- 文件夹图标暂用 `ecsb_group` 贴图加 3×3 缩略图；文件夹的打开、拖动整理随第 3 批落地。
+- 搜索与改名打不出中文（没有输入法）。
+- 背景是打开那一刻的静态截图，动态壁纸不会动（与 15 相同）；截不到时是 15 的径向渐变。
+- 捏合在用户关掉 Spotlight 的捏合之前不生效；Dock 能否收到捏合事件尚未在真机上确认。
 - 只在主显示器上显示。
 
 ## 适配新的 Dock 构建
@@ -102,5 +127,9 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 
 ## 延伸阅读
 
+- [术语表](../Glossary.md)
 - 15.5 的界面规格：`/Volumes/RE/Dock/15.5/Notes/LaunchpadMainInterface.md`
+- 15.5 的文件夹与拖动：`/Volumes/RE/Dock/15.5/Notes/LaunchpadFoldersAndDragging.md`
+- 15.5 的背景与进出场、27.2 的壁纸来源：`/Volumes/RE/Dock/15.5/Notes/LaunchpadBackgroundAndAnimations.md`
 - 27.2 的 `EC*` 图层与图标：`/Volumes/RE/Dock/27.2/Notes/ECLayerReuse.md`
+- 捏合手势：`/Volumes/RE/Dock/27.2/Notes/PinchGesture.md`
