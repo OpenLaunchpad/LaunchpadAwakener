@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Workspace
+   version = "1.0">
+   <FileRef
+      location = "group:PrecompiledLibraries/swift-syntax">
+   </FileRef>
+   <FileRef
+      location = "group:LaunchpadAwakenerPackage">
+   </FileRef>
+   <FileRef
+      location = "group:LaunchpadAwakener.xcodeproj">
+   </FileRef>
+</Workspace>
