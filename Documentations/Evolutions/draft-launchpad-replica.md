@@ -1,6 +1,6 @@
 # Draft - 在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad
 
-- **状态**: Accepted
+- **状态**: In Progress
 - **作者**: JH
 - **创建日期**: 2026-11-05
 - **最后更新**: 2026-11-05
@@ -176,7 +176,7 @@ final class SpringboardController {
 每一批都在 MacBook 上验证通过后才进入下一批。
 
 1. **基础与入口**，分四步提交：
-   1. 结构：把原型的 InjectionScaffold 结构（App、daemon、payload 三个外壳与本地包）搬进功能分支，payload 按 `Host` / `Data` / `Interface` / `Integration` 分目录。InjectionScaffold 的两处绕过一并保留：依赖钉在 `exact: "0.1.4"`；App 每次启动后的第一次注入都重新暂存 payload。
+   1. ✅ 结构：把原型的 InjectionScaffold 结构（App、daemon、payload 三个外壳与本地包）搬进功能分支，payload 按 `Host` / `Data` / `Interface` / `Integration` 分目录。InjectionScaffold 的两处绕过一并保留：依赖钉在 `exact: "0.1.4"`；App 每次启动后的第一次注入都重新暂存 payload。
    2. 宿主与集成：构建档案、宿主接口校验、两个入口 hook、`DockBar` 获取、窗口与层级、键盘焦点、保险机制。原型的界面作为过渡界面保留，到第 2 批换掉。
    3. 数据层：自己的库、旧库导入、App 的发现与变更监听，带单元测试。
    4. App 侧：默认开启自动注入，并随登录启动。

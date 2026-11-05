@@ -4,4 +4,4 @@
 
 | # | 标题 | 状态 |
 |---|------|------|
-| draft | [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md) | Accepted |
+| draft | [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md) | In Progress |

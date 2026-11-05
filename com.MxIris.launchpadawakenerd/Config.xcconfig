@@ -1,3 +1,0 @@
-OTHER_LDFLAGS = $(inherited) -sectcreate __TEXT __launchd_plist "$(SRCROOT)/$(TARGET_NAME)/launchd.plist"
-CREATE_INFOPLIST_SECTION_IN_BINARY = YES
-INFOPLIST_FILE = $(SRCROOT)/$(TARGET_NAME)/Info.plist

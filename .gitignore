@@ -1,5 +1,10 @@
 .DS_Store
-build
-project.xcworkspace
-xcuserdata
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+LaunchpadAwakenerPackage/.build/
+Products/
+LaunchpadAwakenerPackage/Package.resolved
 .worktrees/
