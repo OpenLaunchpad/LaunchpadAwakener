@@ -116,6 +116,9 @@ final class SpringboardItemLayer: CALayer {
     private(set) var item: LaunchpadItem?
     private var metrics: SpringboardMetrics?
 
+    /// Everything the icon draws, in a layer of its own that shakes in jiggle mode, as 15's
+    /// `jitterLayer` was; it fills the item, so it shares the item's coordinates.
+    let jitterLayer = CALayer()
     let imageLayer = CALayer()
     let labelLayer = SpringboardLabelLayer()
     private var selectionLayer: CALayer?
@@ -128,8 +131,9 @@ final class SpringboardItemLayer: CALayer {
     override init() {
         super.init()
         imageLayer.contentsGravity = .resizeAspect
-        addSublayer(imageLayer)
-        addSublayer(labelLayer)
+        jitterLayer.addSublayer(imageLayer)
+        jitterLayer.addSublayer(labelLayer)
+        addSublayer(jitterLayer)
     }
 
     override init(layer: Any) {
@@ -244,7 +248,7 @@ final class SpringboardItemLayer: CALayer {
             let newBackdropLayer = CALayer()
             newBackdropLayer.backgroundColor = Self.folderBackdropColor
             newBackdropLayer.cornerCurve = .continuous
-            insertSublayer(newBackdropLayer, below: imageLayer)
+            jitterLayer.insertSublayer(newBackdropLayer, below: imageLayer)
             backdropLayer = newBackdropLayer
         }
         guard thumbnailGridLayer == nil else { return }
@@ -258,7 +262,7 @@ final class SpringboardItemLayer: CALayer {
         ) else { return }
         newThumbnailGridLayer.masksToBounds = true
         newThumbnailGridLayer.allowsEdgeAntialiasing = false
-        addSublayer(newThumbnailGridLayer)
+        jitterLayer.addSublayer(newThumbnailGridLayer)
         thumbnailGridLayer = newThumbnailGridLayer
     }
 
@@ -344,6 +348,10 @@ final class SpringboardItemLayer: CALayer {
 
     override func layoutSublayers() {
         super.layoutSublayers()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        jitterLayer.frame = bounds
+        CATransaction.commit()
         guard let metrics, let item else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -399,6 +407,41 @@ final class SpringboardItemLayer: CALayer {
     /// `round(icon side × 0.15625)`, rounding half down as 15's `sub_10006AF28` did.
     static func cornerRadius(forIconSide iconSide: CGFloat) -> CGFloat {
         ceil(iconSide * 0.15625 - 0.5)
+    }
+
+    // MARK: - Jiggling
+
+    /// Shakes in jiggle mode, as 15's icons did (`-[ECSBItemLayer setJittering:]`, `0x1000613FC`): the
+    /// jitter layer turns and wanders by the additive animations of ``SpringboardJiggle``, so that the
+    /// item's own geometry stays free for layout, dragging and the folder animations.
+    var isJiggling = false {
+        didSet {
+            guard isJiggling != oldValue else { return }
+            updateJiggle()
+        }
+    }
+
+    /// Keeps the icon still whatever `isJiggling` says, as 15 did for an icon picked up, held down or with
+    /// something held over it.
+    var isHeldStill = false {
+        didSet {
+            guard isHeldStill != oldValue else { return }
+            updateJiggle()
+        }
+    }
+
+    private func updateJiggle() {
+        let shouldShake = isJiggling && !isHeldStill
+        guard shouldShake != (jitterLayer.animation(forKey: SpringboardJiggle.rotationAnimationKey) != nil) else { return }
+        guard shouldShake else {
+            jitterLayer.removeAnimation(forKey: SpringboardJiggle.positionAnimationKey)
+            jitterLayer.removeAnimation(forKey: SpringboardJiggle.rotationAnimationKey)
+            return
+        }
+        var generator = SystemRandomNumberGenerator()
+        let animations = SpringboardJiggle.makeAnimations(using: &generator)
+        jitterLayer.add(animations.position, forKey: SpringboardJiggle.positionAnimationKey)
+        jitterLayer.add(animations.rotation, forKey: SpringboardJiggle.rotationAnimationKey)
     }
 
     // MARK: - Dragging
@@ -481,7 +524,7 @@ final class SpringboardItemLayer: CALayer {
                 layer.frame = folderBackdropFrame
                 layer.cornerRadius = folderCornerRadius
                 layer.transform = CATransform3DMakeScale(1.1, 1.1, 1)
-                insertSublayer(layer, below: imageLayer)
+                jitterLayer.insertSublayer(layer, below: imageLayer)
                 Self.addBlinkAnimation(to: layer)
             }
             backdropLayer = newBackdropLayer
@@ -535,7 +578,8 @@ final class SpringboardItemLayer: CALayer {
             let newSelectionLayer = CALayer()
             newSelectionLayer.backgroundColor = CGColor(gray: 0, alpha: 0.14)
             DockLayerFactory.setMaterialControl(3, appearance: 1, of: newSelectionLayer)
-            insertSublayer(newSelectionLayer, at: 0)
+            // 15 put it at index 0 of the jitter layer, under the icon and its title.
+            jitterLayer.insertSublayer(newSelectionLayer, at: 0)
             selectionLayer = newSelectionLayer
             setNeedsLayout()
             layoutIfNeeded()

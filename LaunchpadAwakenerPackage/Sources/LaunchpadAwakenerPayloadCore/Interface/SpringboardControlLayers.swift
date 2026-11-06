@@ -63,17 +63,21 @@ final class SpringboardPagerControlLayer: CALayer {
 ///
 /// 15 hosted a real text field from another process; here the Dock's key events are turned into text,
 /// which means no input method — see the decision log. Looks follow 15: the capsule `ectl_search_background`,
-/// the loupe and the placeholder centred together until something is typed, then the loupe at the left,
-/// the text after it and the clear button at the right (`-[ECTextInputLayer layout]`, `0x1000086F0`).
+/// the loupe and the placeholder centred together until the field is clicked into or typed in, then the
+/// loupe at the left, the text after it and the clear button at the right (`-[ECTextInputLayer layout]`,
+/// `0x1000086F0`). With the focus, a white caret blinks after the text, as the hosted field's did.
 final class SpringboardSearchFieldLayer: CALayer {
     static let loupeSide: CGFloat = 12
     static let clearButtonSide: CGFloat = 14
+    /// Where the text starts once the field is active: the loupe at 7, 12 wide, then 8.
+    static let textOriginX: CGFloat = 27
 
     private let backgroundLayer = CALayer()
     private let loupeLayer = CALayer()
     private let placeholderLayer = DockLayerFactory.makeTextLayer(withShadow: false)
     private let textLayer = DockLayerFactory.makeTextLayer(withShadow: false)
     private let clearButtonLayer = CALayer()
+    private let caretLayer = CALayer()
 
     override init() {
         super.init()
@@ -90,7 +94,9 @@ final class SpringboardSearchFieldLayer: CALayer {
         placeholderLayer.foregroundColor = CGColor(gray: 1, alpha: 0.36)
         placeholderLayer.string = SpringboardStrings.search
         textLayer.foregroundColor = CGColor(gray: 1, alpha: 1)
-        for sublayer in [backgroundLayer, loupeLayer, placeholderLayer, textLayer, clearButtonLayer] {
+        caretLayer.backgroundColor = CGColor(gray: 1, alpha: 1)
+        caretLayer.isHidden = true
+        for sublayer in [backgroundLayer, loupeLayer, placeholderLayer, textLayer, clearButtonLayer, caretLayer] {
             addSublayer(sublayer)
         }
     }
@@ -106,6 +112,41 @@ final class SpringboardSearchFieldLayer: CALayer {
     private(set) var text = ""
     /// The first layout places everything; only later ones animate between the two arrangements.
     private var hasLaidOut = false
+
+    /// Clicked into or typed in: the loupe and the placeholder sit at the left even with nothing typed
+    /// (`-[ECTextInputLayer setTextFieldActive:]`, 15.5 `0x100031700`).
+    var isActive = false {
+        didSet {
+            guard isActive != oldValue else { return }
+            setNeedsLayout()
+        }
+    }
+
+    /// Typing goes to the field, shown by the blinking caret.
+    var hasFocus = false {
+        didSet {
+            guard hasFocus != oldValue else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            caretLayer.isHidden = !hasFocus
+            CATransaction.commit()
+            restartBlinking()
+            setNeedsLayout()
+        }
+    }
+
+    /// Shown in full at once, as after each key typed, then blinking.
+    private func restartBlinking() {
+        caretLayer.removeAnimation(forKey: "blink")
+        guard hasFocus else { return }
+        let blinkAnimation = CABasicAnimation(keyPath: "opacity")
+        blinkAnimation.fromValue = 1
+        blinkAnimation.toValue = 0
+        blinkAnimation.duration = 0.5
+        blinkAnimation.autoreverses = true
+        blinkAnimation.repeatCount = .infinity
+        caretLayer.add(blinkAnimation, forKey: "blink")
+    }
 
     func configure(scale: CGFloat) {
         CATransaction.begin()
@@ -127,6 +168,7 @@ final class SpringboardSearchFieldLayer: CALayer {
         textLayer.string = newText
         placeholderLayer.isHidden = !newText.isEmpty
         clearButtonLayer.isHidden = newText.isEmpty
+        restartBlinking()
         setNeedsLayout()
     }
 
@@ -165,16 +207,24 @@ final class SpringboardSearchFieldLayer: CALayer {
         CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
         CATransaction.setDisableActions(!hasLaidOut)
         hasLaidOut = true
-        if text.isEmpty {
+        let textWidth = width - Self.textOriginX - 25
+        if text.isEmpty, !isActive {
             let placeholderWidth = SpringboardTypography.width(of: SpringboardStrings.search, in: SpringboardTypography.searchFont)
             let placeholderX = width / 2 - placeholderWidth / 2 + 12
             placeholderLayer.frame = CGRect(x: placeholderX, y: 4, width: placeholderWidth + 2, height: textHeight)
             loupeLayer.frame = CGRect(x: placeholderX - 20, y: loupeY, width: Self.loupeSide, height: Self.loupeSide)
         } else {
-            placeholderLayer.frame = CGRect(x: 27, y: 4, width: width - 27 - 25, height: textHeight)
+            placeholderLayer.frame = CGRect(x: Self.textOriginX, y: 4, width: textWidth, height: textHeight)
             loupeLayer.frame = CGRect(x: 7, y: loupeY, width: Self.loupeSide, height: Self.loupeSide)
         }
-        textLayer.frame = CGRect(x: 27, y: 4, width: width - 27 - 25, height: textHeight)
+        textLayer.frame = CGRect(x: Self.textOriginX, y: 4, width: textWidth, height: textHeight)
+        CATransaction.commit()
+
+        // 2 points wide and 19 high, inset 3 from top and bottom, as macOS 15.5 shows it, after the text.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let typedWidth = min(SpringboardTypography.width(of: text, in: SpringboardTypography.searchFont), textWidth)
+        caretLayer.frame = CGRect(x: Self.textOriginX - 1 + typedWidth, y: 3, width: 2, height: height - 6)
         CATransaction.commit()
     }
 }

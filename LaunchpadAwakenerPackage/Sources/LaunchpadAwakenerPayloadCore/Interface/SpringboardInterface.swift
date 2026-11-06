@@ -72,6 +72,18 @@ final class SpringboardInterface {
     /// Set while an icon is being dragged; see `SpringboardInterface+Dragging.swift`.
     var dragSession: SpringboardDragSession?
 
+    /// Fires once a press on an icon has been held long enough to switch jiggle mode.
+    private var longPressTask: Task<Void, Never>?
+    /// The icon whose long press switched jiggle mode; its release neither launches nor opens.
+    private var longPressedItemLayer: SpringboardItemLayer?
+    private var optionKeyJiggle = SpringboardOptionKeyJiggle()
+
+    /// The pages in front: the open folder's, or the main ones. Jiggle mode is theirs, as 15's
+    /// `-[ECSBPager setDeleting:]` gave it to the shown folder rather than the main pages.
+    var frontPages: SpringboardPagedGrids {
+        folderPanel?.pages ?? mainPages
+    }
+
     /// - Parameters:
     ///   - backgroundStyle: What goes behind the pages; nil for nothing. The Dock's glass may only be asked
     ///     for once the Dock is up, so the off-screen self-check goes without.
@@ -198,10 +210,12 @@ final class SpringboardInterface {
         }
         commitRenaming()
         searchTask?.cancel()
+        cancelLongPress()
     }
 
     func tearDown() {
         searchTask?.cancel()
+        cancelLongPress()
         mainPages.tearDown()
         folderPanel?.pages.tearDown()
         dragSession?.cancelTimers()
@@ -388,6 +402,9 @@ final class SpringboardInterface {
     func closeFolder(animated: Bool = true, completion: (@MainActor () -> Void)? = nil) {
         guard let folderPanel, !isAnimatingFolder else { return }
         commitRenaming()
+        // 15 ended the folder's jiggling at once, before its panel closed (`-[ECSBPager hideGroup]`,
+        // 15.5 `0x100058350`).
+        folderPanel.pages.isJiggling = false
         let closingFolder = folderPanel.folder
         let folderItemLayer = folderItemLayer(of: closingFolder)
         isAnimatingFolder = true
@@ -483,6 +500,8 @@ final class SpringboardInterface {
     private func startRenaming() {
         guard let folderPanel, renamingTitle == nil else { return }
         renamingTitle = folderPanel.folder.title
+        // 15 took the focus from the search field while a title was edited.
+        setSearchFieldFocus(false)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         folderPanel.titleLayer.isHidden = true
@@ -603,6 +622,26 @@ final class SpringboardInterface {
         searchTextDidChange()
     }
 
+    /// A click into the field or a typed key makes it active, the loupe and the placeholder moving to the
+    /// left, and gives it the focus, with a blinking caret (`-[ECSBLayer leftMouseDown:in:]`, 15.5
+    /// `0x100082AB4`; `-[ECSBLayer keyDown:]`, `0x100081AB0`).
+    private func activateSearchField() {
+        searchFieldLayer.isActive = true
+        searchFieldLayer.hasFocus = true
+    }
+
+    /// Without the focus and with nothing typed, the field goes back to its inactive look (`sub_100064748`).
+    private func setSearchFieldFocus(_ hasFocus: Bool) {
+        guard hasFocus else {
+            searchFieldLayer.hasFocus = false
+            if searchText.isEmpty {
+                searchFieldLayer.isActive = false
+            }
+            return
+        }
+        activateSearchField()
+    }
+
     // MARK: - Keys
 
     func handleKeyDown(keyCode: Int64, characters: String, modifierFlags: CGEventFlags) -> Action {
@@ -611,10 +650,15 @@ final class SpringboardInterface {
             handleRenamingKeyDown(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags)
             return .none
         }
-        // 15's order for Escape: cancel a drag, close a folder, clear the search, then close Launchpad.
+        // 15's order for Escape: cancel a drag, end jiggle mode, close a folder, clear the search, then
+        // close Launchpad.
         if keyCode == SpringboardKeyCode.escape {
             if dragSession != nil {
                 cancelDrag()
+                return .none
+            }
+            if frontPages.isJiggling {
+                frontPages.isJiggling = false
                 return .none
             }
             if folderPanel != nil {
@@ -652,13 +696,23 @@ final class SpringboardInterface {
             searchText.removeLast()
             searchTextDidChange()
         case SpringboardKeyCode.tab:
-            break
+            // 15 moved the focus into the field and out again.
+            setSearchFieldFocus(!searchFieldLayer.hasFocus)
         default:
             guard Self.isTypedText(characters, modifierFlags: modifierFlags) else { return .none }
+            activateSearchField()
             searchText += characters
             searchTextDidChange()
         }
         return .none
+    }
+
+    /// Holding Option jiggles the icons in front, and letting it go stops them
+    /// (`-[ECSBSpringboard flagsChanged:]`, 15.5 `0x1000F37AC`).
+    func handleModifiersChanged(_ modifierFlags: CGEventFlags) {
+        guard renamingTitle == nil else { return }
+        let pages = frontPages
+        pages.isJiggling = optionKeyJiggle.isJiggling(afterOptionIsDown: modifierFlags.contains(.maskAlternate), isJiggling: pages.isJiggling)
     }
 
     private func navigate(_ direction: SpringboardNavigation.Direction) {
@@ -699,9 +753,10 @@ final class SpringboardInterface {
 
     // MARK: - Pointer
 
-    func handleMouseDown(at containerPoint: CGPoint, timestamp: UInt64) -> Action {
+    func handleMouseDown(at containerPoint: CGPoint, timestamp: UInt64, modifierFlags: CGEventFlags = []) -> Action {
         // A press while a drop is still settling waits, as one during a folder's animation does.
         guard !isAnimatingFolder, dragSession == nil else { return .none }
+        cancelLongPress()
         mainPages.cancelPendingWheelSettle()
         folderPanel?.pages.cancelPendingWheelSettle()
 
@@ -719,7 +774,7 @@ final class SpringboardInterface {
                 pointerTracking = .none
                 return .none
             }
-            return beginPress(at: containerPoint, timestamp: timestamp, context: .folder)
+            return beginPress(at: containerPoint, timestamp: timestamp, context: .folder, modifierFlags: modifierFlags)
         }
 
         let springboardPoint = springboardLayer.convert(containerPoint, from: containerLayer)
@@ -729,14 +784,15 @@ final class SpringboardInterface {
                 searchFieldLayer.isClearButtonPressed = true
                 pointerTracking = .clearButton
             } else {
+                activateSearchField()
                 pointerTracking = .searchField
             }
             return .none
         }
-        return beginPress(at: containerPoint, timestamp: timestamp, context: .main)
+        return beginPress(at: containerPoint, timestamp: timestamp, context: .main, modifierFlags: modifierFlags)
     }
 
-    private func beginPress(at containerPoint: CGPoint, timestamp: UInt64, context: GridContext) -> Action {
+    private func beginPress(at containerPoint: CGPoint, timestamp: UInt64, context: GridContext, modifierFlags: CGEventFlags) -> Action {
         let pages = pages(for: context)
         let pointInPagesSuperlayer = containerLayer.convert(containerPoint, to: pages.scrollLayer.superlayer)
         if let pageIndex = pages.pageIndexOfIndicator(at: pointInPagesSuperlayer) {
@@ -746,10 +802,33 @@ final class SpringboardInterface {
         if let (pageGrid, gridPoint) = pages.pointInCurrentGrid(pointInPagesSuperlayer), let hit = pageGrid.item(at: gridPoint), hit.isOnIcon {
             hit.itemLayer.isDarkened = true
             pointerTracking = .icon(context: context, pageIndex: pages.currentPageIndex, itemIndex: hit.index, itemLayer: hit.itemLayer, startLocation: containerPoint, startTimestamp: timestamp)
+            scheduleLongPress(on: hit.itemLayer, context: context, isShiftDown: modifierFlags.contains(.maskShift))
             return .none
         }
         pointerTracking = .background(context: context, startLocation: containerPoint, startScrollValue: pages.scrollValue, startTimestamp: timestamp, isDragging: false)
         return .none
+    }
+
+    /// A press held on an icon switches jiggle mode for the pages in front (15's `deletingTimer`,
+    /// `sub_10006F06C`): the icon grows to 1.1 and keeps still until it is let go.
+    private func scheduleLongPress(on itemLayer: SpringboardItemLayer, context: GridContext, isShiftDown: Bool) {
+        cancelLongPress()
+        longPressTask = Task { [weak self] in
+            try? await Task.sleep(for: SpringboardJiggle.longPressDuration(isShiftDown: isShiftDown))
+            guard !Task.isCancelled, let self else { return }
+            self.longPressTask = nil
+            guard case let .icon(_, _, _, pressedLayer, _, _) = self.pointerTracking, pressedLayer === itemLayer else { return }
+            let pages = self.pages(for: context)
+            pages.isJiggling.toggle()
+            itemLayer.isMagnified = true
+            itemLayer.isHeldStill = true
+            self.longPressedItemLayer = itemLayer
+        }
+    }
+
+    private func cancelLongPress() {
+        longPressTask?.cancel()
+        longPressTask = nil
     }
 
     func handleMouseDragged(to containerPoint: CGPoint, timestamp: UInt64) -> Action {
@@ -765,6 +844,9 @@ final class SpringboardInterface {
                     || abs(containerPoint.y - startLocation.y) >= SpringboardPaging.dragThreshold
             else { return .none }
             pointerTracking = .none
+            // A drag takes over the icon, held still and enlarged, whether or not its long press fired.
+            cancelLongPress()
+            longPressedItemLayer = nil
             beginDrag(of: itemLayer, context: context, pageIndex: pageIndex, itemIndex: itemIndex, startLocation: startLocation, location: containerPoint, timestamp: timestamp)
             return .none
         case let .background(context, startLocation, startScrollValue, startTimestamp, isDragging):
@@ -792,7 +874,15 @@ final class SpringboardInterface {
         defer { pointerTracking = .none }
         switch pointerTracking {
         case let .icon(context, pageIndex, itemIndex, itemLayer, _, _):
+            cancelLongPress()
             itemLayer.isDarkened = false
+            if longPressedItemLayer === itemLayer {
+                // 15 neither launched nor opened what a long press had switched jiggle mode on.
+                longPressedItemLayer = nil
+                itemLayer.isMagnified = false
+                itemLayer.isHeldStill = false
+                return .none
+            }
             let pages = pages(for: context)
             guard
                 pageIndex == pages.currentPageIndex,
@@ -803,9 +893,16 @@ final class SpringboardInterface {
             else { return .none }
             switch hit.itemLayer.item {
             case .application(let application):
+                // Even in jiggle mode, as in 15.
                 return launchAction(for: application, itemLayer: hit.itemLayer)
             case .folder(let folder):
+                // 15 took jiggle mode from the main pages into the folder it opened, and the main pages
+                // were still once it closed (`-[ECSBEventHandler leftMouseUp:inLayer:ofPage:]`, 15.5
+                // `0x10006F408`).
+                let isJiggling = pages.isJiggling
+                pages.isJiggling = false
                 openFolder(folder, from: hit.itemLayer)
+                folderPanel?.pages.isJiggling = isJiggling
                 return .none
             case .none:
                 return .none
@@ -813,9 +910,15 @@ final class SpringboardInterface {
         case let .background(context, startLocation, startScrollValue, startTimestamp, isDragging):
             guard isDragging else {
                 guard context == .main else { return .none }
-                // 15 closed on a click on the background, search or not (`cancelActionWithEvent:sender:`).
                 let movement = hypot(containerPoint.x - startLocation.x, containerPoint.y - startLocation.y)
-                return movement < SpringboardPaging.dragThreshold ? .dismiss(reason: "clicked outside the icons") : .none
+                guard movement < SpringboardPaging.dragThreshold else { return .none }
+                // 15 ended jiggle mode on a click on the background, and otherwise closed, search or not
+                // (`cancelActionWithEvent:sender:`).
+                guard !mainPages.isJiggling else {
+                    mainPages.isJiggling = false
+                    return .none
+                }
+                return .dismiss(reason: "clicked outside the icons")
             }
             pages(for: context).settleDrag(startScrollValue: startScrollValue, startTimestamp: startTimestamp, endTimestamp: timestamp)
             return .none

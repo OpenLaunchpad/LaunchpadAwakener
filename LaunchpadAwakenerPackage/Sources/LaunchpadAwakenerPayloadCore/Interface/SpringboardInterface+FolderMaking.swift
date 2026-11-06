@@ -70,6 +70,8 @@ extension SpringboardInterface {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         targetLayer.isDropTarget = false
+        // In jiggle mode 15's new folder shook at once.
+        targetLayer.isHeldStill = false
         dragSession.itemLayer.removeFromSuperlayer()
         turnIntoFolderIcon(targetLayer, showing: unsavedFolder)
         targetLayer.setThumbnailOpacity(0, forSlots: 0..<2)
@@ -118,6 +120,7 @@ extension SpringboardInterface {
         let flight = SpringboardIconFlight.makeFlyingLayer(copying: dragSession.itemLayer.imageLayer, in: folderItemLayer)
 
         folderItemLayer.endDropTargetAfterDrop()
+        folderItemLayer.isHeldStill = false
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         dragSession.itemLayer.removeFromSuperlayer()

@@ -61,6 +61,8 @@ payload 注入 macOS 27.2 的 Dock，接管所有「打开 Apps」的入口，�
 
 **捏合读原始 DockSwipe 事件，且默认不接管。** 27 的「拇指加三指捏合」由 Spotlight 进程识别，Dock 的手势系统里已经没有它，`sendLaunchAppsBrowsing` 也不在这条路上；但 WindowServer 仍把 DockSwipe 事件送到 Dock 的连接上。payload 在已有的事件 hook 里照 15 的状态机读这些事件，跟手设可见度，松手后跑 15 的 60 Hz 弹簧。Spotlight 也会响应同一组事件，所以只有 `com.apple.spotlight` 的 `trackpadAppBrowseEnabled` 为 NO 时才接管；不要用系统设置里的「更多手势」开关代替，它很可能让 HID 层不再产生捏合事件。
 
+**抖动模式抖的是图标里的一层，不是图标本身。** 15 的图标里有一层 `jitterLayer` 装着图片、标题、文件夹的方圆与缩略图，抖动只给它加两段永远循环、叠加（additive）的关键帧动画：绕中心转 ±0.0353 弧度（约 2°），以及在四个各坐标为 0 或 −1 点的位置之间游走，周期 0.25 秒，起始相位随机且是 0.05 秒的整数倍。复刻照搬这一层（`SpringboardItemLayer.jitterLayer`）：图标本身的 position 与 transform 留给排版、拖动、放大和文件夹动画用，要是把抖动加在图标上，这些隐式动画一跑就会盖掉它。两段动画都设了 Core Animation 的私有属性 `frameInterval = 0.05`，让抖动按每秒 20 下一跳一跳地走，这正是 15 那种生硬感的来源，27.2 的 QuartzCore 里它还在。抖动是「这几页」的状态（`SpringboardPagedGrids.isJiggling`），文件夹开着时归文件夹，与 15 的 `-[ECSBPager setDeleting:]` 一致；页面重建时新格子自动带上。被拖的、正被悬停的、长按中的图标用 `isHeldStill` 暂时不抖，与 15 相同。
+
 **收起时先交还输入，再放退场动画。** 与 15 一样：退场一开始就归还键盘焦点、事件不再拦截，正在退场的窗口另存一份，动画结束后才移出屏幕；此时再打开会先立刻结束旧的那份。点图标启动的放大淡出放在窗口根图层上，不随界面一起淡出。
 
 **自动注入的两道保护。** 同一个 Dock 进程的注入与 payload 的暂存都只进行一次（App 启动时的注入与进程监视的注入会同时开始）；注入后 Dock 连续 3 次在 15 秒内退出，就自动关掉自动注入并说明原因，免得一个加载即崩溃的 payload 让 Dock 循环崩溃。
@@ -94,6 +96,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── SpringboardInterface+Dragging.swift # 拖动整理（ECSBDragCapture 与各 DragState）
 │   ├── SpringboardInterface+FolderMaking.swift # 拖到图标上建文件夹、放进文件夹、未存的文件夹与解散
 │   ├── SpringboardIconFlight.swift     # 图片缩进文件夹缩略图的动画
+│   ├── SpringboardJiggle.swift         # 抖动模式：15 的两段抖动动画、长按时长、Option 规则
 │   ├── SpringboardBackground.swift     # 背景：15 的模糊壁纸，或 Dock 的液态玻璃
 │   ├── SpringboardPagedGrids.swift     # 主界面与文件夹共用的翻页器（ECPagerLayer）
 │   ├── SpringboardFolderPanel.swift    # 打开的文件夹（ECSBGroupLayer）与改名编辑框
@@ -137,7 +140,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 ## 已知降级
 
 - 透明与着色图标样式下，Dock 在图标背后画的玻璃底没有复刻。
-- 搜索与改名打不出中文（没有输入法）。
+- 搜索与改名打不出中文（没有输入法）；搜索框的光标只在文字末尾，左右方向键不移动它。
+- 抖动模式没有关闭按钮，不能删除 App。15 只给 App Store 的 App 显示关闭按钮，确认气泡由 27.2 已经删掉的 `com.apple.dock.ecap` 服务画。
 - 玻璃背景：打开期间切换深浅色或辅助功能里的透明度、对比度，要到下次打开才跟上（界面每次打开都重建，没有注册 Dock 的外观观察者）。
 - 背景是打开那一刻的静态截图，动态壁纸不会动（与 15 相同）；截不到时是 15 的径向渐变。
 - 快速放进文件夹后，文件夹图标的缩略图在库发布新布局、页面重建时就滚回顶部；15 要等下次打开再关上这个文件夹才滚回。

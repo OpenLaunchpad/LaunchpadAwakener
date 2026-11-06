@@ -317,8 +317,8 @@ final class SpringboardFolderPanel {
             itemLayer.isPictureAndTitleLayoutSuspended = true
             let iconFrame = iconFrames[itemIndex]
             let labelFrame = Self.minimizedLabelFrame(under: iconFrame, labelSize: itemLayer.restingLabelFrame.size)
-            itemLayer.imageLayer.frame = folderLayer.convert(iconFrame, to: itemLayer)
-            itemLayer.labelLayer.frame = folderLayer.convert(labelFrame, to: itemLayer)
+            itemLayer.imageLayer.frame = folderLayer.convert(iconFrame, to: itemLayer.jitterLayer)
+            itemLayer.labelLayer.frame = folderLayer.convert(labelFrame, to: itemLayer.jitterLayer)
             itemLayer.labelLayer.opacity = 0
             if itemIndex < Self.thumbnailCount {
                 itemLayer.imageLayer.minificationFilter = lanczosFilter

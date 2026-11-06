@@ -211,13 +211,16 @@ final class SpringboardController {
             restartIdleTimer()
             perform(interface.handleKeyDown(keyCode: keyCode, characters: characters, modifierFlags: inputEvent.modifierFlags))
             return true
-        case .keyUp, .modifiersChanged:
+        case .keyUp:
+            return true
+        case .modifiersChanged:
+            interface.handleModifiersChanged(inputEvent.modifierFlags)
             return true
         case .mouseDown(.left, _):
             // Clicks on the Dock stay the Dock's, as they did over macOS 15's Launchpad.
             guard !isInsideDockBar(inputEvent.location) else { return false }
             restartIdleTimer()
-            perform(interface.handleMouseDown(at: containerPoint, timestamp: inputEvent.timestamp))
+            perform(interface.handleMouseDown(at: containerPoint, timestamp: inputEvent.timestamp, modifierFlags: inputEvent.modifierFlags))
             return true
         case .mouseDragged(.left):
             restartIdleTimer()

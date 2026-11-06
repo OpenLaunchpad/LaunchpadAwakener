@@ -31,6 +31,22 @@ final class SpringboardPagedGrids {
     /// Called whenever the current page changes, after the change.
     var currentPageDidChange: (() -> Void)?
 
+    /// Whether these pages are in jiggle mode, every icon shaking, as macOS 15's `-[ECSBPager setDeleting:]`
+    /// put a pager's own pages (15.5 `0x10002DBD0`). Pages built later shake as well.
+    var isJiggling = false {
+        didSet {
+            guard isJiggling != oldValue else { return }
+            applyJiggling(to: itemLayers)
+        }
+    }
+
+    private func applyJiggling(to itemLayers: [SpringboardItemLayer]) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        itemLayers.forEach { $0.isJiggling = isJiggling }
+        CATransaction.commit()
+    }
+
     init(metrics: SpringboardMetrics, scale: CGFloat, pageStride: CGFloat, pageFrame: @escaping (Int) -> CGRect) {
         self.metrics = metrics
         self.scale = scale
@@ -75,6 +91,9 @@ final class SpringboardPagedGrids {
         currentPageIndex = min(max(pageIndex, 0), max(pageGrids.count - 1, 0))
         pagerControlLayer.configure(pageCount: pageGrids.count, currentPageIndex: currentPageIndex, metrics: metrics)
         CATransaction.commit()
+        if isJiggling {
+            applyJiggling(to: itemLayers)
+        }
         setScrollValue(pageStride * CGFloat(currentPageIndex), animated: false)
     }
 

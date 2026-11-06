@@ -120,6 +120,8 @@ extension SpringboardInterface {
         containerLayer.addSublayer(itemLayer)
         CATransaction.commit()
         itemLayer.isMagnified = true
+        // In jiggle mode 15 stopped the icon being dragged from shaking until it was put down.
+        itemLayer.isHeldStill = true
 
         var arrangedLayers: [SpringboardItemLayer?] = pageGrid.itemLayers
         if arrangedLayers.indices.contains(itemIndex) {
@@ -276,6 +278,8 @@ extension SpringboardInterface {
         endHover()
         dragSession.hoverTarget = (targetIndex, targetLayer)
         targetLayer.isDropTarget = true
+        // 15 stopped the icon held over from shaking, and let it shake again once left.
+        targetLayer.isHeldStill = true
         dragSession.itemLayer.isMagnified = false
         dragSession.itemLayer.labelLayer.opacity = 0
         // Holding on opens a folder, or turns an application into a new folder and opens that.
@@ -298,6 +302,7 @@ extension SpringboardInterface {
         dragSession.springLoadingTask?.cancel()
         dragSession.hoverTarget = nil
         hoverTarget.itemLayer.isDropTarget = false
+        hoverTarget.itemLayer.isHeldStill = false
         dragSession.itemLayer.isMagnified = true
     }
 
@@ -697,6 +702,8 @@ extension SpringboardInterface {
         if let dragSession, let mainPageArrangement = dragSession.mainPageArrangement, folderPanel != nil {
             mainPagePlaceholder = mainPageArrangement
         }
+        // Put down, the icon shakes again if its pages are in jiggle mode.
+        dragSession?.itemLayer.isHeldStill = false
         dragSession?.cancelTimers()
         dragSession = nil
         applyPendingLayoutIfIdle()
