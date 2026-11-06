@@ -262,7 +262,8 @@ extension SpringboardInterface {
         }
         for (index, layer) in dragSession.arrangedLayers.enumerated() {
             guard let layer else { continue }
-            layer.frame = pageGrid.cellFrame(at: index)
+            // Not `frame`: an icon may be scaled at this moment, a folder dissolving for one.
+            layer.setUntransformedFrame(pageGrid.cellFrame(at: index))
             layer.opacity = index < pageGrid.capacity ? 1 : 0
         }
         CATransaction.commit()
@@ -365,8 +366,11 @@ extension SpringboardInterface {
             folderItemLayer.layoutIfNeeded()
             CATransaction.commit()
         }
-        // The main page as the drag left it when the folder opened, if it did; its gap is dropped below.
-        let mainPageArrangement = dragSession.mainPageArrangement
+        // The main page as a drag left it when the folder opened — this drag, or the one whose drop opened
+        // the folder by itself; its gap is dropped below. This drag now moves the main page, so the gap no
+        // longer waits for the folder to close.
+        let mainPageArrangement = dragSession.mainPageArrangement ?? mainPagePlaceholder
+        mainPagePlaceholder = nil
         dragSession.isWaitingForFolderToClose = true
         dragSession.unsavedFolderTarget = nil
         dragSession.mainPageArrangement = nil

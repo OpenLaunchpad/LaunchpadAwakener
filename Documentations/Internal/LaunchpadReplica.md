@@ -43,6 +43,10 @@ payload 注入 macOS 27.2 的 Dock，接管所有「打开 Apps」的入口，�
 
 **打开的文件夹是另一个翻页器。** 15 的 `ECSBGroupLayer` 本身就是 `ECPagerLayer`，所以主界面与文件夹共用 `SpringboardPagedGrids`（滚动层、页码、跟手、回弹、滚轮停顿）。面板是 `CABackdropLayer` 加私有的 `CAFilter`；开合动画只让面板的形状与图标在动，承载内容的容器始终铺满，靠遮罩裁出面板。毛玻璃由窗口服务器采样（`windowServerAware`），放在遮罩外面：背景不再是窗口里画出来的图像，只采样本窗口什么也模糊不到；遮罩会把内容放到屏幕外绘制，那里也采样不到窗口身后。
 
+**界面按屏幕尺寸铺，不按窗口根图层。** `WALayerKitWindow` 的根图层在建界面时 bounds 还是 0×0。图标的位置都由屏幕尺寸算出，不受影响，但按根图层定大小的容器与背景就成了 0×0：最初的壁纸背景因此看起来是透明的，换成玻璃后也只在屏幕左下角露出一小块。
+
+**图标缩放时只设 bounds 与 position。** 解散中的文件夹图标缩到一成、被拖的图标放大到 1.1 倍时，页面可能正好在让位；给带 transform 的图层设 `frame`，Core Animation 会按缩放后的尺寸反推 bounds，图标恢复原大后就大了十倍、跑出原格。让位一律用 `setUntransformedFrame(_:)`。关闭文件夹的动画也只处理还在面板里的图标：网格的列表里仍有被拖出去的那个，碰了它就会在手上消失。
+
 **新建的图层先提交上屏，再做动画。** Core Animation 不给从未提交过的图层做隐式动画。打开文件夹时面板、图标都是新建的，所以先在关掉动画的事务里摆好起点、排好图标，`CATransaction.flush()` 提交，再开始动画；图标缩进缩略图、文件夹解散也是这样。漏掉这一步的症状就是「打开没有动画、关闭有」。
 
 **背景是 Dock 自己的液态玻璃。** 起初照 15 截取 WindowManager 的壁纸窗口再加 15 的三个滤镜，用户看过后改成玻璃。玻璃来自 Dock 画 Dock 栏与 Cmd-Tab 切换器的那套控制器：Swift 写的，但经四个 Objective-C 类就能驱动（`DockGlassMaterialLayerController`、`DockGlassMaterialLayoutConfiguration`、`DockSDFElement`、`DockGlassMaterialEnvironment`），每个方法调用前都校验签名，校验不过就退回一层带 15 三个滤镜、由窗口服务器采样的模糊。三个容易踩的地方：
@@ -123,7 +127,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 
 - 单元测试（`swift test`，只在开发机上跑，不碰 Dock）：库的建立、追加、编辑（移动、溢出、建文件夹及被拖的排在前面、放入、新的末页，以及任何编辑让文件夹只剩一个 App 时解散）与整理；界面在库跟上之前显示的文件夹与库的结果一致；旧库导入（含隐藏页、断了父项的页、下载中的 App、空页）；App 发现、排除名单与 15.5 原文件的逐项核对；对账；主界面与文件夹的几何（以 15.5 规格里 1470×956 屏的手算示例为准）；搜索规则；翻页、方向键与拖动命中规则；捏合映射与弹簧。
 - MacBook 上的非交互验证：部署后与 Dock 重启后各注入一次、hook 装上、21 个 Dock 方法签名全部吻合；导入 3 页、2 个文件夹、149 个 App 与旧库一致；开发构建的离屏自检核对 Dock 的 `ECGridLayer` 建出的图标数量与位置、文件夹图标的方圆与 `ECImageGridLayer` 缩略图，以及 Dock 的玻璃建出的图层：一个由窗口服务器采样、带 `glassBackground` 滤镜、组名 `launchpad-background` 的 `CABackdropLayer`，加 `CASDFLayer` 与 `CAPortalLayer`，向屏幕四边外扩 64 点，Dock 未崩溃。
-- 需要用户亲自看、亲手操作的部分（打开后的观感、翻页、搜索、文件夹、拖动、进出场与 15 的逐帧比较、捏合）不在 agent 的验证范围内。
+- 经用户同意的交互验证（2026-11-06，MacBook 上）：经 ssh 截图、录屏，用一个发 `CGEvent` 的小工具模拟点击与拖动，核对了玻璃背景、文件夹打开动画、快速松手建文件夹并自动弹开、从文件夹拖出后解散；录屏逐帧看过，测试用的文件夹已拆掉。
+- 仍需用户亲自判断的部分：观感与手感、与 15 的逐帧比较、停住 1 秒弹开新文件夹、捏合。
 
 ## 已知降级
 

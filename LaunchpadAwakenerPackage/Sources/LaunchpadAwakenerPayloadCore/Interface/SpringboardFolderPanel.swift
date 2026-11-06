@@ -213,7 +213,7 @@ final class SpringboardFolderPanel {
                 rectInFolder(thumbnailLayer.convert(thumbnailLayer.bounds, to: folderItemLayer), of: folderItemLayer, springboardLayer: springboardLayer)
             }
         } ?? []
-        let visibleItemLayers = pages.currentPageGrid?.itemLayers ?? []
+        let visibleItemLayers = Self.itemLayersInPanel(pages.currentPageGrid?.itemLayers ?? [], folderLayer: folderLayer)
 
         if SpringboardPreferences.reducesMotion {
             // The panel goes at once; only the pages fade back.
@@ -255,6 +255,21 @@ final class SpringboardFolderPanel {
             }
         }
         CATransaction.commit()
+    }
+
+    /// The icons of a page that are still in the panel. The grid keeps listing an icon a drag took out of
+    /// the folder; closing must not fly that one into the thumbnails or fade it, or it vanishes in hand.
+    static func itemLayersInPanel<ItemLayer: CALayer>(_ itemLayers: [ItemLayer], folderLayer: CALayer) -> [ItemLayer] {
+        itemLayers.filter { itemLayer in
+            var ancestorLayer = itemLayer.superlayer
+            while let currentLayer = ancestorLayer {
+                if currentLayer === folderLayer {
+                    return true
+                }
+                ancestorLayer = currentLayer.superlayer
+            }
+            return false
+        }
     }
 
     /// `rect`, in `itemLayer`, as it will be in the folder layer once the springboard is back at full

@@ -95,7 +95,9 @@ final class SpringboardInterface {
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        containerLayer.frame = rootLayer.bounds
+        // The screen, not the root layer's bounds: the Dock's window has not sized its root layer yet, and
+        // anything sized from it — the background — comes out empty.
+        containerLayer.frame = CGRect(origin: .zero, size: metrics.input.screenSize)
         // Keep y up inside, whatever the window's root layer does.
         containerLayer.isGeometryFlipped = rootLayer.contentsAreFlipped()
         // Fading as a group would draw everything off screen, where the glass has nothing behind it; the
@@ -444,7 +446,7 @@ final class SpringboardInterface {
             }
         }
         for (index, itemLayer) in placeholder.arrangedLayers.compactMap({ $0 }).enumerated() {
-            itemLayer.frame = pageGrid.cellFrame(at: index)
+            itemLayer.setUntransformedFrame(pageGrid.cellFrame(at: index))
             itemLayer.opacity = index < pageGrid.capacity ? 1 : 0
         }
         CATransaction.commit()

@@ -97,6 +97,9 @@ final class SpringboardController {
         restartIdleTimer()
         let backgroundDescription = newInterface.background?.isGlass == true ? "the Dock's glass, variant \(SpringboardPreferences.glassVariant)" : "the stand-in blur"
         #log(.info, "Shown (\(reason, privacy: .public)) over \(backgroundDescription, privacy: .public): \(newInterface.geometryDescription, privacy: .public)")
+        #if DEBUG
+        SpringboardSelfCheck.logShownBackground(of: newInterface, rootLayer: newWindow.rootLayer)
+        #endif
     }
 
     /// Hides the springboard. Input goes back at once, as in 15; the window leaves when the exit

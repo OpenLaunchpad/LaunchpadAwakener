@@ -64,6 +64,16 @@ enum SpringboardSelfCheck {
         return Int(modificationDate.timeIntervalSince1970)
     }
 
+    /// Logs the background of a springboard as it is shown, in full: what the glass looks like on screen
+    /// cannot be read back, but how its layers are set up can.
+    static func logShownBackground(of interface: SpringboardInterface, rootLayer: CALayer) {
+        guard let background = interface.background else { return }
+        #log(.info, "Shown background: root flipped \(rootLayer.isGeometryFlipped, privacy: .public) contents flipped \(rootLayer.contentsAreFlipped(), privacy: .public); container flipped \(interface.containerLayer.isGeometryFlipped, privacy: .public)")
+        for line in describeLines(background.layer, depth: 0, maximumDepth: 8) {
+            #log(.info, "Shown background: \(line, privacy: .public)")
+        }
+    }
+
     /// The layer tree below `layer`, three levels deep: class names and frames, and for backdrops whether
     /// the window server fills them, their group and their filters.
     private static func describe(_ layer: CALayer, depth: Int = 0) -> String {
@@ -76,6 +86,48 @@ enum SpringboardSelfCheck {
         }
         guard depth < 3, let sublayers = layer.sublayers, !sublayers.isEmpty else { return description }
         return description + " [" + sublayers.map { describe($0, depth: depth + 1) }.joined(separator: ", ") + "]"
+    }
+
+    /// One line per layer, indented by depth, with every property that decides what the glass draws.
+    private static func describeLines(_ layer: CALayer, depth: Int, maximumDepth: Int) -> [String] {
+        let className = String(cString: object_getClassName(layer))
+        var line = String(repeating: "  ", count: depth) + "\(className) frame \(NSStringFromRect(layer.frame)) bounds \(NSStringFromRect(layer.bounds))"
+        line += " opacity \(layer.opacity) hidden \(layer.isHidden) masks \(layer.masksToBounds) flipped \(layer.isGeometryFlipped) scale \(layer.contentsScale)"
+        if !CATransform3DIsIdentity(layer.transform) {
+            line += " transform \(layer.transform.m11)x\(layer.transform.m22)"
+        }
+        if let mask = layer.mask {
+            line += " mask \(String(cString: object_getClassName(mask))) \(NSStringFromRect(mask.frame))"
+        }
+        if let filters = layer.filters, !filters.isEmpty {
+            line += " filters \(filters.compactMap { ($0 as? NSObject)?.value(forKey: "name") as? String })"
+        }
+        if layer.compositingFilter != nil {
+            line += " compositing \(String(describing: layer.compositingFilter))"
+        }
+        let propertyNames: [String] = switch className {
+        case "CABackdropLayer":
+            ["enabled", "windowServerAware", "groupName", "scale", "backdropRect", "marginWidth", "sourceSublayerDefinesBounds", "ignoresScreenClip", "captureOnly", "preallocatesScreenArea", "bleedAmount", "zoom", "ignoresOffscreenGroups", "allowsInPlaceFiltering"]
+        case "CASDFLayer":
+            ["effect", "smoothness", "gaussianRadius", "effectOffset", "mergeElements", "experimentalCulling"]
+        case "CASDFElementLayer":
+            ["mode", "operation", "cornerRadius", "contentsZeroValueDistance", "contentsOneValueDistance", "gradientOvalization"]
+        case "CAPortalLayer":
+            ["sourceLayer", "sourceLayerRenderId", "hidesSourceLayer", "matchesPosition", "matchesTransform", "matchesOpacity", "allowsBackdropGroups", "crossDisplay"]
+        default:
+            []
+        }
+        for propertyName in propertyNames where layer.responds(to: NSSelectorFromString(propertyName)) || propertyName == "enabled" {
+            let value = layer.value(forKey: propertyName)
+            let valueDescription = (value as? CALayer).map { "\(String(cString: object_getClassName($0))) \(NSStringFromRect($0.frame))" } ?? String(describing: value ?? "nil")
+            line += " \(propertyName) \(valueDescription)"
+        }
+        var lines = [line]
+        guard depth < maximumDepth else { return lines }
+        for sublayer in layer.sublayers ?? [] {
+            lines += describeLines(sublayer, depth: depth + 1, maximumDepth: maximumDepth)
+        }
+        return lines
     }
 }
 #endif

@@ -551,3 +551,13 @@ enum SpringboardTextures {
         return image
     }
 }
+
+extension CALayer {
+    /// Puts the layer over `frame`, a rectangle in its superlayer, as if it had no transform. Unlike
+    /// setting `frame`, this means the same whatever the transform is: setting the frame of a layer scaled
+    /// to a tenth makes it ten times as large once the scale goes.
+    func setUntransformedFrame(_ frame: CGRect) {
+        bounds = CGRect(origin: bounds.origin, size: frame.size)
+        position = CGPoint(x: frame.minX + anchorPoint.x * frame.width, y: frame.minY + anchorPoint.y * frame.height)
+    }
+}
