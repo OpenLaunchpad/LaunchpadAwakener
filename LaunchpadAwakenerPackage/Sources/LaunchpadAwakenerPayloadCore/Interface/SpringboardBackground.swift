@@ -2,31 +2,66 @@ import CoreGraphics
 import Foundation
 import QuartzCore
 
-/// What lies behind the pages: glass over whatever is behind the window.
+/// What lies behind the pages.
 ///
-/// macOS 15 showed a blurred, darkened snapshot of the wallpaper here. On macOS 27 this is the Dock's
-/// own Liquid Glass (``DockGlassMaterial``) instead, always in its dark appearance and not adapting to
-/// what is behind it: the titles keep 15's white text and shadow, which a light glass would wash out.
-/// The glass reaches past every edge of the screen so that its rim stays off screen. Without the Dock's
-/// glass, a backdrop with 15's blur, saturation and darkening stands in.
+/// By default macOS 15's: the wallpaper as captured on opening, blurred, saturated and darkened by
+/// 15's three filters in a rasterized container (`-[Springboard init]`, 15.5 `0x100007C48`;
+/// `_applyDesktopFilters` `0x10002E120`), or 15's own radial gradient when there is no picture
+/// (`-[Springboard _newDesktopLayer]`, `0x100090670`). App windows stay hidden behind it, as in 15.
+///
+/// `springboard-background` set to `glass` puts the Dock's own Liquid Glass there instead
+/// (``DockGlassMaterial``), over whatever is behind the window: always in its dark appearance, so 15's
+/// white titles stay legible, and reaching past every edge so that its rim stays off screen. Without
+/// the Dock's glass, a window-server backdrop with 15's filters stands in.
 @MainActor
 final class SpringboardBackground {
+    enum Style: String {
+        case wallpaper
+        case glass
+    }
+
     /// How far the glass reaches past each edge of the screen, enough to keep its rim out of sight.
     static let glassOutset: CGFloat = 64
     /// Backdrops in one group share a capture and cannot see each other; the Dock's own groups are
     /// `dock-bar` and `bezelList`.
     static let backdropGroupName = "launchpad-background"
 
+    let style: Style
+    /// The wallpaper shown, for the wallpaper style; nil when 15's gradient stands in.
+    let wallpaperImage: CGImage?
     /// Fills the screen; the glass's own layers reach past it.
     let layer = CALayer()
-    private let glass: DockGlassMaterial?
+    private var glass: DockGlassMaterial?
 
-    init(frame: CGRect, scale: CGFloat) {
+    /// - Parameter wallpaperImage: The wallpaper as captured on opening, for the wallpaper style; nil
+    ///   leaves 15's gradient.
+    init(style: Style, frame: CGRect, scale: CGFloat, wallpaperImage: CGImage?) {
+        self.style = style
+        self.wallpaperImage = style == .wallpaper ? wallpaperImage : nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.frame = frame
-        // A group would be drawn off screen, where a window-server backdrop has nothing behind it.
-        layer.allowsGroupOpacity = false
+        switch style {
+        case .wallpaper:
+            // 15's `_desktopContainerLayer`: the filters are worked out once, when it is rasterized.
+            layer.shouldRasterize = true
+            layer.rasterizationScale = scale
+            layer.filters = QuartzCorePrivate.desktopBackgroundFilters()
+            layer.addSublayer(Self.makeDesktopLayer(image: wallpaperImage, frame: layer.bounds))
+        case .glass:
+            // A group would be drawn off screen, where a window-server backdrop has nothing behind it.
+            layer.allowsGroupOpacity = false
+            addGlass(scale: scale)
+        }
+        CATransaction.commit()
+    }
+
+    /// Whether the Dock's glass is shown.
+    var isGlass: Bool {
+        glass != nil
+    }
+
+    private func addGlass(scale: CGFloat) {
         let glass = DockGlassMaterial(variant: SpringboardPreferences.glassVariant, isAdaptive: false)
         let isGlassShown = glass?.update(
             frame: layer.bounds.insetBy(dx: -Self.glassOutset, dy: -Self.glassOutset),
@@ -38,18 +73,31 @@ final class SpringboardBackground {
         if let glass, isGlassShown {
             layer.addSublayer(glass.rootLayer)
             self.glass = glass
-        } else {
-            let backdropLayer = QuartzCorePrivate.makeBackdropLayer(isWindowServerAware: true)
-            backdropLayer.frame = layer.bounds
-            backdropLayer.backgroundFilters = QuartzCorePrivate.desktopBackgroundFilters()
-            layer.addSublayer(backdropLayer)
-            self.glass = nil
+            return
         }
-        CATransaction.commit()
+        let backdropLayer = QuartzCorePrivate.makeBackdropLayer(isWindowServerAware: true)
+        backdropLayer.frame = layer.bounds
+        backdropLayer.filters = QuartzCorePrivate.desktopBackgroundFilters()
+        layer.addSublayer(backdropLayer)
     }
 
-    /// Whether the Dock's glass is shown, rather than the stand-in blur.
-    var isGlass: Bool {
-        glass != nil
+    /// The wallpaper, stretched over the screen; 15's radial gradient when there is no picture.
+    private static func makeDesktopLayer(image: CGImage?, frame: CGRect) -> CALayer {
+        guard let image else {
+            let gradientLayer = CAGradientLayer()
+            gradientLayer.type = .radial
+            gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.6)
+            gradientLayer.endPoint = CGPoint(x: 1.2, y: 1.5)
+            gradientLayer.colors = [
+                CGColor(red: 0.251, green: 0.254, blue: 0.284, alpha: 1),
+                CGColor(red: 0.132, green: 0.132, blue: 0.147, alpha: 1),
+            ]
+            gradientLayer.frame = frame
+            return gradientLayer
+        }
+        let desktopLayer = CALayer()
+        desktopLayer.frame = frame
+        desktopLayer.contents = image
+        return desktopLayer
     }
 }

@@ -41,7 +41,7 @@ payload 注入 macOS 27.2 的 Dock，接管所有「打开 Apps」的入口，�
 
 **主页的空位跟着文件夹走。** 拖进文件夹（弹开的或快速松手后自动弹开的）时，被拖图标在主页上留下的空位不立刻合拢，而是保留到文件夹关上后 250 毫秒，这期间主页不按新布局重建（`mainPagePlaceholder`）。从文件夹里拖出时同样等面板关上 250 毫秒，主页才让位，只剩一个 App 的文件夹此时解散成那个 App。
 
-**打开的文件夹是另一个翻页器。** 15 的 `ECSBGroupLayer` 本身就是 `ECPagerLayer`，所以主界面与文件夹共用 `SpringboardPagedGrids`（滚动层、页码、跟手、回弹、滚轮停顿）。面板是 `CABackdropLayer` 加私有的 `CAFilter`；开合动画只让面板的形状与图标在动，承载内容的容器始终铺满，靠遮罩裁出面板。毛玻璃由窗口服务器采样（`windowServerAware`），放在遮罩外面：背景不再是窗口里画出来的图像，只采样本窗口什么也模糊不到；遮罩会把内容放到屏幕外绘制，那里也采样不到窗口身后。
+**打开的文件夹是另一个翻页器。** 15 的 `ECSBGroupLayer` 本身就是 `ECPagerLayer`，所以主界面与文件夹共用 `SpringboardPagedGrids`（滚动层、页码、跟手、回弹、滚轮停顿）。面板是 `CABackdropLayer` 加私有的 `CAFilter`；开合动画只让面板的形状与图标在动，承载内容的容器始终铺满，靠遮罩裁出面板。面板的毛玻璃不用实时的 `CABackdropLayer`：面板身后只有那张静态的壁纸背景，于是把同一张壁纸图先过背景的三个滤镜、再过面板的模糊与饱和度，铺在遮罩里、上面盖白色半透明，一次算好（`SpringboardFolderPanel.Frost.wallpaper`）。macOS 27 上实时 backdrop 遇到局部重绘会画错：按下文件夹里的图标时，那一格和屏幕另一块区域的毛玻璃会突然变暗。只有玻璃背景（由窗口服务器合成）才用窗口服务器采样的 backdrop，放在遮罩外面，因为遮罩会把内容放到屏幕外绘制，那里采样不到窗口身后。
 
 **界面按屏幕尺寸铺，不按窗口根图层。** `WALayerKitWindow` 的根图层在建界面时 bounds 还是 0×0。图标的位置都由屏幕尺寸算出，不受影响，但按根图层定大小的容器与背景就成了 0×0：最初的壁纸背景因此看起来是透明的，换成玻璃后也只在屏幕左下角露出一小块。
 
@@ -49,13 +49,15 @@ payload 注入 macOS 27.2 的 Dock，接管所有「打开 Apps」的入口，�
 
 **新建的图层先提交上屏，再做动画。** Core Animation 不给从未提交过的图层做隐式动画。打开文件夹时面板、图标都是新建的，所以先在关掉动画的事务里摆好起点、排好图标，`CATransaction.flush()` 提交，再开始动画；图标缩进缩略图、文件夹解散也是这样。漏掉这一步的症状就是「打开没有动画、关闭有」。
 
-**背景是 Dock 自己的液态玻璃。** 起初照 15 截取 WindowManager 的壁纸窗口再加 15 的三个滤镜，用户看过后改成玻璃。玻璃来自 Dock 画 Dock 栏与 Cmd-Tab 切换器的那套控制器：Swift 写的，但经四个 Objective-C 类就能驱动（`DockGlassMaterialLayerController`、`DockGlassMaterialLayoutConfiguration`、`DockSDFElement`、`DockGlassMaterialEnvironment`），每个方法调用前都校验签名，校验不过就退回一层带 15 三个滤镜、由窗口服务器采样的模糊。三个容易踩的地方：
+**背景默认是 15 的模糊壁纸，Dock 自己的液态玻璃是选项。** 每次打开都截一张 WindowManager 的壁纸窗口（27 的壁纸窗口归它，每个空间一扇叫 `Wallpaper` 的窗口），用 15 同样的 `SLSHWCaptureWindowList(…, 0x11944)`；截好的图放进栅格化的容器，套 15 的三个滤镜（模糊 30、饱和度 1.8、颜色矩阵压暗），只算一次，App 的窗口被它挡住，与 15 一样。截不到时是 15 自带的径向渐变。中途一度改成玻璃（用户想要更贴合新系统的效果），看过后又改回来，因为模糊效果不如原版；玻璃留作 `springboard-background` 设为 `glass` 时的选项。
+
+玻璃来自 Dock 画 Dock 栏与 Cmd-Tab 切换器的那套控制器：Swift 写的，但经四个 Objective-C 类就能驱动（`DockGlassMaterialLayerController`、`DockGlassMaterialLayoutConfiguration`、`DockSDFElement`、`DockGlassMaterialEnvironment`），每个方法调用前都校验签名，校验不过就退回一层带 15 三个滤镜、由窗口服务器采样的模糊。三个容易踩的地方：
 
 - 取环境的 `+currentDockMaterialEnvironmentWithColorScheme:` 在 `DockBar` 或 `DockGlobals` 还不存在时会让 Dock 直接崩溃，所以调用前两个全局变量都要读到；开发构建的离屏自检也因此等 Dock 起来 5 秒后才建玻璃，并且每个 payload 构建只试一次（在 `/tmp` 里留标记），万一崩了，Dock 重启后不会再试。
 - 玻璃固定深色、不随背后亮度变化：图标标题沿用 15 的白字加阴影，浅色玻璃上看不清。玻璃向屏幕四边外扩 64 点，让它的边缘高光落在屏幕外。
 - 玻璃由窗口服务器采样，所以界面整体淡入淡出时不能当作一组离屏绘制（`allowsGroupOpacity` 关掉，Cmd-Tab 也这样做），否则淡入期间玻璃后面什么也没有。代价是淡入时图标与玻璃各自半透明叠在一起。
 
-App 的窗口会被模糊进背景，这与 15（只有壁纸）不同，是选玻璃时就接受的。`springboard-glass-variant` 偏好可以换成 Dock 的另外两种玻璃（2 去掉前景效果，4 是 Cmd-Tab 的），下次打开生效。
+选玻璃时 App 的窗口会被模糊进背景，与 15（只有壁纸）不同。`springboard-glass-variant` 偏好可以换成 Dock 的另外两种玻璃（2 去掉前景效果，4 是 Cmd-Tab 的），下次打开生效。
 
 **捏合读原始 DockSwipe 事件，且默认不接管。** 27 的「拇指加三指捏合」由 Spotlight 进程识别，Dock 的手势系统里已经没有它，`sendLaunchAppsBrowsing` 也不在这条路上；但 WindowServer 仍把 DockSwipe 事件送到 Dock 的连接上。payload 在已有的事件 hook 里照 15 的状态机读这些事件，跟手设可见度，松手后跑 15 的 60 Hz 弹簧。Spotlight 也会响应同一组事件，所以只有 `com.apple.spotlight` 的 `trackpadAppBrowseEnabled` 为 NO 时才接管；不要用系统设置里的「更多手势」开关代替，它很可能让 HID 层不再产生捏合事件。
 
@@ -73,6 +75,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── DockHostInterface.swift         # 签名清单与校验；WALayerKitWindow、DockBar rect
 │   ├── DockBarReference.swift          # 经全局变量拿 DockBar 与 DockGlobals
 │   ├── DockGlassMaterial.swift         # Dock 自己的液态玻璃（Cmd-Tab 切换器那套控制器）
+│   ├── WallpaperSnapshot.swift         # 截 WindowManager 的壁纸窗口
 │   ├── DockEnvironment.swift           # Dock 的方向、厚度、刘海、图标样式
 │   ├── DockLayerFactory.swift          # ECGridLayer、ECTextLayer、ECShadowTextLayer、材质；CA 私有滤镜
 │   ├── IconServicesBridge.swift        # IconServices 取图
@@ -91,7 +94,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── SpringboardInterface+Dragging.swift # 拖动整理（ECSBDragCapture 与各 DragState）
 │   ├── SpringboardInterface+FolderMaking.swift # 拖到图标上建文件夹、放进文件夹、未存的文件夹与解散
 │   ├── SpringboardIconFlight.swift     # 图片缩进文件夹缩略图的动画
-│   ├── SpringboardBackground.swift     # 玻璃背景与退路
+│   ├── SpringboardBackground.swift     # 背景：15 的模糊壁纸，或 Dock 的液态玻璃
 │   ├── SpringboardPagedGrids.swift     # 主界面与文件夹共用的翻页器（ECPagerLayer）
 │   ├── SpringboardFolderPanel.swift    # 打开的文件夹（ECSBGroupLayer）与改名编辑框
 │   ├── SpringboardPageGrid.swift       # 每页一个 ECGridLayer 及其数据源
@@ -121,7 +124,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 文件夹改名同样不接输入法；Esc 取消改名、保留原名（15 的行为没能查清）。
 - 拖到 Dock 上、拖动搜索结果、文件夹里的方向键导航都不支持；拖动时文件夹不额外加一行。
 - 捏合没有接入 27 的 Dock 手势系统（那里已经没有它），而是读原始 DockSwipe 事件，并且要用户先关掉 Spotlight 的捏合。
-- 背景不是 15 的模糊壁纸，而是 Dock 自己的液态玻璃，App 的窗口也会被模糊进来；这是用户看过后改的，取不到玻璃时退回带 15 滤镜的窗口服务器模糊。
+- 背景默认照 15 截壁纸、加三个滤镜；另有 `springboard-background` 设为 `glass` 时的 Dock 液态玻璃，那时 App 的窗口会被模糊进来。
 
 ## 验证
 
@@ -134,7 +137,9 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 
 - 透明与着色图标样式下，Dock 在图标背后画的玻璃底没有复刻。
 - 搜索与改名打不出中文（没有输入法）。
-- 打开期间切换深浅色或辅助功能里的透明度、对比度，玻璃要到下次打开才跟上（界面每次打开都重建，没有注册 Dock 的外观观察者）。
+- 玻璃背景：打开期间切换深浅色或辅助功能里的透明度、对比度，要到下次打开才跟上（界面每次打开都重建，没有注册 Dock 的外观观察者）。
+- 背景是打开那一刻的静态截图，动态壁纸不会动（与 15 相同）；截不到时是 15 的径向渐变。
+- 文件夹打开的那 0.25 秒里，面板的毛玻璃不包含正在淡出的主网格图标（固定算好的毛玻璃只有壁纸）。
 - 快速放进文件夹后，文件夹图标的缩略图在库发布新布局、页面重建时就滚回顶部；15 要等下次打开再关上这个文件夹才滚回。
 - 捏合在用户关掉 Spotlight 的捏合之前不生效；Dock 能否收到捏合事件尚未在真机上确认。
 - 只在主显示器上显示。

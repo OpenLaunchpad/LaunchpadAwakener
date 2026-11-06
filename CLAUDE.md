@@ -19,7 +19,7 @@ ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakene
 
 出了问题，先经 ssh 退回系统的 Apps 并换掉注入过的 Dock：`touch /tmp/LaunchpadAwakener.disabled; killall Dock`。
 
-**用户要求看界面时**（截图、点击属于交互操作，用户没提就不做）：经 ssh 跑 `open -a Apps` 打开、`screencapture -x` 截图（能截到窗口内容）、`screencapture -v -V <秒>` 录屏后拷回本机用 ffmpeg 抽帧；点击与拖动用在 MacBook 上编译的一个发 `CGEvent` 的小工具，经 ssh 发的事件实测有效。开发构建 20 秒没有输入就自动收起，打开与操作要放在同一条命令里。拖动会改用户的布局，测完要还原。
+**用户要求看界面时**（截图、点击属于交互操作，用户没提就不做）：经 ssh 跑 `open -a Apps` 打开、`screencapture -x` 截图（能截到窗口内容）、`screencapture -v -V <秒>` 录屏后拷回本机用 ffmpeg 抽帧（录屏启动要零点几秒到一两秒，先开录、等一秒再操作）；点击与拖动用在 MacBook 上编译的一个发 `CGEvent` 的小工具，经 ssh 发的事件实测有效。开发构建 20 秒没有输入就自动收起，打开与操作要放在同一条命令里。拖动会改用户的布局，测完要还原。
 
 ## 结构
 

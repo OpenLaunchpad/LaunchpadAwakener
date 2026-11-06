@@ -61,8 +61,15 @@ enum SpringboardPreferences {
         return duration > 0 ? duration : nil
     }
 
-    /// `springboard-glass-variant`: which of the Dock's glasses the background uses — 0 the Dock's own,
-    /// 2 the same without foreground effects, 4 the Command-Tab switcher's. 0 unless set. Not one of
+    /// `springboard-background`: `glass` puts the Dock's own Liquid Glass behind the pages; anything else,
+    /// or nothing, macOS 15's blurred wallpaper. Not one of macOS 15's keys; read each time the springboard
+    /// opens.
+    static var backgroundStyle: SpringboardBackground.Style {
+        UserDefaults.standard.string(forKey: "springboard-background").flatMap(SpringboardBackground.Style.init(rawValue:)) ?? .wallpaper
+    }
+
+    /// `springboard-glass-variant`: which of the Dock's glasses the glass background uses — 0 the Dock's
+    /// own, 2 the same without foreground effects, 4 the Command-Tab switcher's. 0 unless set. Not one of
     /// macOS 15's keys; read each time the springboard opens.
     static var glassVariant: Int {
         UserDefaults.standard.integer(forKey: "springboard-glass-variant")

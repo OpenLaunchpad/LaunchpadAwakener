@@ -76,11 +76,16 @@ final class SpringboardController {
         }
         SpringboardIconProvider.shared.refreshIconStyle()
         let metrics = Self.metrics(forScreenSize: newWindow.displayBounds.size)
+        let backgroundStyle = SpringboardPreferences.backgroundStyle
+        // 15 captured the wallpaper afresh each time it opened.
+        let wallpaperImage = backgroundStyle == .wallpaper ? WallpaperSnapshot.captureWallpaperImage(onDisplay: displayIdentifier) : nil
         let newInterface = SpringboardInterface(
             layout: layout,
             metrics: metrics,
             scale: newWindow.backingScaleFactor,
             rootLayer: newWindow.rootLayer,
+            backgroundStyle: backgroundStyle,
+            wallpaperImage: wallpaperImage,
             applyEdit: { edit in
                 Task {
                     await LaunchpadServices.library.apply(edit)
@@ -95,7 +100,12 @@ final class SpringboardController {
             newInterface.animateEntrance(duration: SpringboardPreferences.showAnimationDuration)
         }
         restartIdleTimer()
-        let backgroundDescription = newInterface.background?.isGlass == true ? "the Dock's glass, variant \(SpringboardPreferences.glassVariant)" : "the stand-in blur"
+        let backgroundDescription = switch backgroundStyle {
+        case .wallpaper:
+            wallpaperImage.map { "the wallpaper, \($0.width)×\($0.height) pixels" } ?? "15's gradient"
+        case .glass:
+            newInterface.background?.isGlass == true ? "the Dock's glass, variant \(SpringboardPreferences.glassVariant)" : "the stand-in blur"
+        }
         #log(.info, "Shown (\(reason, privacy: .public)) over \(backgroundDescription, privacy: .public): \(newInterface.geometryDescription, privacy: .public)")
         #if DEBUG
         SpringboardSelfCheck.logShownBackground(of: newInterface, rootLayer: newWindow.rootLayer)
@@ -256,16 +266,17 @@ final class SpringboardController {
         } else {
             ApplicationLauncher.launchApplication(withBundleIdentifier: application.bundleIdentifier)
         }
-        if let window, let interface, iconImage != nil, !iconFrame.isEmpty {
-            // On the window's root layer, so the springboard fading out does not take it along.
+        if let window, let interface, iconImage != nil, !iconFrame.isEmpty, !SpringboardPreferences.reducesMotion {
+            // On the window's root layer, so the springboard fading out does not take it along. The model
+            // holds the starting state: a frame drawn before the animation applies must not show the copy
+            // already doubled — that flashed a faint square around the icon.
             let launchingIconLayer = CALayer()
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             launchingIconLayer.frame = interface.containerLayer.convert(iconFrame, to: window.rootLayer)
             launchingIconLayer.contents = iconImage
             launchingIconLayer.contentsGravity = .resizeAspect
-            launchingIconLayer.opacity = 0.1
-            launchingIconLayer.transform = CATransform3DMakeScale(2, 2, 1)
+            launchingIconLayer.opacity = 0.9
             window.rootLayer.addSublayer(launchingIconLayer)
             CATransaction.commit()
 
@@ -279,7 +290,16 @@ final class SpringboardController {
             launchAnimation.animations = [scaleAnimation, opacityAnimation]
             launchAnimation.duration = Self.launchAnimationDuration
             launchAnimation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            launchAnimation.fillMode = .forwards
+            launchAnimation.isRemovedOnCompletion = false
+            CATransaction.begin()
+            CATransaction.setCompletionBlock {
+                MainActor.assumeIsolated {
+                    launchingIconLayer.removeFromSuperlayer()
+                }
+            }
             launchingIconLayer.add(launchAnimation, forKey: "launch")
+            CATransaction.commit()
         }
         hide(reason: "launching \(application.title)")
     }

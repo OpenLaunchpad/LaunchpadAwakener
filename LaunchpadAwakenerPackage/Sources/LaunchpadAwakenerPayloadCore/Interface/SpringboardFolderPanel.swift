@@ -12,9 +12,12 @@ import QuartzCore
 /// the thumbnails to their cells; closing reverses it (`animatedShow` `0x10004E0E4`, `animatedHide`
 /// `0x10004E63C`, both default 0.25 s animations).
 ///
-/// 15's backdrop frosted the wallpaper picture drawn in the same window. The background is now glass
-/// that the window server fills, so the backdrop is the window server's too, and sits outside the mask:
-/// a mask draws what it clips off screen, where a window-server backdrop has nothing behind it.
+/// 15's frosting was a live backdrop over its blurred wallpaper. Here the wallpaper behind the panel is a
+/// fixed picture, so the frosting is that picture once more through the panel's filters, under the
+/// white tint (``Frost/wallpaper(_:screenSize:)``): on macOS 27 a live backdrop redrew wrongly wherever
+/// part of the screen changed — the cell of a pressed icon went dark. Over the glass background, which
+/// the window server composites, the backdrop is the window server's, outside the mask: a mask draws
+/// what it clips off screen, where a window-server backdrop has nothing behind it.
 @MainActor
 final class SpringboardFolderPanel {
     static let animationDuration: CFTimeInterval = 0.25
@@ -26,14 +29,36 @@ final class SpringboardFolderPanel {
     let folderLayer = CALayer()
     private let maskContainerLayer = CALayer()
     private let maskLayer = CALayer()
-    private let backdropLayer = QuartzCorePrivate.makeBackdropLayer(isWindowServerAware: true)
+    /// The panel's shape as it grows and shrinks: the tinted frosting, or the tint over a fixed frosting.
+    private let backdropLayer: CALayer
     let titleLayer = SpringboardLabelLayer(font: SpringboardTypography.folderTitleFont)
     let titleEditorLayer = SpringboardTitleEditorLayer()
     private let scale: CGFloat
 
-    init(folder: LaunchpadFolder, metrics: SpringboardMetrics, scale: CGFloat, itemLayerWasFilled: @escaping (SpringboardItemLayer) -> Void) {
+    /// Where the panel's frosting comes from.
+    enum Frost {
+        /// The wallpaper picture behind the springboard, filtered again: fixed, worked out once.
+        case wallpaper(CGImage, screenSize: CGSize)
+        /// A backdrop the window server fills, for the glass background.
+        case windowServerBackdrop
+        /// A backdrop filled from the window's own layers, over 15's gradient.
+        case windowBackdrop
+    }
+
+    init(
+        folder: LaunchpadFolder,
+        metrics: SpringboardMetrics,
+        scale: CGFloat,
+        frost: Frost,
+        itemLayerWasFilled: @escaping (SpringboardItemLayer) -> Void
+    ) {
         self.folder = folder
         self.scale = scale
+        backdropLayer = switch frost {
+        case .wallpaper: CALayer()
+        case .windowServerBackdrop: QuartzCorePrivate.makeBackdropLayer(isWindowServerAware: true)
+        case .windowBackdrop: QuartzCorePrivate.makeBackdropLayer(isWindowServerAware: false)
+        }
         let folderMetrics = SpringboardFolderMetrics(metrics: metrics, applicationCount: folder.applications.count, isDragging: false)
         self.folderMetrics = folderMetrics
         pages = SpringboardPagedGrids(
@@ -55,17 +80,34 @@ final class SpringboardFolderPanel {
         backdropLayer.backgroundColor = SpringboardItemLayer.folderBackdropColor
         backdropLayer.cornerCurve = .continuous
         backdropLayer.masksToBounds = true
-        // The Dock's own glass puts its blur in a backdrop's `filters`, as this does.
-        backdropLayer.filters = QuartzCorePrivate.folderBackdropFilters()
         for panelLayer in [backdropLayer, maskLayer] {
             panelLayer.frame = folderMetrics.panelFrame
             panelLayer.cornerRadius = SpringboardFolderMetrics.panelCornerRadius
         }
         pages.scrollLayer.frame = folderMetrics.scrollFrame
         pages.pagerControlLayer.frame = folderMetrics.pagerControlFrame
+        switch frost {
+        case let .wallpaper(wallpaperImage, screenSize):
+            // The wallpaper where the springboard's background shows it, through the background's filters
+            // and then the panel's; the mask cuts out the panel.
+            let frostLayer = CALayer()
+            frostLayer.frame = CGRect(origin: CGPoint(x: -folderMetrics.folderFrame.minX, y: -folderMetrics.folderFrame.minY), size: screenSize)
+            frostLayer.contents = wallpaperImage
+            frostLayer.filters = (QuartzCorePrivate.desktopBackgroundFilters() ?? []) + (QuartzCorePrivate.folderBackdropFilters() ?? [])
+            frostLayer.shouldRasterize = true
+            frostLayer.rasterizationScale = scale
+            maskContainerLayer.addSublayer(frostLayer)
+            maskContainerLayer.addSublayer(backdropLayer)
+        case .windowServerBackdrop:
+            // The Dock's own glass puts its blur in a backdrop's `filters`, as this does.
+            backdropLayer.filters = QuartzCorePrivate.folderBackdropFilters()
+            folderLayer.addSublayer(backdropLayer)
+        case .windowBackdrop:
+            backdropLayer.filters = QuartzCorePrivate.folderBackdropFilters()
+            maskContainerLayer.addSublayer(backdropLayer)
+        }
         maskContainerLayer.addSublayer(pages.scrollLayer)
         maskContainerLayer.addSublayer(pages.pagerControlLayer)
-        folderLayer.addSublayer(backdropLayer)
         folderLayer.addSublayer(maskContainerLayer)
 
         titleLayer.setString(folder.title, contentsScale: scale)

@@ -22,12 +22,22 @@ enum SpringboardSelfCheck {
         hasRun = true
         let detachedRootLayer = CALayer()
         detachedRootLayer.frame = CGRect(origin: .zero, size: metrics.input.screenSize)
-        let interface = SpringboardInterface(layout: layout, metrics: metrics, scale: scale, rootLayer: detachedRootLayer, showsBackground: false, applyEdit: { _ in })
+        let interface = SpringboardInterface(layout: layout, metrics: metrics, scale: scale, rootLayer: detachedRootLayer, backgroundStyle: nil, applyEdit: { _ in })
         defer { interface.tearDown() }
 
         #log(.info, "Self-check: \(interface.geometryDescription, privacy: .public)")
         let summary = interface.firstPageSummary
         #log(.info, "Self-check: \(summary, privacy: .public)")
+
+        // Only the size is logged; the image stays in the Dock.
+        let captureStartDate = Date()
+        let wallpaperImage = WallpaperSnapshot.captureWallpaperImage(onDisplay: CGMainDisplayID())
+        let captureMilliseconds = Int(Date().timeIntervalSince(captureStartDate) * 1000)
+        if let wallpaperImage {
+            #log(.info, "Self-check: wallpaper captured, \(wallpaperImage.width, privacy: .public)×\(wallpaperImage.height, privacy: .public) pixels in \(captureMilliseconds, privacy: .public) ms; background filters \(QuartzCorePrivate.desktopBackgroundFilters()?.count ?? 0, privacy: .public)")
+        } else {
+            #log(.error, "Self-check: no wallpaper captured after \(captureMilliseconds, privacy: .public) ms; the background falls back to 15's gradient")
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + glassCheckDelay) {
             MainActor.assumeIsolated {
@@ -47,7 +57,7 @@ enum SpringboardSelfCheck {
             #log(.error, "Self-check: the Dock's glass is unavailable; the background is the stand-in blur")
             return
         }
-        let background = SpringboardBackground(frame: frame, scale: scale)
+        let background = SpringboardBackground(style: .glass, frame: frame, scale: scale, wallpaperImage: nil)
         guard background.isGlass else {
             #log(.error, "Self-check: the Dock's glass could not be laid out; the background is the stand-in blur")
             return

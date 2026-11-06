@@ -72,14 +72,18 @@ final class SpringboardInterface {
     /// Set while an icon is being dragged; see `SpringboardInterface+Dragging.swift`.
     var dragSession: SpringboardDragSession?
 
-    /// - Parameter showsBackground: Whether to put the glass behind the pages. The Dock's glass may only be
-    ///   asked for once the Dock is up, so the off-screen self-check goes without.
+    /// - Parameters:
+    ///   - backgroundStyle: What goes behind the pages; nil for nothing. The Dock's glass may only be asked
+    ///     for once the Dock is up, so the off-screen self-check goes without.
+    ///   - wallpaperImage: The wallpaper as captured on opening, for the wallpaper style; nil falls back to
+    ///     15's own gradient.
     init(
         layout: LaunchpadLayout,
         metrics: SpringboardMetrics,
         scale: CGFloat,
         rootLayer: CALayer,
-        showsBackground: Bool = true,
+        backgroundStyle: SpringboardBackground.Style? = .wallpaper,
+        wallpaperImage: CGImage? = nil,
         applyEdit: @escaping (LaunchpadEdit) -> Void
     ) {
         self.layout = layout
@@ -100,13 +104,15 @@ final class SpringboardInterface {
         containerLayer.frame = CGRect(origin: .zero, size: metrics.input.screenSize)
         // Keep y up inside, whatever the window's root layer does.
         containerLayer.isGeometryFlipped = rootLayer.contentsAreFlipped()
-        // Fading as a group would draw everything off screen, where the glass has nothing behind it; the
-        // Command-Tab switcher turns both off for its glass too.
-        containerLayer.allowsGroupOpacity = false
-        containerLayer.setValue(false, forKey: "allowsGroupBlending")
+        if backgroundStyle == .glass {
+            // Fading as a group would draw everything off screen, where the glass has nothing behind it;
+            // the Command-Tab switcher turns both off for its glass too.
+            containerLayer.allowsGroupOpacity = false
+            containerLayer.setValue(false, forKey: "allowsGroupBlending")
+        }
 
-        if showsBackground {
-            let background = SpringboardBackground(frame: containerLayer.bounds, scale: scale)
+        if let backgroundStyle {
+            let background = SpringboardBackground(style: backgroundStyle, frame: containerLayer.bounds, scale: scale, wallpaperImage: wallpaperImage)
             containerLayer.addSublayer(background.layer)
             self.background = background
         }
@@ -360,10 +366,27 @@ final class SpringboardInterface {
 
     // MARK: - Folders
 
+    /// What an open folder's panel frosts, for the background behind it.
+    private var folderFrost: SpringboardFolderPanel.Frost {
+        switch background?.style {
+        case .glass:
+            .windowServerBackdrop
+        case .wallpaper:
+            background?.wallpaperImage.map { .wallpaper($0, screenSize: metrics.input.screenSize) } ?? .windowBackdrop
+        case nil:
+            .windowBackdrop
+        }
+    }
+
     func openFolder(_ folder: LaunchpadFolder, from folderItemLayer: SpringboardItemLayer, completion: (@MainActor () -> Void)? = nil) {
         guard folderPanel == nil, !isAnimatingFolder else { return }
         select(itemAt: nil)
-        let newFolderPanel = SpringboardFolderPanel(folder: folder, metrics: metrics, scale: scale) { [weak self] itemLayer in
+        let newFolderPanel = SpringboardFolderPanel(
+            folder: folder,
+            metrics: metrics,
+            scale: scale,
+            frost: folderFrost
+        ) { [weak self] itemLayer in
             self?.putIcons(in: itemLayer)
         }
         folderPanel = newFolderPanel
