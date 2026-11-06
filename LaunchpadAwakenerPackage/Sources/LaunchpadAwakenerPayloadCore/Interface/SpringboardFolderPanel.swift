@@ -8,9 +8,12 @@ import QuartzCore
 /// A frosted rounded panel — `CABackdropLayer`, white 97 % at half opacity, blur 30 and saturation 1.8,
 /// corner radius 36 — holding the folder's pages on the Dock's `ECGridLayer`, its own page dots, and
 /// the title above it in Light 28 (`-[ECSBGroupLayer initWithGroup:groupPager:layoutRTL:]`,
-/// 15.5 `0x10004BE70`). Opening grows the panel out of the folder icon's square while the icons fly from
-/// the thumbnails to their cells; closing reverses it (`animatedShow` `0x10004E0E4`, `animatedHide`
-/// `0x10004E63C`, both default 0.25 s animations).
+/// 15.5 `0x10004BE70`). Opening grows the panel out of the folder icon's square over the icons, which
+/// stay in their cells and fade in; closing shrinks it back while the icons fly into the thumbnails
+/// (`animatedShow` `0x10004E0E4`, `animatedHide` `0x10004E63C`, both default 0.25 s animations). 15 flew
+/// the icons out of the thumbnails when opening too — `_minimizeItemLayers` `0x10004D93C` put each
+/// picture on its thumbnail and the animated `-[ECSBGridLayer _layoutItemLayers]` `0x10001F338` laid it
+/// back in its cell — but here they stay put, a deliberate departure recorded in the proposal.
 ///
 /// 15's frosting was a live backdrop over its blurred wallpaper. Here the wallpaper behind the panel is a
 /// fixed picture, so the frosting is that picture once more through the panel's filters, under the
@@ -176,17 +179,14 @@ final class SpringboardFolderPanel {
 
     // MARK: - Opening and closing
 
-    /// Grows the panel out of `folderItemLayer`'s square and flies the first nine icons out of its
-    /// thumbnails. `containerLayer` is the folder layer's superlayer; `springboardLayer` fades to 0
-    /// and shrinks to 0.95 meanwhile, as 15's main grid did. With Reduce Motion the panel appears at
+    /// Grows the panel out of `folderItemLayer`'s square over the first page's icons, which stay in their
+    /// cells and fade in. `containerLayer` is the folder layer's superlayer; `springboardLayer` fades to
+    /// 0 and shrinks to 0.95 meanwhile, as 15's main grid did. With Reduce Motion the panel appears at
     /// once and the pages only fade, as in 15.
     func animateOpen(from folderItemLayer: SpringboardItemLayer, springboardLayer: CALayer, containerLayer: CALayer, completion: @escaping @MainActor () -> Void) {
         let isAnimated = !SpringboardPreferences.reducesMotion
         let backdropRect = rectInFolder(folderItemLayer.folderBackdropFrame, of: folderItemLayer, springboardLayer: springboardLayer)
         let folderCellRect = rectInFolder(folderItemLayer.bounds, of: folderItemLayer, springboardLayer: springboardLayer)
-        let thumbnailRects = folderItemLayer.thumbnailLayers.prefix(9).map { thumbnailLayer in
-            rectInFolder(thumbnailLayer.convert(thumbnailLayer.bounds, to: folderItemLayer), of: folderItemLayer, springboardLayer: springboardLayer)
-        }
         let firstPageItemLayers = pages.pageGrids.first?.itemLayers ?? []
         let titleFrame = titleLayer.frame
 
@@ -206,11 +206,12 @@ final class SpringboardFolderPanel {
                 height: titleFrame.height
             )
             titleLayer.opacity = 0
+            // Unfaded, whichever icon lies under the folder's square would show a piece of itself there
+            // in the first frame instead of the folder's frosting.
+            firstPageItemLayers.forEach { $0.opacity = 0 }
         }
         pages.pagerControlLayer.opacity = 0
         folderItemLayer.opacity = 0
-        // The grid has placed its items; lay them out now so their icon frames are known.
-        firstPageItemLayers.forEach { $0.layoutIfNeeded() }
         CATransaction.commit()
         // Core Animation does not animate a change to a layer it has never committed, and every layer
         // of the panel is new: put the starting state on screen first.
@@ -236,13 +237,7 @@ final class SpringboardFolderPanel {
             titleLayer.frame = titleFrame
             titleLayer.opacity = 1
             springboardLayer.transform = CATransform3DMakeScale(0.95, 0.95, 1)
-            for (itemIndex, itemLayer) in firstPageItemLayers.enumerated() {
-                if thumbnailRects.indices.contains(itemIndex) {
-                    flyIconLayer(itemLayer, betweenThumbnailRect: thumbnailRects[itemIndex], isOpening: true)
-                } else {
-                    addOpacityAnimation(to: itemLayer, from: 0, to: 1)
-                }
-            }
+            firstPageItemLayers.forEach { $0.opacity = 1 }
         }
         CATransaction.commit()
     }
@@ -291,7 +286,7 @@ final class SpringboardFolderPanel {
         springboardLayer.transform = CATransform3DIdentity
         for (itemIndex, itemLayer) in visibleItemLayers.enumerated() {
             if pages.currentPageIndex == 0, thumbnailRects.indices.contains(itemIndex) {
-                flyIconLayer(itemLayer, betweenThumbnailRect: thumbnailRects[itemIndex], isOpening: false)
+                flyIconLayer(itemLayer, intoThumbnailRect: thumbnailRects[itemIndex])
             } else {
                 addOpacityAnimation(to: itemLayer, from: 1, to: 0)
             }
@@ -325,8 +320,9 @@ final class SpringboardFolderPanel {
         return rectInSpringboard.offsetBy(dx: springboardOrigin.x - folderLayer.frame.minX, dy: springboardOrigin.y - folderLayer.frame.minY)
     }
 
-    /// Animates an item between showing its icon over `thumbnailRect` (in the folder layer) and its cell.
-    private func flyIconLayer(_ itemLayer: SpringboardItemLayer, betweenThumbnailRect thumbnailRect: CGRect, isOpening: Bool) {
+    /// Flies an item from its cell until its icon lies over `thumbnailRect` (in the folder layer), fading
+    /// its title; it stays there until the panel is gone.
+    private func flyIconLayer(_ itemLayer: SpringboardItemLayer, intoThumbnailRect thumbnailRect: CGRect) {
         guard let superlayer = itemLayer.superlayer, itemLayer.iconFrame.width > 0 else { return }
         let thumbnailInSuperlayer = folderLayer.convert(thumbnailRect, to: superlayer)
         let thumbnailScale = thumbnailInSuperlayer.width / itemLayer.iconFrame.width
@@ -338,20 +334,14 @@ final class SpringboardFolderPanel {
             y: thumbnailInSuperlayer.midY - thumbnailScale * iconOffset.y
         )
         let positionAnimation = CABasicAnimation(keyPath: "position")
+        positionAnimation.toValue = thumbnailPosition
         let scaleAnimation = CABasicAnimation(keyPath: "transform.scale")
+        scaleAnimation.toValue = thumbnailScale
         let labelOpacityAnimation = CABasicAnimation(keyPath: "opacity")
-        if isOpening {
-            positionAnimation.fromValue = thumbnailPosition
-            scaleAnimation.fromValue = thumbnailScale
-            labelOpacityAnimation.fromValue = 0
-        } else {
-            positionAnimation.toValue = thumbnailPosition
-            scaleAnimation.toValue = thumbnailScale
-            labelOpacityAnimation.toValue = 0
-            for animation in [positionAnimation, scaleAnimation, labelOpacityAnimation] {
-                animation.fillMode = .forwards
-                animation.isRemovedOnCompletion = false
-            }
+        labelOpacityAnimation.toValue = 0
+        for animation in [positionAnimation, scaleAnimation, labelOpacityAnimation] {
+            animation.fillMode = .forwards
+            animation.isRemovedOnCompletion = false
         }
         itemLayer.add(positionAnimation, forKey: "folderPosition")
         itemLayer.add(scaleAnimation, forKey: "folderScale")
