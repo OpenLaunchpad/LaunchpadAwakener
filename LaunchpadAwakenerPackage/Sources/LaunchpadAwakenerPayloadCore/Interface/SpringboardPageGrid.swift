@@ -72,6 +72,14 @@ final class SpringboardPageGrid {
             columnCount: metrics.input.columnCount,
             scaleFactor: Float(scale)
         ) else { return nil }
+        // `ECGridLayer` keeps its items in a layer inside a clipping one, its only sublayer once made; 15's
+        // `ECSBGridLayer` turned the clipping off (`initWithLayerSource:scaleFactor:layoutRTL:`, 15.5
+        // `0x10011DB70`), so a picture flying to or from a folder icon's thumbnail is never cut off at
+        // the page's edge.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        gridLayer.sublayers?.forEach { $0.masksToBounds = false }
+        CATransaction.commit()
         self.gridLayer = gridLayer
         self.source = source
         self.rowCount = rowCount

@@ -142,6 +142,12 @@ final class SpringboardItemLayer: CALayer {
 
     /// The icon, in this layer: only a press on it counts as a press on the item, as in 15.
     private(set) var iconFrame: CGRect = .zero
+    /// Where the title rests, in this layer.
+    private(set) var restingLabelFrame: CGRect = .zero
+    /// While set, layout works out ``iconFrame`` and ``restingLabelFrame`` but leaves the picture and the
+    /// title where an animation put them, as 15's `disableLayout` left them (`-[ECSBItemLayer layout]`,
+    /// 15.5 `0x100020A14`, returned at once).
+    var isPictureAndTitleLayoutSuspended = false
 
     /// The folder's frosted square, in this layer.
     var folderBackdropFrame: CGRect {
@@ -152,6 +158,14 @@ final class SpringboardItemLayer: CALayer {
 
     var folderCornerRadius: CGFloat {
         Self.cornerRadius(forIconSide: metrics?.iconSide ?? iconFrame.width)
+    }
+
+    /// A folder's 3 × 3 thumbnail grid, in this layer: the frosted square inset by a tenth of its width.
+    /// An application has the same place, where its thumbnails would be once it turns into a folder.
+    var thumbnailGridFrame: CGRect {
+        let backdropFrame = folderBackdropFrame
+        let gridInset = SpringboardFolderMetrics.thumbnailGridInset(forBackdropSide: backdropFrame.width)
+        return backdropFrame.insetBy(dx: gridInset, dy: gridInset)
     }
 
     /// The thumbnail layers of a folder, in reading order: top row first, left to right.
@@ -343,23 +357,24 @@ final class SpringboardItemLayer: CALayer {
             width: iconSide,
             height: iconSide
         )
-        imageLayer.frame = iconFrame
-
         let labelWidth = min(SpringboardLabelLayer.preferredSize(of: item.title).width, metrics.labelMaximumWidth)
-        labelLayer.frame = CGRect(
+        restingLabelFrame = CGRect(
             x: Self.centered(cellWidth / 2 - labelWidth / 2, isEven: Int(labelWidth).isMultiple(of: 2)),
             y: bottomPadding,
             width: labelWidth,
             height: metrics.labelHeight
         )
+        if !isPictureAndTitleLayoutSuspended {
+            imageLayer.frame = iconFrame
+            labelLayer.frame = restingLabelFrame
+        }
 
         if isFolder {
             let backdropFrame = folderBackdropFrame
             backdropLayer?.frame = backdropFrame
             backdropLayer?.cornerRadius = folderCornerRadius
             if let thumbnailGridLayer {
-                let gridInset = SpringboardFolderMetrics.thumbnailGridInset(forBackdropSide: backdropFrame.width)
-                thumbnailGridLayer.frame = backdropFrame.insetBy(dx: gridInset, dy: gridInset)
+                thumbnailGridLayer.frame = thumbnailGridFrame
                 DockLayerFactory.layoutImageGridLayer(thumbnailGridLayer)
             }
         } else if let backdropLayer {

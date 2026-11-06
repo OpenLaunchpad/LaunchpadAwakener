@@ -8,12 +8,9 @@ import QuartzCore
 /// A frosted rounded panel — `CABackdropLayer`, white 97 % at half opacity, blur 30 and saturation 1.8,
 /// corner radius 36 — holding the folder's pages on the Dock's `ECGridLayer`, its own page dots, and
 /// the title above it in Light 28 (`-[ECSBGroupLayer initWithGroup:groupPager:layoutRTL:]`,
-/// 15.5 `0x10004BE70`). Opening grows the panel out of the folder icon's square over the icons, which
-/// stay in their cells and fade in; closing shrinks it back while the icons fly into the thumbnails
-/// (`animatedShow` `0x10004E0E4`, `animatedHide` `0x10004E63C`, both default 0.25 s animations). 15 flew
-/// the icons out of the thumbnails when opening too — `_minimizeItemLayers` `0x10004D93C` put each
-/// picture on its thumbnail and the animated `-[ECSBGridLayer _layoutItemLayers]` `0x10001F338` laid it
-/// back in its cell — but here they stay put, a deliberate departure recorded in the proposal.
+/// 15.5 `0x10004BE70`). Opening grows the panel out of the folder icon's square while the pictures fly
+/// out of its thumbnails into their cells; closing reverses it (`animatedShow` `0x10004E0E4`,
+/// `animatedHide` `0x10004E63C`), each in one transaction of default 0.25 s implicit animations.
 ///
 /// 15's frosting was a live backdrop over its blurred wallpaper. Here the wallpaper behind the panel is a
 /// fixed picture, so the frosting is that picture once more through the panel's filters, under the
@@ -179,16 +176,25 @@ final class SpringboardFolderPanel {
 
     // MARK: - Opening and closing
 
-    /// Grows the panel out of `folderItemLayer`'s square over the first page's icons, which stay in their
-    /// cells and fade in. `containerLayer` is the folder layer's superlayer; `springboardLayer` fades to
-    /// 0 and shrinks to 0.95 meanwhile, as 15's main grid did. With Reduce Motion the panel appears at
-    /// once and the pages only fade, as in 15.
+    /// How many of the first page's icons a folder icon shows as thumbnails.
+    static let thumbnailCount = 9
+
+    /// Grows the panel out of `folderItemLayer`'s square while the first page's pictures fly out of its
+    /// thumbnails into their cells and their titles fade in under them, as 15's `prepareForAnimatedShow`
+    /// (15.5 `0x10004DECC`) and `animatedShow` (`0x10004E0E4`) did. Everything moves by implicit
+    /// animations in one transaction, so the pictures keep pace with the panel. `containerLayer` is the
+    /// folder layer's superlayer; `springboardLayer` fades to 0 and shrinks to 0.95 meanwhile, as 15's
+    /// main grid did. With Reduce Motion the panel appears at once and the pages only fade, as in 15.
     func animateOpen(from folderItemLayer: SpringboardItemLayer, springboardLayer: CALayer, containerLayer: CALayer, completion: @escaping @MainActor () -> Void) {
         let isAnimated = !SpringboardPreferences.reducesMotion
         let backdropRect = rectInFolder(folderItemLayer.folderBackdropFrame, of: folderItemLayer, springboardLayer: springboardLayer)
         let folderCellRect = rectInFolder(folderItemLayer.bounds, of: folderItemLayer, springboardLayer: springboardLayer)
+        let thumbnailGridRect = rectInFolder(folderItemLayer.thumbnailGridFrame, of: folderItemLayer, springboardLayer: springboardLayer)
         let firstPageItemLayers = pages.pageGrids.first?.itemLayers ?? []
         let titleFrame = titleLayer.frame
+        let scrollPosition = pages.scrollLayer.position
+        // The grid has placed its items; lay them out now, so that the titles have their sizes.
+        firstPageItemLayers.forEach { $0.layoutIfNeeded() }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -198,17 +204,12 @@ final class SpringboardFolderPanel {
                 panelLayer.frame = backdropRect
                 panelLayer.cornerRadius = folderItemLayer.folderCornerRadius
             }
-            // 15 starts the title over the folder icon, its bottom on the top of the icon's cell.
-            titleLayer.frame = CGRect(
-                x: folderCellRect.midX - titleFrame.width / 2,
-                y: folderCellRect.maxY,
-                width: titleFrame.width,
-                height: titleFrame.height
-            )
+            titleLayer.frame = Self.titleFrameOverFolder(cellRect: folderCellRect, titleSize: titleFrame.size)
             titleLayer.opacity = 0
-            // Unfaded, whichever icon lies under the folder's square would show a piece of itself there
-            // in the first frame instead of the folder's frosting.
-            firstPageItemLayers.forEach { $0.opacity = 0 }
+            // 15's pages hung from a container shrunk onto the folder's cell, by its bottom left corner,
+            // and came out with it.
+            pages.scrollLayer.position = CGPoint(x: scrollPosition.x + folderCellRect.minX, y: scrollPosition.y + folderCellRect.minY)
+            minimize(firstPageItemLayers, intoThumbnailGrid: thumbnailGridRect)
         }
         pages.pagerControlLayer.opacity = 0
         folderItemLayer.opacity = 0
@@ -225,6 +226,14 @@ final class SpringboardFolderPanel {
                 CATransaction.setAnimationDuration(0.1)
                 self.pages.pagerControlLayer.opacity = 1
                 CATransaction.commit()
+                // The pictures are full size and in place again; 15's `_removeItemLayerFilters`.
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                for itemLayer in firstPageItemLayers {
+                    itemLayer.imageLayer.minificationFilter = .linear
+                    itemLayer.isPictureAndTitleLayoutSuspended = false
+                }
+                CATransaction.commit()
                 completion()
             }
         }
@@ -237,22 +246,28 @@ final class SpringboardFolderPanel {
             titleLayer.frame = titleFrame
             titleLayer.opacity = 1
             springboardLayer.transform = CATransform3DMakeScale(0.95, 0.95, 1)
-            firstPageItemLayers.forEach { $0.opacity = 1 }
+            pages.scrollLayer.position = scrollPosition
+            for itemLayer in firstPageItemLayers {
+                itemLayer.opacity = 1
+                itemLayer.imageLayer.frame = itemLayer.iconFrame
+                itemLayer.labelLayer.frame = itemLayer.restingLabelFrame
+                itemLayer.labelLayer.opacity = 1
+            }
         }
         CATransaction.commit()
     }
 
-    /// The reverse of opening; `completion` runs once the panel is gone and the folder icon is back.
+    /// The reverse of opening, as 15's `animatedHide` (15.5 `GroupLayer_animatedHideBlock` `0x10004E63C`)
+    /// did: the pages slide with the container shrinking onto the folder's cell, the first page's pictures
+    /// fly into the thumbnails with their titles fading under them, and the title and the page dots fade
+    /// back over and under the icon. 15 did this to the first page even when another one showed; that one
+    /// only slides away under the shrinking panel. `completion` runs once the panel is gone and the folder
+    /// icon is back.
     func animateClose(to folderItemLayer: SpringboardItemLayer?, springboardLayer: CALayer, completion: @escaping @MainActor () -> Void) {
-        let backdropRect = folderItemLayer.map { rectInFolder($0.folderBackdropFrame, of: $0, springboardLayer: springboardLayer) }
-        let thumbnailRects = folderItemLayer.map { folderItemLayer in
-            folderItemLayer.thumbnailLayers.prefix(9).map { thumbnailLayer in
-                rectInFolder(thumbnailLayer.convert(thumbnailLayer.bounds, to: folderItemLayer), of: folderItemLayer, springboardLayer: springboardLayer)
-            }
-        } ?? []
-        let visibleItemLayers = Self.itemLayersInPanel(pages.currentPageGrid?.itemLayers ?? [], folderLayer: folderLayer)
+        let isAnimated = !SpringboardPreferences.reducesMotion
+        let firstPageItemLayers = Self.itemLayersInPanel(pages.pageGrids.first?.itemLayers ?? [], folderLayer: folderLayer)
 
-        if SpringboardPreferences.reducesMotion {
+        if !isAnimated {
             // The panel goes at once; only the pages fade back.
             CATransaction.begin()
             CATransaction.setDisableActions(true)
@@ -272,11 +287,26 @@ final class SpringboardFolderPanel {
                 completion()
             }
         }
-        if let backdropRect, let folderItemLayer {
+        if isAnimated, let folderItemLayer {
+            let backdropRect = rectInFolder(folderItemLayer.folderBackdropFrame, of: folderItemLayer, springboardLayer: springboardLayer)
+            let folderCellRect = rectInFolder(folderItemLayer.bounds, of: folderItemLayer, springboardLayer: springboardLayer)
+            let thumbnailGridRect = rectInFolder(folderItemLayer.thumbnailGridFrame, of: folderItemLayer, springboardLayer: springboardLayer)
             for panelLayer in [backdropLayer, maskLayer] {
                 panelLayer.frame = backdropRect
                 panelLayer.cornerRadius = folderItemLayer.folderCornerRadius
             }
+            let scrollPosition = pages.scrollLayer.position
+            pages.scrollLayer.position = CGPoint(x: scrollPosition.x + folderCellRect.minX, y: scrollPosition.y + folderCellRect.minY)
+            let pagerControlSize = pages.pagerControlLayer.bounds.size
+            pages.pagerControlLayer.frame = CGRect(
+                x: folderCellRect.midX - pagerControlSize.width / 2,
+                y: folderCellRect.minY,
+                width: pagerControlSize.width,
+                height: pagerControlSize.height
+            )
+            titleLayer.frame = Self.titleFrameOverFolder(cellRect: folderCellRect, titleSize: titleLayer.bounds.size)
+            // After the pages have moved, so that the pictures land on the thumbnails wherever the pages end up.
+            minimize(firstPageItemLayers, intoThumbnailGrid: thumbnailGridRect)
         } else {
             folderLayer.opacity = 0
         }
@@ -284,13 +314,6 @@ final class SpringboardFolderPanel {
         pages.pagerControlLayer.opacity = 0
         springboardLayer.opacity = 1
         springboardLayer.transform = CATransform3DIdentity
-        for (itemIndex, itemLayer) in visibleItemLayers.enumerated() {
-            if pages.currentPageIndex == 0, thumbnailRects.indices.contains(itemIndex) {
-                flyIconLayer(itemLayer, intoThumbnailRect: thumbnailRects[itemIndex])
-            } else {
-                addOpacityAnimation(to: itemLayer, from: 1, to: 0)
-            }
-        }
         CATransaction.commit()
     }
 
@@ -320,43 +343,92 @@ final class SpringboardFolderPanel {
         return rectInSpringboard.offsetBy(dx: springboardOrigin.x - folderLayer.frame.minX, dy: springboardOrigin.y - folderLayer.frame.minY)
     }
 
-    /// Flies an item from its cell until its icon lies over `thumbnailRect` (in the folder layer), fading
-    /// its title; it stays there until the panel is gone.
-    private func flyIconLayer(_ itemLayer: SpringboardItemLayer, intoThumbnailRect thumbnailRect: CGRect) {
-        guard let superlayer = itemLayer.superlayer, itemLayer.iconFrame.width > 0 else { return }
-        let thumbnailInSuperlayer = folderLayer.convert(thumbnailRect, to: superlayer)
-        let thumbnailScale = thumbnailInSuperlayer.width / itemLayer.iconFrame.width
-        // Scaling happens around the anchor, the cell's centre; place the cell so the icon's centre
-        // lands on the thumbnail's centre.
-        let iconOffset = CGPoint(x: itemLayer.iconFrame.midX - itemLayer.bounds.midX, y: itemLayer.iconFrame.midY - itemLayer.bounds.midY)
-        let thumbnailPosition = CGPoint(
-            x: thumbnailInSuperlayer.midX - thumbnailScale * iconOffset.x,
-            y: thumbnailInSuperlayer.midY - thumbnailScale * iconOffset.y
-        )
-        let positionAnimation = CABasicAnimation(keyPath: "position")
-        positionAnimation.toValue = thumbnailPosition
-        let scaleAnimation = CABasicAnimation(keyPath: "transform.scale")
-        scaleAnimation.toValue = thumbnailScale
-        let labelOpacityAnimation = CABasicAnimation(keyPath: "opacity")
-        labelOpacityAnimation.toValue = 0
-        for animation in [positionAnimation, scaleAnimation, labelOpacityAnimation] {
-            animation.fillMode = .forwards
-            animation.isRemovedOnCompletion = false
+    /// 15's `_minimizeItemLayers` (15.5 `0x10004D93C`): each picture of the first page over its thumbnail
+    /// in the folder icon's grid, `thumbnailGridRect` in the folder layer, and each title just under its
+    /// picture, faded; the icons after the ninth fade as a whole. Only the pictures and titles move, inside
+    /// cells that stay put, and shrunk pictures are filtered with Lanczos. Layout leaves them there until
+    /// the panel is open again.
+    private func minimize(_ itemLayers: [SpringboardItemLayer], intoThumbnailGrid thumbnailGridRect: CGRect) {
+        let iconFrames = Self.minimizedIconFrames(count: itemLayers.count, thumbnailGridFrame: thumbnailGridRect, columnCount: folderMetrics.columnCount)
+        let lanczosFilter = QuartzCorePrivate.stringConstant(named: "kCAFilterLanczos").map(CALayerContentsFilter.init(rawValue:)) ?? .trilinear
+        for (itemIndex, itemLayer) in itemLayers.enumerated() {
+            itemLayer.isPictureAndTitleLayoutSuspended = true
+            let iconFrame = iconFrames[itemIndex]
+            let labelFrame = Self.minimizedLabelFrame(under: iconFrame, labelSize: itemLayer.restingLabelFrame.size)
+            itemLayer.imageLayer.frame = folderLayer.convert(iconFrame, to: itemLayer)
+            itemLayer.labelLayer.frame = folderLayer.convert(labelFrame, to: itemLayer)
+            itemLayer.labelLayer.opacity = 0
+            if itemIndex < Self.thumbnailCount {
+                itemLayer.imageLayer.minificationFilter = lanczosFilter
+            } else {
+                itemLayer.opacity = 0
+                itemLayer.imageLayer.minificationFilter = .linear
+            }
         }
-        itemLayer.add(positionAnimation, forKey: "folderPosition")
-        itemLayer.add(scaleAnimation, forKey: "folderScale")
-        itemLayer.labelLayer.add(labelOpacityAnimation, forKey: "folderLabelOpacity")
     }
 
-    private func addOpacityAnimation(to layer: CALayer, from fromOpacity: Float, to toOpacity: Float) {
-        let opacityAnimation = CABasicAnimation(keyPath: "opacity")
-        opacityAnimation.fromValue = fromOpacity
-        opacityAnimation.toValue = toOpacity
-        if toOpacity < fromOpacity {
-            opacityAnimation.fillMode = .forwards
-            opacityAnimation.isRemovedOnCompletion = false
+    /// Where 15 put the pictures of a folder's first page while the panel was shut
+    /// (`-[ECSBGroupLayer _minimizeItemLayers]`, 15.5 `0x10004D93C`), in the coordinates of
+    /// `thumbnailGridFrame`, y up. The first nine lie on the folder icon's 3 × 3 thumbnails: cells a third
+    /// of the grid wide and high, truncated, inset by 2 points. The rest carry on the way 15's loop did —
+    /// the tenth under the grid's first column, then from the fourth column of the second row on,
+    /// `columnCount` to a row — and are never seen there, since they fade.
+    static func minimizedIconFrames(count: Int, thumbnailGridFrame: CGRect, columnCount: Int) -> [CGRect] {
+        let cellWidth = floor(thumbnailGridFrame.width / 3)
+        let cellHeight = floor(thumbnailGridFrame.height / 3)
+        var iconFrames: [CGRect] = []
+        iconFrames.reserveCapacity(count)
+        // 15 counted the cells of a row apart from the column it placed at, which drift apart after the ninth.
+        var cellCountInRow = 0
+        var column = 0
+        var row = 0
+        var isPastThumbnails = false
+        for itemIndex in 0..<count {
+            iconFrames.append(CGRect(
+                x: thumbnailGridFrame.minX + 2 + CGFloat(column) * cellWidth,
+                y: thumbnailGridFrame.maxY + 2 - CGFloat(row + 1) * cellHeight,
+                width: cellWidth - 4,
+                height: cellHeight - 4
+            ))
+            let rowLength: Int
+            if itemIndex < thumbnailCount {
+                rowLength = 3
+            } else if !isPastThumbnails {
+                isPastThumbnails = true
+                cellCountInRow = 2
+                column = 3
+                row = 1
+                continue
+            } else {
+                rowLength = columnCount
+            }
+            cellCountInRow += 1
+            if cellCountInRow == rowLength {
+                cellCountInRow = 0
+                column = 0
+                row += 1
+            } else {
+                column += 1
+            }
         }
-        layer.add(opacityAnimation, forKey: "folderOpacity")
+        return iconFrames
+    }
+
+    /// A title's place under its minimized picture: centred on it, truncated to a whole point, its top on
+    /// the picture's bottom (`_minimizeItemLayers`).
+    static func minimizedLabelFrame(under iconFrame: CGRect, labelSize: CGSize) -> CGRect {
+        CGRect(
+            x: (iconFrame.minX + iconFrame.width / 2 - labelSize.width / 2).rounded(.towardZero),
+            y: iconFrame.minY - labelSize.height,
+            width: labelSize.width,
+            height: labelSize.height
+        )
+    }
+
+    /// Where 15 put the title while the panel was shut: centred over the folder's cell, its bottom on the
+    /// top of the cell (`_minimizePagerElements`, 15.5 `0x10004D6BC`).
+    static func titleFrameOverFolder(cellRect: CGRect, titleSize: CGSize) -> CGRect {
+        CGRect(x: cellRect.midX - titleSize.width / 2, y: cellRect.maxY, width: titleSize.width, height: titleSize.height)
     }
 }
 
