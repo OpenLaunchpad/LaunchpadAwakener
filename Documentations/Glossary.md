@@ -47,3 +47,9 @@
 本项目沿用 macOS 15 的叫法：Launchpad 的主界面及其主控。代码里的 `Springboard*` 类型分别对应 15.5 的 `Springboard`、`ECSBSpringboard`、`ECSBLayer`、`ECSBGroupLayer` 等；与 iOS 的 SpringBoard 无关。
 
 - **主要出现在**：`LaunchpadAwakenerPayloadCore/Interface/`
+
+### Unsaved folder（未存的文件夹）
+
+拖动时界面上已经出现、库里还没有的文件夹：停在 App 上 1 秒弹开的那个，或快速松手后库写好之前的那个。它的标识符是负数（`LaunchpadItemIdentifier.unsavedFolder`），库发布的新布局到达时按第一个 App 换成真正的文件夹；停住弹开的那个要在面板里松手才写库，拖出面板就解散，库里什么也不留。
+
+- **主要出现在**：`LaunchpadAwakenerPayloadCore/Interface/SpringboardInterface+FolderMaking.swift`、[实现说明](Internal/LaunchpadReplica.md)「建文件夹先在界面上做出来」

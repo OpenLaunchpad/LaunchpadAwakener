@@ -61,6 +61,13 @@ enum SpringboardPreferences {
         return duration > 0 ? duration : nil
     }
 
+    /// `springboard-glass-variant`: which of the Dock's glasses the background uses — 0 the Dock's own,
+    /// 2 the same without foreground effects, 4 the Command-Tab switcher's. 0 unless set. Not one of
+    /// macOS 15's keys; read each time the springboard opens.
+    static var glassVariant: Int {
+        UserDefaults.standard.integer(forKey: "springboard-glass-variant")
+    }
+
     /// `springboard-edit-group-title`: whether clicking an open folder's title renames it. On unless set.
     static var allowsRenamingFolders: Bool {
         UserDefaults.standard.object(forKey: "springboard-edit-group-title") as? Bool ?? true

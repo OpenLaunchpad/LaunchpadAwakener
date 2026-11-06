@@ -60,15 +60,19 @@ extension LaunchpadStore {
         }
     }
 
-    /// Makes a folder of `targetItem` and `draggedItem`, in that order, where `targetItem` was.
+    /// Makes a folder of `targetItem` and `draggedItem` where `targetItem` was. The dragged item comes
+    /// second, as a quick drop puts it; `draggedItemIndex` 0 puts it first, for one placed before the
+    /// target inside a folder that opened while it was held over the target.
     @discardableResult
     package func makeFolder(
         merging draggedItem: LaunchpadItemIdentifier,
         with targetItem: LaunchpadItemIdentifier,
         title: String,
+        draggedItemIndex: Int = 1,
         itemsPerPage: Int
     ) throws -> LaunchpadItemIdentifier {
         try performTransaction {
+            let sourceFolder = try containingFolder(of: draggedItem)
             try detach(draggedItem)
             let targetPage = try parent(of: targetItem)
             let folder = try appendFolder(titled: title, to: targetPage)
@@ -77,9 +81,12 @@ extension LaunchpadStore {
                 throw LaunchpadStoreError.itemNotFound(targetItem)
             }
             pageChildren[targetIndex] = folder.folder
-            try setChildren([targetItem, draggedItem], of: folder.firstPage)
+            try setChildren(draggedItemIndex <= 0 ? [draggedItem, targetItem] : [targetItem, draggedItem], of: folder.firstPage)
             try setChildren(pageChildren, of: targetPage)
             try tidyUp(itemsPerPage: itemsPerPage)
+            if let sourceFolder {
+                try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
+            }
             return folder.folder
         }
     }
@@ -90,6 +97,7 @@ extension LaunchpadStore {
             guard try type(of: folderIdentifier) == .folder else {
                 throw LaunchpadStoreError.unexpectedItemType(folderIdentifier, expected: "folder")
             }
+            let sourceFolder = try containingFolder(of: itemIdentifier)
             try detach(itemIdentifier)
             let folderPages = try children(of: folderIdentifier)
             let targetPage: LaunchpadItemIdentifier
@@ -100,6 +108,9 @@ extension LaunchpadStore {
             }
             try setChildren(try children(of: targetPage) + [itemIdentifier], of: targetPage)
             try tidyUp(itemsPerPage: itemsPerPage)
+            if let sourceFolder, sourceFolder != folderIdentifier {
+                try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
+            }
         }
     }
 
@@ -108,27 +119,46 @@ extension LaunchpadStore {
     /// dissolved it when the second-to-last one was dragged out.
     package func moveItem(_ itemIdentifier: LaunchpadItemIdentifier, outOfFolderTo targetIndex: Int, onPage pageIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
         try performTransaction {
-            let folderIdentifier = try parent(of: try parent(of: itemIdentifier))
+            let sourceFolder = try containingFolder(of: itemIdentifier)
             try moveItem(itemIdentifier, toIndex: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
-            guard (try? type(of: folderIdentifier)) == .folder else { return }
-            let remainingApplications = try children(of: folderIdentifier).flatMap { try children(of: $0) }
-            guard remainingApplications.count <= 1 else { return }
-            let folderPage = try parent(of: folderIdentifier)
-            if let lastApplication = remainingApplications.first {
-                let folderIndex = try children(of: folderPage).firstIndex(of: folderIdentifier) ?? 0
-                try moveItem(lastApplication, toIndex: folderIndex, onPage: folderPage, itemsPerPage: itemsPerPage)
+            if let sourceFolder {
+                try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
             }
-            try removeItem(folderIdentifier)
-            try tidyUp(itemsPerPage: itemsPerPage)
         }
     }
 
-    /// Moves an item onto a new page after the last one, as dragging past the last page did.
+    /// Moves an item onto a new page after the last one, as dragging past the last page did; a folder it
+    /// leaves with one application or none is dissolved.
     package func moveItemToNewLastPage(_ itemIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
         try performTransaction {
+            let sourceFolder = try containingFolder(of: itemIdentifier)
             let newPage = try appendPage(to: rootIdentifier)
             try moveItem(itemIdentifier, toIndex: 0, onPage: newPage, itemsPerPage: itemsPerPage)
+            if let sourceFolder {
+                try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
+            }
         }
+    }
+
+    /// The folder `itemIdentifier` sits in, or nil when it sits on a page of the springboard itself.
+    private func containingFolder(of itemIdentifier: LaunchpadItemIdentifier) throws -> LaunchpadItemIdentifier? {
+        let folderIdentifier = try parent(of: try parent(of: itemIdentifier))
+        return (try? type(of: folderIdentifier)) == .folder ? folderIdentifier : nil
+    }
+
+    /// 15 dissolved a folder that a drag left with one application or none, wherever the dragged one
+    /// went: the last application takes the folder's place, and the folder goes.
+    private func dissolveIfAlmostEmpty(_ folderIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
+        guard (try? type(of: folderIdentifier)) == .folder else { return }
+        let remainingApplications = try children(of: folderIdentifier).flatMap { try children(of: $0) }
+        guard remainingApplications.count <= 1 else { return }
+        let folderPage = try parent(of: folderIdentifier)
+        if let lastApplication = remainingApplications.first {
+            let folderIndex = try children(of: folderPage).firstIndex(of: folderIdentifier) ?? 0
+            try moveItem(lastApplication, toIndex: folderIndex, onPage: folderPage, itemsPerPage: itemsPerPage)
+        }
+        try removeItem(folderIdentifier)
+        try tidyUp(itemsPerPage: itemsPerPage)
     }
 
     package func renameFolder(_ folderIdentifier: LaunchpadItemIdentifier, to title: String) throws {

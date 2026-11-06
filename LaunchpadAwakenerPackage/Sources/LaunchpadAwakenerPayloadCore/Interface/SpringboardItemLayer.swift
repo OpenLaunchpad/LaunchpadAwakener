@@ -276,6 +276,50 @@ final class SpringboardItemLayer: CALayer {
         CATransaction.commit()
     }
 
+    /// Where the thumbnail of the folder's `slot`th application is, or would be, in this layer — with the
+    /// grid scrolled as it is now. `ECImageGridLayer` lays its thumbnails out row by row from the top
+    /// left, a cell a third of the grid apart (15.5 `_layoutItemLayers`, `0x100023EE8`).
+    func thumbnailFrame(atSlot slot: Int) -> CGRect? {
+        guard let thumbnailGridLayer, slot >= 0 else { return nil }
+        let thumbnailLayers = thumbnailLayers
+        if thumbnailLayers.indices.contains(slot) {
+            let thumbnailLayer = thumbnailLayers[slot]
+            return thumbnailLayer.convert(thumbnailLayer.bounds, to: self)
+        }
+        let cellWidth = floor(thumbnailGridLayer.bounds.width / 3)
+        let cellHeight = floor(thumbnailGridLayer.bounds.height / 3)
+        let row = CGFloat(slot / 3)
+        let column = CGFloat(slot % 3)
+        guard let firstThumbnailLayer = thumbnailLayers.first, let itemsLayer = firstThumbnailLayer.superlayer else {
+            // No thumbnails yet: the grid's own layout, unscrolled.
+            let gridBounds = thumbnailGridLayer.bounds
+            let frameInGrid = CGRect(
+                x: 2 + column * cellWidth,
+                y: gridBounds.height + 2 - (row + 1) * cellHeight,
+                width: cellWidth - 4,
+                height: cellHeight - 4
+            )
+            return thumbnailGridLayer.convert(frameInGrid, to: self)
+        }
+        let frameInItems = firstThumbnailLayer.frame.offsetBy(dx: column * cellWidth, dy: -row * cellHeight)
+        return itemsLayer.convert(frameInItems, to: self)
+    }
+
+    /// Hides or shows the thumbnails of the given slots, without animation unless the transaction animates.
+    func setThumbnailOpacity(_ opacity: Float, forSlots slots: Range<Int>) {
+        let thumbnailLayers = thumbnailLayers
+        for slot in slots where thumbnailLayers.indices.contains(slot) {
+            thumbnailLayers[slot].opacity = opacity
+        }
+    }
+
+    /// Scrolls a folder's thumbnails up to show the slot after its last application, as 15 did while an
+    /// icon was held over the folder (`-[ECSBGroupItemLayer setDarkenedForDrop:]`, `0x100076F0C`), or back.
+    func scrollThumbnails(toAvailableSpace: Bool) {
+        guard let thumbnailGridLayer else { return }
+        DockLayerFactory.scrollImageGridLayer(thumbnailGridLayer, toAvailableSpace: toAvailableSpace)
+    }
+
     /// The point size to render a folder's thumbnails at: the grid's row height less the spacing,
     /// clamped to 1…32 as `+[ECSBGroupItemLayer miniIconSizeForBounds:andScaleFactor:]` clamped it.
     static func thumbnailSide(forIconSide iconSide: CGFloat) -> CGFloat {
@@ -355,7 +399,7 @@ final class SpringboardItemLayer: CALayer {
 
     /// Something is held over this item: an application shows a folder square behind it, 10 % larger,
     /// and dims; both blink twice after 0.65 s (`-[ECSBItemLayer setHighlighted:]`, `0x1000608F8`, and
-    /// `-[ECSBGroupItemLayer setHighlighted:]`, `0x1000771C4`).
+    /// `-[ECSBGroupItemLayer setHighlighted:]`, `0x1000771C4`). Ending it takes the look away at once.
     var isDropTarget = false {
         didSet {
             guard isDropTarget != oldValue else { return }
@@ -363,7 +407,37 @@ final class SpringboardItemLayer: CALayer {
         }
     }
 
+    /// Ends a folder's drop-target look once an icon was dropped into it: the square shrinks back from
+    /// the whole icon at 1.1 times and the title fades in, with the default animation, and the thumbnails
+    /// stay scrolled to the new one (`-[ECSBOpenGroupDragState endDrag:withEvent:]`, 15.5 `0x100085E04`).
+    func endDropTargetAfterDrop() {
+        guard isDropTarget, isFolder, let backdropLayer else {
+            isDropTarget = false
+            return
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        backdropLayer.removeAnimation(forKey: "blink")
+        CATransaction.commit()
+        let backdropFrame = folderBackdropFrame
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.25)
+        // Bounds and position rather than the frame, which is undefined under the 1.1 scale.
+        backdropLayer.bounds = CGRect(origin: .zero, size: backdropFrame.size)
+        backdropLayer.position = CGPoint(x: backdropFrame.midX, y: backdropFrame.midY)
+        backdropLayer.transform = CATransform3DIdentity
+        labelLayer.opacity = 1
+        CATransaction.commit()
+        // Record the end without the instant change `isDropTarget` makes.
+        isSuppressingDropTargetUpdate = true
+        isDropTarget = false
+        isSuppressingDropTargetUpdate = false
+    }
+
+    private var isSuppressingDropTargetUpdate = false
+
     private func updateDropTarget() {
+        guard !isSuppressingDropTargetUpdate else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         labelLayer.opacity = isDropTarget ? 0 : 1
@@ -374,6 +448,11 @@ final class SpringboardItemLayer: CALayer {
             if isDropTarget, let backdropLayer {
                 Self.addBlinkAnimation(to: backdropLayer)
             }
+            // The thumbnails scroll to the free slot, with the default animation.
+            CATransaction.begin()
+            CATransaction.setDisableActions(false)
+            scrollThumbnails(toAvailableSpace: isDropTarget)
+            CATransaction.commit()
         } else if isDropTarget {
             imageLayer.filters = Self.darkeningFilters()
             let newBackdropLayer = CALayer()

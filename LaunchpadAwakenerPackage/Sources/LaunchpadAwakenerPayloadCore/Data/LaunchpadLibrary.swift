@@ -190,7 +190,8 @@ package actor LaunchpadLibrary {
 /// One change made by hand — dragging or renaming — to apply to the stored layout.
 package enum LaunchpadEdit: Sendable, Equatable {
     case move(LaunchpadItemIdentifier, toIndex: Int, onPage: LaunchpadItemIdentifier)
-    case makeFolder(merging: LaunchpadItemIdentifier, with: LaunchpadItemIdentifier, title: String)
+    /// `draggedItemIndex` is where the dragged application goes in the new folder: 1 after the target, 0 before.
+    case makeFolder(merging: LaunchpadItemIdentifier, with: LaunchpadItemIdentifier, title: String, draggedItemIndex: Int = 1)
     case moveIntoFolder(LaunchpadItemIdentifier, folder: LaunchpadItemIdentifier)
     case moveOutOfFolder(LaunchpadItemIdentifier, toIndex: Int, onPage: LaunchpadItemIdentifier)
     case moveToNewLastPage(LaunchpadItemIdentifier)
@@ -208,8 +209,8 @@ extension LaunchpadLibrary {
             switch edit {
             case let .move(itemIdentifier, targetIndex, pageIdentifier):
                 try store.moveItem(itemIdentifier, toIndex: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
-            case let .makeFolder(draggedItem, targetItem, title):
-                try store.makeFolder(merging: draggedItem, with: targetItem, title: title, itemsPerPage: itemsPerPage)
+            case let .makeFolder(draggedItem, targetItem, title, draggedItemIndex):
+                try store.makeFolder(merging: draggedItem, with: targetItem, title: title, draggedItemIndex: draggedItemIndex, itemsPerPage: itemsPerPage)
             case let .moveIntoFolder(itemIdentifier, folderIdentifier):
                 try store.moveItem(itemIdentifier, intoFolder: folderIdentifier, itemsPerPage: itemsPerPage)
             case let .moveOutOfFolder(itemIdentifier, targetIndex, pageIdentifier):

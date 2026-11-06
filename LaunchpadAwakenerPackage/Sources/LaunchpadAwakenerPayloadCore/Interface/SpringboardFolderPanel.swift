@@ -11,6 +11,10 @@ import QuartzCore
 /// 15.5 `0x10004BE70`). Opening grows the panel out of the folder icon's square while the icons fly from
 /// the thumbnails to their cells; closing reverses it (`animatedShow` `0x10004E0E4`, `animatedHide`
 /// `0x10004E63C`, both default 0.25 s animations).
+///
+/// 15's backdrop frosted the wallpaper picture drawn in the same window. The background is now glass
+/// that the window server fills, so the backdrop is the window server's too, and sits outside the mask:
+/// a mask draws what it clips off screen, where a window-server backdrop has nothing behind it.
 @MainActor
 final class SpringboardFolderPanel {
     static let animationDuration: CFTimeInterval = 0.25
@@ -22,7 +26,7 @@ final class SpringboardFolderPanel {
     let folderLayer = CALayer()
     private let maskContainerLayer = CALayer()
     private let maskLayer = CALayer()
-    private let backdropLayer = QuartzCorePrivate.makeBackdropLayer()
+    private let backdropLayer = QuartzCorePrivate.makeBackdropLayer(isWindowServerAware: true)
     let titleLayer = SpringboardLabelLayer(font: SpringboardTypography.folderTitleFont)
     let titleEditorLayer = SpringboardTitleEditorLayer()
     private let scale: CGFloat
@@ -43,22 +47,25 @@ final class SpringboardFolderPanel {
         CATransaction.setDisableActions(true)
         folderLayer.frame = folderMetrics.folderFrame
         folderLayer.masksToBounds = false
+        folderLayer.allowsGroupOpacity = false
         maskContainerLayer.frame = folderLayer.bounds
         maskContainerLayer.mask = maskLayer
         maskLayer.backgroundColor = CGColor(gray: 1, alpha: 1)
         maskLayer.cornerCurve = .continuous
         backdropLayer.backgroundColor = SpringboardItemLayer.folderBackdropColor
         backdropLayer.cornerCurve = .continuous
-        backdropLayer.backgroundFilters = QuartzCorePrivate.folderBackdropFilters()
+        backdropLayer.masksToBounds = true
+        // The Dock's own glass puts its blur in a backdrop's `filters`, as this does.
+        backdropLayer.filters = QuartzCorePrivate.folderBackdropFilters()
         for panelLayer in [backdropLayer, maskLayer] {
             panelLayer.frame = folderMetrics.panelFrame
             panelLayer.cornerRadius = SpringboardFolderMetrics.panelCornerRadius
         }
         pages.scrollLayer.frame = folderMetrics.scrollFrame
         pages.pagerControlLayer.frame = folderMetrics.pagerControlFrame
-        maskContainerLayer.addSublayer(backdropLayer)
         maskContainerLayer.addSublayer(pages.scrollLayer)
         maskContainerLayer.addSublayer(pages.pagerControlLayer)
+        folderLayer.addSublayer(backdropLayer)
         folderLayer.addSublayer(maskContainerLayer)
 
         titleLayer.setString(folder.title, contentsScale: scale)
@@ -129,26 +136,44 @@ final class SpringboardFolderPanel {
 
     /// Grows the panel out of `folderItemLayer`'s square and flies the first nine icons out of its
     /// thumbnails. `containerLayer` is the folder layer's superlayer; `springboardLayer` fades to 0
-    /// and shrinks to 0.95 meanwhile, as 15's main grid did.
+    /// and shrinks to 0.95 meanwhile, as 15's main grid did. With Reduce Motion the panel appears at
+    /// once and the pages only fade, as in 15.
     func animateOpen(from folderItemLayer: SpringboardItemLayer, springboardLayer: CALayer, containerLayer: CALayer, completion: @escaping @MainActor () -> Void) {
+        let isAnimated = !SpringboardPreferences.reducesMotion
         let backdropRect = rectInFolder(folderItemLayer.folderBackdropFrame, of: folderItemLayer, springboardLayer: springboardLayer)
+        let folderCellRect = rectInFolder(folderItemLayer.bounds, of: folderItemLayer, springboardLayer: springboardLayer)
         let thumbnailRects = folderItemLayer.thumbnailLayers.prefix(9).map { thumbnailLayer in
             rectInFolder(thumbnailLayer.convert(thumbnailLayer.bounds, to: folderItemLayer), of: folderItemLayer, springboardLayer: springboardLayer)
         }
+        let firstPageItemLayers = pages.pageGrids.first?.itemLayers ?? []
+        let titleFrame = titleLayer.frame
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         containerLayer.addSublayer(folderLayer)
-        for panelLayer in [backdropLayer, maskLayer] {
-            panelLayer.frame = backdropRect
-            panelLayer.cornerRadius = folderItemLayer.folderCornerRadius
+        if isAnimated {
+            for panelLayer in [backdropLayer, maskLayer] {
+                panelLayer.frame = backdropRect
+                panelLayer.cornerRadius = folderItemLayer.folderCornerRadius
+            }
+            // 15 starts the title over the folder icon, its bottom on the top of the icon's cell.
+            titleLayer.frame = CGRect(
+                x: folderCellRect.midX - titleFrame.width / 2,
+                y: folderCellRect.maxY,
+                width: titleFrame.width,
+                height: titleFrame.height
+            )
+            titleLayer.opacity = 0
         }
-        titleLayer.opacity = 0
         pages.pagerControlLayer.opacity = 0
         folderItemLayer.opacity = 0
+        // The grid has placed its items; lay them out now so their icon frames are known.
+        firstPageItemLayers.forEach { $0.layoutIfNeeded() }
         CATransaction.commit()
+        // Core Animation does not animate a change to a layer it has never committed, and every layer
+        // of the panel is new: put the starting state on screen first.
+        CATransaction.flush()
 
-        let firstPageItemLayers = pages.pageGrids.first?.itemLayers ?? []
         CATransaction.begin()
         CATransaction.setAnimationDuration(Self.animationDuration)
         CATransaction.setCompletionBlock {
@@ -160,18 +185,21 @@ final class SpringboardFolderPanel {
                 completion()
             }
         }
-        for panelLayer in [backdropLayer, maskLayer] {
-            panelLayer.frame = folderMetrics.panelFrame
-            panelLayer.cornerRadius = SpringboardFolderMetrics.panelCornerRadius
-        }
-        titleLayer.opacity = 1
         springboardLayer.opacity = 0
-        springboardLayer.transform = CATransform3DMakeScale(0.95, 0.95, 1)
-        for (itemIndex, itemLayer) in firstPageItemLayers.enumerated() {
-            if thumbnailRects.indices.contains(itemIndex) {
-                flyIconLayer(itemLayer, betweenThumbnailRect: thumbnailRects[itemIndex], isOpening: true)
-            } else {
-                addOpacityAnimation(to: itemLayer, from: 0, to: 1)
+        if isAnimated {
+            for panelLayer in [backdropLayer, maskLayer] {
+                panelLayer.frame = folderMetrics.panelFrame
+                panelLayer.cornerRadius = SpringboardFolderMetrics.panelCornerRadius
+            }
+            titleLayer.frame = titleFrame
+            titleLayer.opacity = 1
+            springboardLayer.transform = CATransform3DMakeScale(0.95, 0.95, 1)
+            for (itemIndex, itemLayer) in firstPageItemLayers.enumerated() {
+                if thumbnailRects.indices.contains(itemIndex) {
+                    flyIconLayer(itemLayer, betweenThumbnailRect: thumbnailRects[itemIndex], isOpening: true)
+                } else {
+                    addOpacityAnimation(to: itemLayer, from: 0, to: 1)
+                }
             }
         }
         CATransaction.commit()
@@ -187,6 +215,13 @@ final class SpringboardFolderPanel {
         } ?? []
         let visibleItemLayers = pages.currentPageGrid?.itemLayers ?? []
 
+        if SpringboardPreferences.reducesMotion {
+            // The panel goes at once; only the pages fade back.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            folderLayer.opacity = 0
+            CATransaction.commit()
+        }
         CATransaction.begin()
         CATransaction.setAnimationDuration(Self.animationDuration)
         CATransaction.setCompletionBlock {

@@ -31,6 +31,20 @@ final class SpringboardDragSession {
     /// Whether the current page was added past the last one during this drag.
     var isOnNewLastPage = false
 
+    /// Set once the icon is let go: the drop is animating, and input waits until it ends.
+    var isEnding = false
+    /// A release that came while a folder was opening or closing; carried out once it has.
+    var pendingDrop: (location: CGPoint, timestamp: UInt64)?
+    /// Set from leaving a folder until its icon is back on the main page, 250 ms after it closed.
+    var isWaitingForFolderToClose = false
+
+    /// The main page as it was when a folder opened under the dragged icon: its icons, with a gap where
+    /// the dragged one was. If the drag ends in the folder, the gap stays until the folder closes.
+    var mainPageArrangement: (pageIndex: Int, arrangedLayers: [SpringboardItemLayer?])?
+    /// The application held over until a new folder opened around it, with the folder's name; the folder
+    /// is stored only by the drop.
+    var unsavedFolderTarget: (application: LaunchpadApplication, title: String)?
+
     var lastLocation: CGPoint
     var lastTimestamp: UInt64
     var hoverTarget: (index: Int, itemLayer: SpringboardItemLayer)?
@@ -129,7 +143,7 @@ extension SpringboardInterface {
     // MARK: - Moving
 
     func continueDrag(to location: CGPoint, timestamp: UInt64) {
-        guard let dragSession else { return }
+        guard let dragSession, !dragSession.isEnding else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         dragSession.itemLayer.position = CGPoint(x: location.x + dragSession.grabOffset.x, y: location.y + dragSession.grabOffset.y)
@@ -158,7 +172,7 @@ extension SpringboardInterface {
     /// Decides what the dragged icon's position means, in 15's order: leaving the open folder, an edge,
     /// another icon to drop onto, then a new place on the page.
     private func evaluateDrag() {
-        guard let dragSession, !isAnimatingFolder else { return }
+        guard let dragSession, !dragSession.isEnding, !dragSession.isWaitingForFolderToClose, !isAnimatingFolder else { return }
         let cellCenter = dragSession.itemLayer.position
 
         if let folderPanel {
@@ -230,12 +244,22 @@ extension SpringboardInterface {
         animateArrangement()
     }
 
-    /// Moves every icon of the current page to its place in the arrangement, making room in 0.4 s;
-    /// icons pushed past the page's capacity hide until they spill over on the drop.
-    private func animateArrangement() {
-        guard let dragSession, let pageGrid = pages(for: dragSession.context).currentPageGrid else { return }
+    /// Moves every icon of the current page to its place in the arrangement, making room in 0.4 s unless
+    /// told otherwise; icons pushed past the page's capacity hide until they spill over on the drop.
+    func animateArrangement(duration: CFTimeInterval = SpringboardDragging.makeRoomDuration, completion: (@MainActor () -> Void)? = nil) {
+        guard let dragSession, let pageGrid = pages(for: dragSession.context).currentPageGrid else {
+            completion?()
+            return
+        }
         CATransaction.begin()
-        CATransaction.setAnimationDuration(SpringboardDragging.makeRoomDuration)
+        CATransaction.setAnimationDuration(duration)
+        if let completion {
+            CATransaction.setCompletionBlock {
+                MainActor.assumeIsolated {
+                    completion()
+                }
+            }
+        }
         for (index, layer) in dragSession.arrangedLayers.enumerated() {
             guard let layer else { continue }
             layer.frame = pageGrid.cellFrame(at: index)
@@ -253,18 +277,22 @@ extension SpringboardInterface {
         targetLayer.isDropTarget = true
         dragSession.itemLayer.isMagnified = false
         dragSession.itemLayer.labelLayer.opacity = 0
-        // Holding over a folder opens it (15 also turned an application into a new folder and opened
-        // that; here a new folder is made on the drop instead).
-        if case .folder(let folder) = targetLayer.item {
-            dragSession.springLoadingTask = Task { [weak self] in
-                try? await Task.sleep(for: SpringboardDragging.springLoadingDelay)
-                guard !Task.isCancelled else { return }
-                self?.springLoad(folder, folderItemLayer: targetLayer)
+        // Holding on opens a folder, or turns an application into a new folder and opens that.
+        dragSession.springLoadingTask = Task { [weak self] in
+            try? await Task.sleep(for: SpringboardDragging.springLoadingDelay)
+            guard !Task.isCancelled, let self else { return }
+            switch targetLayer.item {
+            case .folder(let folder):
+                self.springLoad(folder, folderItemLayer: targetLayer)
+            case .application(let application):
+                self.springLoadNewFolder(around: application, targetLayer: targetLayer)
+            case .none:
+                break
             }
         }
     }
 
-    private func endHover() {
+    func endHover() {
         guard let dragSession, let hoverTarget = dragSession.hoverTarget else { return }
         dragSession.springLoadingTask?.cancel()
         dragSession.hoverTarget = nil
@@ -272,52 +300,125 @@ extension SpringboardInterface {
         dragSession.itemLayer.isMagnified = true
     }
 
-    /// Opens a held-over folder and carries the dragged icon into it, placed after its last item.
+    /// Opens a held-over folder and carries the dragged icon into it, placed after the last item of its
+    /// first page. The dragged icon's cell on the main page stays empty meanwhile, as 15 left it.
     private func springLoad(_ folder: LaunchpadFolder, folderItemLayer: SpringboardItemLayer) {
-        guard dragSession != nil, folderPanel == nil else { return }
+        guard let dragSession, folderPanel == nil, !isAnimatingFolder else { return }
         endHover()
         cancelEdgePageTurn()
-        removeDraggedItemFromArrangement()
+        dragSession.mainPageArrangement = (dragSession.pageIndex, dragSession.arrangedLayers)
         openFolder(folder, from: folderItemLayer) { [weak self] in
-            guard let self, let dragSession = self.dragSession, let folderPanel = self.folderPanel, let firstPage = folderPanel.pages.currentPageGrid else { return }
-            dragSession.context = .folder
-            dragSession.pageIndex = folderPanel.pages.currentPageIndex
-            dragSession.arrangement = firstPage.items + [dragSession.item]
-            dragSession.arrangedLayers = firstPage.itemLayers.map(Optional.some) + [nil]
-            dragSession.currentIndex = dragSession.arrangement.count - 1
-            dragSession.wasInsideFolderPanel = true
-            // Keep the dragged icon above the panel that just appeared.
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            self.containerLayer.addSublayer(dragSession.itemLayer)
-            CATransaction.commit()
+            self?.carryDraggedItemIntoOpenFolder()
         }
+        keepDraggedIconOnTop()
+    }
+
+    /// Once a folder opened under the dragged icon: the icon belongs to the folder's current page now,
+    /// after its last item.
+    func carryDraggedItemIntoOpenFolder() {
+        guard let dragSession, !dragSession.isEnding, let folderPanel, let currentPage = folderPanel.pages.currentPageGrid else { return }
+        dragSession.context = .folder
+        dragSession.pageIndex = folderPanel.pages.currentPageIndex
+        dragSession.arrangement = currentPage.items + [dragSession.item]
+        dragSession.arrangedLayers = currentPage.itemLayers.map(Optional.some) + [nil]
+        dragSession.currentIndex = dragSession.arrangement.count - 1
+        dragSession.wasInsideFolderPanel = true
+        dragSession.hasRearranged = true
+        keepDraggedIconOnTop()
+        performPendingDrop()
+    }
+
+    /// Puts the dragged icon back on top of everything, the open folder's panel included.
+    func keepDraggedIconOnTop() {
+        guard let dragSession else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        containerLayer.addSublayer(dragSession.itemLayer)
+        CATransaction.commit()
+    }
+
+    /// Carries out a release that came while a folder was opening or closing.
+    func performPendingDrop() {
+        guard let dragSession, let pendingDrop = dragSession.pendingDrop else { return }
+        dragSession.pendingDrop = nil
+        endDrag(at: pendingDrop.location, timestamp: pendingDrop.timestamp)
     }
 
     /// The dragged icon left the open folder: close it and carry the icon to the end of the main page —
-    /// onto its last cell when the page is full (`-[ECSBCloseGroupDragState beginTransition]`).
+    /// onto its last cell when the page is full (`-[ECSBCloseGroupDragState beginTransition]`,
+    /// 15.5 `0x10011FE08`). 250 ms after the folder has closed, the main page closes the gap the icon may
+    /// have left there, and a folder left with one application or none dissolves into it.
     private func leaveFolder() {
-        guard let dragSession, folderPanel != nil else { return }
+        guard let dragSession, let folderPanel else { return }
         cancelEdgePageTurn()
-        closeFolder()
-        guard let mainPage = mainPages.currentPageGrid else { return }
-        var arrangement = mainPage.items
-        var arrangedLayers: [SpringboardItemLayer?] = mainPage.itemLayers
-        if let draggedIndex = arrangement.firstIndex(where: { $0.identifier == dragSession.item.identifier }) {
-            arrangement.remove(at: draggedIndex)
-            arrangedLayers.remove(at: draggedIndex)
+        let folderItemLayer = self.folderItemLayer(of: folderPanel.folder)
+        let remainingApplications = folderPanel.folder.applications.filter { $0.identifier != dragSession.item.identifier }
+        let dissolves = folderPanel.folder.isUnsaved || remainingApplications.count <= 1
+        if let folderItemLayer, remainingApplications.count != folderPanel.folder.applications.count {
+            // The folder's icon shows the folder without the dragged application as it closes, as 15
+            // refreshed it (`-[ECSBGroupLayer prepareForAnimatedHide]`, 15.5 `0x10004E404`).
+            let remainingFolder = folderPanel.folder.removing(dragSession.item.identifier)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            folderItemLayer.configure(with: .folder(remainingFolder), metrics: metrics, scale: scale)
+            putIcons(in: folderItemLayer)
+            folderItemLayer.layoutIfNeeded()
+            CATransaction.commit()
         }
-        let insertionIndex = min(arrangement.count, mainPage.capacity - 1)
-        arrangement.insert(dragSession.item, at: insertionIndex)
-        arrangedLayers.insert(nil, at: insertionIndex)
-        dragSession.context = .main
-        dragSession.pageIndex = mainPages.currentPageIndex
-        dragSession.arrangement = arrangement
-        dragSession.arrangedLayers = arrangedLayers
-        dragSession.currentIndex = insertionIndex
-        dragSession.wasInsideFolderPanel = false
-        dragSession.hasRearranged = true
-        animateArrangement()
+        // The main page as the drag left it when the folder opened, if it did; its gap is dropped below.
+        let mainPageArrangement = dragSession.mainPageArrangement
+        dragSession.isWaitingForFolderToClose = true
+        dragSession.unsavedFolderTarget = nil
+        dragSession.mainPageArrangement = nil
+        closeFolder()
+
+        if let mainPage = mainPages.currentPageGrid {
+            var arrangement: [LaunchpadItem]
+            var arrangedLayers: [SpringboardItemLayer?]
+            if let mainPageArrangement, mainPageArrangement.pageIndex == mainPages.currentPageIndex {
+                let stashedLayers = mainPageArrangement.arrangedLayers.compactMap { $0 }.filter { $0.item != nil }
+                arrangedLayers = stashedLayers
+                arrangement = stashedLayers.compactMap(\.item)
+            } else {
+                arrangement = mainPage.items
+                arrangedLayers = mainPage.itemLayers
+            }
+            if let draggedIndex = arrangement.firstIndex(where: { $0.identifier == dragSession.item.identifier }) {
+                arrangement.remove(at: draggedIndex)
+                arrangedLayers.remove(at: draggedIndex)
+            }
+            if dissolves, let folderItemLayer, let folderIndex = arrangedLayers.firstIndex(where: { $0 === folderItemLayer }) {
+                if let remainingApplication = remainingApplications.first {
+                    arrangement[folderIndex] = .application(remainingApplication)
+                } else {
+                    arrangement.remove(at: folderIndex)
+                    arrangedLayers.remove(at: folderIndex)
+                }
+            }
+            let insertionIndex = min(arrangement.count, mainPage.capacity - 1)
+            arrangement.insert(dragSession.item, at: insertionIndex)
+            arrangedLayers.insert(nil, at: insertionIndex)
+            dragSession.context = .main
+            dragSession.pageIndex = mainPages.currentPageIndex
+            dragSession.arrangement = arrangement
+            dragSession.arrangedLayers = arrangedLayers
+            dragSession.currentIndex = insertionIndex
+            dragSession.wasInsideFolderPanel = false
+            dragSession.hasRearranged = true
+        }
+
+        // The panel closes in 0.25 s; 250 ms later the main page moves (`Pager_hideGroupAfter250ms`).
+        DispatchQueue.main.asyncAfter(deadline: .now() + SpringboardFolderPanel.animationDuration + 0.25) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.dragSession === dragSession, !dragSession.isEnding else { return }
+                dragSession.isWaitingForFolderToClose = false
+                self.animateArrangement(duration: SpringboardFolderPanel.animationDuration)
+                if dissolves, let folderItemLayer {
+                    self.dissolveFolderIcon(folderItemLayer, into: remainingApplications.first)
+                }
+                self.performPendingDrop()
+            }
+        }
     }
 
     private func removeDraggedItemFromArrangement() {
@@ -344,7 +445,7 @@ extension SpringboardInterface {
         }
     }
 
-    private func cancelEdgePageTurn() {
+    func cancelEdgePageTurn() {
         dragSession?.edgeTask?.cancel()
         dragSession?.edgeDirection = nil
     }
@@ -381,23 +482,28 @@ extension SpringboardInterface {
         animateArrangement()
     }
 
+
     // MARK: - Dropping
 
     func endDrag(at location: CGPoint, timestamp: UInt64) {
-        guard let dragSession else { return }
+        guard let dragSession, !dragSession.isEnding else { return }
+        // A release while a folder opens or closes waits for it to finish, as 15's did.
+        if isAnimatingFolder || dragSession.isWaitingForFolderToClose {
+            dragSession.pendingDrop = (location, timestamp)
+            return
+        }
         dragSession.cancelTimers()
 
         if let hoverTarget = dragSession.hoverTarget, let targetItem = hoverTarget.itemLayer.item {
+            dragSession.isEnding = true
             switch targetItem {
             case .application(let targetApplication):
-                applyEdit(.makeFolder(merging: dragSession.item.identifier, with: targetApplication.identifier, title: defaultFolderName(for: targetApplication)))
+                let title = defaultFolderName(for: targetApplication)
+                applyEdit(.makeFolder(merging: dragSession.item.identifier, with: targetApplication.identifier, title: title))
+                dropIntoNewFolder(around: targetApplication, targetLayer: hoverTarget.itemLayer, title: title)
             case .folder(let folder):
                 applyEdit(.moveIntoFolder(dragSession.item.identifier, folder: folder.identifier))
-            }
-            let targetIconRect = hoverTarget.itemLayer.convert(hoverTarget.itemLayer.iconFrame, to: containerLayer)
-            animateDraggedLayer(intoIconAt: targetIconRect) { [weak self] in
-                hoverTarget.itemLayer.isDropTarget = false
-                self?.finishDrag()
+                dropIntoFolder(folder, folderItemLayer: hoverTarget.itemLayer)
             }
             return
         }
@@ -410,6 +516,7 @@ extension SpringboardInterface {
             cancelDrag()
             return
         }
+        dragSession.isEnding = true
         applyEdit(edit)
         let targetIndex = min(dragSession.currentIndex, max(pageGrid.capacity - 1, 0))
         let cellFrameInGrid = pageGrid.cellFrame(at: targetIndex)
@@ -453,13 +560,23 @@ extension SpringboardInterface {
             }
             return .move(itemIdentifier, toIndex: dragSession.currentIndex, onPage: pageIdentifier)
         case .folder:
+            if let unsavedFolderTarget = dragSession.unsavedFolderTarget {
+                // Released in a folder opened by holding over an application: the folder is made now, in
+                // the order its panel shows.
+                return .makeFolder(
+                    merging: itemIdentifier,
+                    with: unsavedFolderTarget.application.identifier,
+                    title: unsavedFolderTarget.title,
+                    draggedItemIndex: dragSession.currentIndex == 0 ? 0 : 1
+                )
+            }
             guard let folderPanel, folderPanel.folder.pages.indices.contains(dragSession.pageIndex) else { return nil }
             return .move(itemIdentifier, toIndex: dragSession.currentIndex, onPage: folderPanel.folder.pages[dragSession.pageIndex].identifier)
         }
     }
 
     /// 15 named a new folder after the target application's category, or "Untitled".
-    private func defaultFolderName(for application: LaunchpadApplication) -> String {
+    func defaultFolderName(for application: LaunchpadApplication) -> String {
         if
             let bundleURL = application.bundleURL,
             let categoryIdentifier = Bundle(url: bundleURL)?.object(forInfoDictionaryKey: "LSApplicationCategoryType") as? String,
@@ -470,28 +587,24 @@ extension SpringboardInterface {
         return Bundle.main.localizedString(forKey: "Untitled", value: "Untitled", table: nil)
     }
 
-    private func animateDraggedLayer(intoIconAt targetIconRect: CGRect, completion: @escaping @MainActor () -> Void) {
-        guard let dragSession else { return }
-        CATransaction.begin()
-        CATransaction.setCompletionBlock {
-            MainActor.assumeIsolated {
-                dragSession.itemLayer.removeFromSuperlayer()
-                completion()
-            }
-        }
-        dragSession.itemLayer.position = CGPoint(x: targetIconRect.midX, y: targetIconRect.midY)
-        dragSession.itemLayer.transform = CATransform3DMakeScale(0.3, 0.3, 1)
-        dragSession.itemLayer.opacity = 0
-        CATransaction.commit()
-    }
-
-    /// Escape, or a drop that changed nothing: everything slides back where it was.
+    /// Escape, or a drop that changed nothing: everything slides back where it was. A folder the drag
+    /// opened closes as usual while the main page is rebuilt from the stored layout. A drop already
+    /// animating is left to finish.
     func cancelDrag() {
-        guard let dragSession else { return }
+        guard let dragSession, !dragSession.isEnding else { return }
+        dragSession.isEnding = true
         dragSession.cancelTimers()
+        dragSession.mainPageArrangement = nil
+        dragSession.unsavedFolderTarget = nil
         endHover()
-        if folderPanel != nil, dragSession.sourceContext == .main {
-            closeFolder(animated: false)
+        var closingFolder: LaunchpadFolder?
+        if let folderPanel, dragSession.sourceContext == .main {
+            closingFolder = folderPanel.folder
+            if isAnimatingFolder {
+                dismissFolderImmediately()
+            } else {
+                closeFolder()
+            }
         }
         if dragSession.sourceContext == .folder, folderPanel == nil {
             // Dragged out of a folder that has closed since: back into the folder's icon, as 15 did.
@@ -505,7 +618,7 @@ extension SpringboardInterface {
                 finishDrag()
                 return
             }
-            animateDraggedLayer(intoIconAt: folderIconLayer.convert(folderIconLayer.iconFrame, to: containerLayer)) { [weak self] in
+            slideDraggedLayer(intoFolderIcon: folderIconLayer) { [weak self] in
                 self?.finishDrag()
             }
             return
@@ -514,6 +627,10 @@ extension SpringboardInterface {
         let sourcePages = pages(for: dragSession.sourceContext)
         if dragSession.sourceContext == .main {
             showMainPages(pageIndex: dragSession.sourcePageIndex)
+            if let closingFolder, folderPanel != nil {
+                // The closing panel shrinks onto the rebuilt page's icon of its folder, shown once it has.
+                hideFolderIcon(of: closingFolder)
+            }
         } else if let folderPanel {
             folderPanel.reloadPages(pageIndex: dragSession.sourcePageIndex) { [weak self] itemLayer in
                 self?.putIcons(in: itemLayer)
@@ -550,7 +667,32 @@ extension SpringboardInterface {
         CATransaction.commit()
     }
 
-    private func finishDrag() {
+    /// Sends the dragged icon back into a closed folder's icon: it slides there, shrinking to a
+    /// thumbnail's size and fading to half (`-[ECSBBeginningDragState _restoreItemLayer:…]`, 15.5
+    /// `0x10010D574`), then goes.
+    private func slideDraggedLayer(intoFolderIcon folderIconLayer: SpringboardItemLayer, completion: @escaping @MainActor () -> Void) {
+        guard let dragSession else { return }
+        let folderIconRect = folderIconLayer.convert(folderIconLayer.iconFrame, to: containerLayer)
+        let thumbnailScale = SpringboardItemLayer.thumbnailSide(forIconSide: metrics.iconSide) / max(metrics.iconSide, 1)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock {
+            MainActor.assumeIsolated {
+                dragSession.itemLayer.removeFromSuperlayer()
+                completion()
+            }
+        }
+        dragSession.itemLayer.position = CGPoint(x: folderIconRect.midX, y: folderIconRect.midY)
+        dragSession.itemLayer.transform = CATransform3DMakeScale(thumbnailScale, thumbnailScale, 1)
+        dragSession.itemLayer.opacity = 0.5
+        CATransaction.commit()
+    }
+
+    /// Ends the drag. One that ended in a folder it opened leaves the main page with its gap until that
+    /// folder closes.
+    func finishDrag() {
+        if let dragSession, let mainPageArrangement = dragSession.mainPageArrangement, folderPanel != nil {
+            mainPagePlaceholder = mainPageArrangement
+        }
         dragSession?.cancelTimers()
         dragSession = nil
         applyPendingLayoutIfIdle()

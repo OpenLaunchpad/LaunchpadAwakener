@@ -35,8 +35,8 @@ final class SpringboardInterface {
     /// Stores an edit; the new layout comes back through ``replaceLayout(_:)``.
     let applyEdit: (LaunchpadEdit) -> Void
     let springboardLayer = CALayer()
-    /// 15's `_desktopContainerLayer`: the wallpaper, filtered and rasterized once.
-    private let desktopContainerLayer = CALayer()
+    /// Glass over whatever is behind the window, where 15 had the blurred wallpaper; nil off screen.
+    private(set) var background: SpringboardBackground?
     let mainPages: SpringboardPagedGrids
     private let searchFieldLayer = SpringboardSearchFieldLayer()
     private let noResultsLayer = SpringboardNoResultsLayer()
@@ -51,7 +51,12 @@ final class SpringboardInterface {
     /// True while a folder opens or closes; input and layout changes wait.
     private(set) var isAnimatingFolder = false
     private var renamingTitle: String?
-    private var pendingLayout: LaunchpadLayout?
+    /// The latest stored layout, waiting until nothing it would disturb is moving.
+    private(set) var pendingLayout: LaunchpadLayout?
+    /// The main page as a drag that ended in a folder left it — its icons with a gap where the dragged one
+    /// was — kept until 250 ms after that folder closes, when the gap closes (`Pager_hideGroupAfter250ms`,
+    /// 15.5 `0x100058B88`). Until then the main pages are not rebuilt.
+    var mainPagePlaceholder: (pageIndex: Int, arrangedLayers: [SpringboardItemLayer?])?
 
     private enum PointerTracking {
         case none
@@ -67,13 +72,14 @@ final class SpringboardInterface {
     /// Set while an icon is being dragged; see `SpringboardInterface+Dragging.swift`.
     var dragSession: SpringboardDragSession?
 
-    /// - Parameter desktopImage: The wallpaper as captured on opening; nil falls back to 15's own gradient.
+    /// - Parameter showsBackground: Whether to put the glass behind the pages. The Dock's glass may only be
+    ///   asked for once the Dock is up, so the off-screen self-check goes without.
     init(
         layout: LaunchpadLayout,
         metrics: SpringboardMetrics,
         scale: CGFloat,
         rootLayer: CALayer,
-        desktopImage: CGImage? = nil,
+        showsBackground: Bool = true,
         applyEdit: @escaping (LaunchpadEdit) -> Void
     ) {
         self.layout = layout
@@ -92,13 +98,16 @@ final class SpringboardInterface {
         containerLayer.frame = rootLayer.bounds
         // Keep y up inside, whatever the window's root layer does.
         containerLayer.isGeometryFlipped = rootLayer.contentsAreFlipped()
+        // Fading as a group would draw everything off screen, where the glass has nothing behind it; the
+        // Command-Tab switcher turns both off for its glass too.
+        containerLayer.allowsGroupOpacity = false
+        containerLayer.setValue(false, forKey: "allowsGroupBlending")
 
-        desktopContainerLayer.frame = containerLayer.bounds
-        desktopContainerLayer.shouldRasterize = true
-        desktopContainerLayer.rasterizationScale = scale
-        desktopContainerLayer.filters = QuartzCorePrivate.desktopBackgroundFilters()
-        desktopContainerLayer.addSublayer(Self.makeDesktopLayer(image: desktopImage, frame: containerLayer.bounds))
-        containerLayer.addSublayer(desktopContainerLayer)
+        if showsBackground {
+            let background = SpringboardBackground(frame: containerLayer.bounds, scale: scale)
+            containerLayer.addSublayer(background.layer)
+            self.background = background
+        }
 
         springboardLayer.frame = metrics.springboardFrame
         springboardLayer.masksToBounds = false
@@ -120,27 +129,6 @@ final class SpringboardInterface {
             self?.select(itemAt: nil)
         }
         showMainPages(pageIndex: 0)
-    }
-
-    /// The wallpaper, stretched over the screen; 15's radial gradient when there is no picture
-    /// (`-[Springboard _newDesktopLayer]`, 15.5 `0x100090670`).
-    private static func makeDesktopLayer(image: CGImage?, frame: CGRect) -> CALayer {
-        guard let image else {
-            let gradientLayer = CAGradientLayer()
-            gradientLayer.type = .radial
-            gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.6)
-            gradientLayer.endPoint = CGPoint(x: 1.2, y: 1.5)
-            gradientLayer.colors = [
-                CGColor(red: 0.251, green: 0.254, blue: 0.284, alpha: 1),
-                CGColor(red: 0.132, green: 0.132, blue: 0.147, alpha: 1),
-            ]
-            gradientLayer.frame = frame
-            return gradientLayer
-        }
-        let desktopLayer = CALayer()
-        desktopLayer.frame = frame
-        desktopLayer.contents = image
-        return desktopLayer
     }
 
     // MARK: - Showing and hiding
@@ -264,10 +252,16 @@ final class SpringboardInterface {
         }
     }
 
-    /// Takes the layout as stored after an edit or a reconciliation. Waits while something is moving.
+    /// Takes the layout as stored after an edit or a reconciliation. Waits while something is moving; while
+    /// the main page keeps a drag's gap, only the open folder takes it.
     func replaceLayout(_ newLayout: LaunchpadLayout) {
         guard isIdle else {
             pendingLayout = newLayout
+            return
+        }
+        if mainPagePlaceholder != nil {
+            pendingLayout = newLayout
+            updateOpenFolder(from: newLayout)
             return
         }
         pendingLayout = nil
@@ -278,8 +272,15 @@ final class SpringboardInterface {
         } else {
             showMainPages(pageIndex: mainPages.currentPageIndex)
         }
+        updateOpenFolder(from: newLayout)
+    }
+
+    /// Gives the open folder its stored state; closes it if the folder is gone.
+    private func updateOpenFolder(from newLayout: LaunchpadLayout) {
         guard let folderPanel else { return }
-        guard let updatedFolder = newLayout.folders.first(where: { $0.identifier == folderPanel.folder.identifier }) else {
+        guard let updatedFolder = storedFolder(for: folderPanel.folder, in: newLayout) else {
+            // Not stored yet: the drop that makes it is still to come.
+            guard !folderPanel.folder.isUnsaved else { return }
             // The folder is gone — emptied or dissolved by the edit.
             folderPanel.folderLayer.removeFromSuperlayer()
             folderPanel.pages.tearDown()
@@ -289,6 +290,8 @@ final class SpringboardInterface {
             springboardLayer.opacity = 1
             springboardLayer.transform = CATransform3DIdentity
             CATransaction.commit()
+            // Nothing will close for the gap to wait for.
+            closeMainPagePlaceholderNow()
             return
         }
         folderPanel.update(with: updatedFolder) { [weak self] itemLayer in
@@ -297,17 +300,32 @@ final class SpringboardInterface {
         hideFolderIcon(of: updatedFolder)
     }
 
+    /// `folder` as stored in `newLayout`. A folder still unsaved is found by its first application,
+    /// the one the folder was made around.
+    func storedFolder(for folder: LaunchpadFolder, in newLayout: LaunchpadLayout) -> LaunchpadFolder? {
+        if let sameFolder = newLayout.folders.first(where: { $0.identifier == folder.identifier }) {
+            return sameFolder
+        }
+        guard folder.isUnsaved, let firstApplication = folder.applications.first else { return nil }
+        return newLayout.folders.first { storedFolder in
+            storedFolder.applications.contains { $0.identifier == firstApplication.identifier }
+        }
+    }
+
     func applyPendingLayoutIfIdle() {
         if let pendingLayout, isIdle {
             replaceLayout(pendingLayout)
         }
     }
 
-    private func folderItemLayer(of folder: LaunchpadFolder) -> SpringboardItemLayer? {
+    /// The main page's icon of `folder`; for a folder made by dragging, the icon it was made in, until the
+    /// main page is rebuilt.
+    func folderItemLayer(of folder: LaunchpadFolder) -> SpringboardItemLayer? {
         mainPages.itemLayers.first { $0.item?.identifier == folder.identifier }
+            ?? mainPages.itemLayers.first { $0.item?.identifier == .unsavedFolder }
     }
 
-    private func hideFolderIcon(of folder: LaunchpadFolder) {
+    func hideFolderIcon(of folder: LaunchpadFolder) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         folderItemLayer(of: folder)?.opacity = 0
@@ -358,14 +376,28 @@ final class SpringboardInterface {
     func closeFolder(animated: Bool = true, completion: (@MainActor () -> Void)? = nil) {
         guard let folderPanel, !isAnimatingFolder else { return }
         commitRenaming()
-        let folderItemLayer = folderItemLayer(of: folderPanel.folder)
+        let closingFolder = folderPanel.folder
+        let folderItemLayer = folderItemLayer(of: closingFolder)
         isAnimatingFolder = true
         let finish: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
             self.folderPanel = nil
-            self.isAnimatingFolder = false
+            // The page may have been rebuilt meanwhile; show the folder's icon on the page as it is now.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self.folderItemLayer(of: closingFolder)?.opacity = 1
+            CATransaction.commit()
             completion?()
-            self.applyPendingLayoutIfIdle()
+            guard self.mainPagePlaceholder != nil else {
+                self.isAnimatingFolder = false
+                self.applyPendingLayoutIfIdle()
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.closeMainPagePlaceholder()
+                }
+            }
         }
         guard animated else {
             CATransaction.begin()
@@ -380,6 +412,58 @@ final class SpringboardInterface {
             return
         }
         folderPanel.animateClose(to: folderItemLayer, springboardLayer: springboardLayer, completion: finish)
+    }
+
+    /// Closes the gap a drag left on the main page without waiting for a folder to close; input waits
+    /// meanwhile, as during a folder's animation.
+    func closeMainPagePlaceholderNow() {
+        guard mainPagePlaceholder != nil else { return }
+        isAnimatingFolder = true
+        closeMainPagePlaceholder()
+    }
+
+    /// 250 ms after the folder closed, the gap a drag left on the main page closes with the default
+    /// animation; then the stored layout may rebuild the page.
+    private func closeMainPagePlaceholder() {
+        let finish: @MainActor () -> Void = { [weak self] in
+            guard let self else { return }
+            self.mainPagePlaceholder = nil
+            self.isAnimatingFolder = false
+            self.applyPendingLayoutIfIdle()
+        }
+        guard let placeholder = mainPagePlaceholder, mainPages.pageGrids.indices.contains(placeholder.pageIndex) else {
+            finish()
+            return
+        }
+        let pageGrid = mainPages.pageGrids[placeholder.pageIndex]
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(SpringboardFolderPanel.animationDuration)
+        CATransaction.setCompletionBlock {
+            MainActor.assumeIsolated {
+                finish()
+            }
+        }
+        for (index, itemLayer) in placeholder.arrangedLayers.compactMap({ $0 }).enumerated() {
+            itemLayer.frame = pageGrid.cellFrame(at: index)
+            itemLayer.opacity = index < pageGrid.capacity ? 1 : 0
+        }
+        CATransaction.commit()
+    }
+
+    /// Takes an open or opening folder away at once, for a drag cancelled while it opened.
+    func dismissFolderImmediately() {
+        guard let folderPanel else { return }
+        let dismissedFolder = folderPanel.folder
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        folderPanel.folderLayer.removeFromSuperlayer()
+        folderItemLayer(of: dismissedFolder)?.opacity = 1
+        springboardLayer.opacity = 1
+        springboardLayer.transform = CATransform3DIdentity
+        CATransaction.commit()
+        folderPanel.pages.tearDown()
+        self.folderPanel = nil
+        isAnimatingFolder = false
     }
 
     // MARK: - Renaming
@@ -604,7 +688,8 @@ final class SpringboardInterface {
     // MARK: - Pointer
 
     func handleMouseDown(at containerPoint: CGPoint, timestamp: UInt64) -> Action {
-        guard !isAnimatingFolder else { return .none }
+        // A press while a drop is still settling waits, as one during a folder's animation does.
+        guard !isAnimatingFolder, dragSession == nil else { return .none }
         mainPages.cancelPendingWheelSettle()
         folderPanel?.pages.cancelPendingWheelSettle()
 

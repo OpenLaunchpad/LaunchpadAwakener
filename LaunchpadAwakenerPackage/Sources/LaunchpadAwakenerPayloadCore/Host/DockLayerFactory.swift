@@ -35,6 +35,10 @@ enum DockLayerFactory {
     )
     static let imageGridLayerLayout = DockMethodSignature(className: "ECImageGridLayer", selectorName: "layout", typeEncoding: "v16@0:8")
     static let imageGridLayerInvalidate = DockMethodSignature(className: "ECImageGridLayer", selectorName: "layerSourceInvalidated:", typeEncoding: "v24@0:8@16")
+    /// Scrolls the thumbnails up to show the row after the last one, as 15 did while an icon was held
+    /// over a folder; `scrollToTop` scrolls back.
+    static let imageGridLayerScrollToAvailableSpace = DockMethodSignature(className: "ECImageGridLayer", selectorName: "scrollToAvailableSpace", typeEncoding: "v16@0:8")
+    static let imageGridLayerScrollToTop = DockMethodSignature(className: "ECImageGridLayer", selectorName: "scrollToTop", typeEncoding: "v16@0:8")
     /// The Dock's category on `CALayer` that 15's selection highlight used (`setMaterialControl:3 appearance:1`).
     static let layerMaterialControl = DockMethodSignature(className: "CALayer", selectorName: "setMaterialControl:appearance:", typeEncoding: "v32@0:8Q16Q24")
 
@@ -50,6 +54,8 @@ enum DockLayerFactory {
         imageGridLayerInitialiser,
         imageGridLayerLayout,
         imageGridLayerInvalidate,
+        imageGridLayerScrollToAvailableSpace,
+        imageGridLayerScrollToTop,
     ]
 
     // MARK: - ECGridLayer
@@ -105,6 +111,14 @@ enum DockLayerFactory {
         unsafeBitCast(gridLayer.method(for: selector), to: InvalidateFunction.self)(gridLayer, selector, source)
     }
 
+    /// Scrolls the grid's items so the slot after the last item shows (`toAvailableSpace`), or back to
+    /// the top; animated if the current transaction animates.
+    static func scrollImageGridLayer(_ gridLayer: CALayer, toAvailableSpace: Bool) {
+        typealias ScrollFunction = @convention(c) (AnyObject, Selector) -> Void
+        let selector = toAvailableSpace ? imageGridLayerScrollToAvailableSpace.selector : imageGridLayerScrollToTop.selector
+        unsafeBitCast(gridLayer.method(for: selector), to: ScrollFunction.self)(gridLayer, selector)
+    }
+
     // MARK: - ECTextLayer and ECShadowTextLayer
 
     /// A Dock text layer; `ECShadowTextLayer` draws its shadow with the text rather than as a layer
@@ -157,8 +171,16 @@ enum QuartzCorePrivate {
     }
 
     /// A `CABackdropLayer`, which filters whatever lies behind it; a plain layer if the class is gone.
-    static func makeBackdropLayer() -> CALayer {
-        (NSClassFromString("CABackdropLayer") as? CALayer.Type)?.init() ?? CALayer()
+    ///
+    /// `isWindowServerAware` makes the window server fill it from everything behind it on screen — other
+    /// windows too, and backdrops of the same window beneath it — as the Dock's own glass is filled.
+    /// Without it, it sees only this window's own layers beneath it.
+    static func makeBackdropLayer(isWindowServerAware: Bool = false) -> CALayer {
+        let backdropLayer = (NSClassFromString("CABackdropLayer") as? CALayer.Type)?.init() ?? CALayer()
+        if isWindowServerAware, backdropLayer.responds(to: NSSelectorFromString("setWindowServerAware:")) {
+            backdropLayer.setValue(true, forKey: "windowServerAware")
+        }
+        return backdropLayer
     }
 
     /// An open folder's frosting: blur 30 with hard edges, then saturation 1.8 (15.5 `0x10004BE70`).
@@ -175,8 +197,9 @@ enum QuartzCorePrivate {
         return [blurFilter, saturationFilter]
     }
 
-    /// The desktop behind Launchpad: blur 30 with hard edges, saturation 1.8, then every channel at 55 %
-    /// plus 5.3 % (`-[Springboard init]`, 15.5 `0x100007C48`). There is no other dimming.
+    /// What macOS 15 did to the desktop behind Launchpad: blur 30 with hard edges, saturation 1.8, then
+    /// every channel at 55 % plus 5.3 % (`-[Springboard init]`, 15.5 `0x100007C48`). There is no other
+    /// dimming. Now only the background when the Dock's own glass is unavailable.
     static func desktopBackgroundFilters() -> [Any]? {
         guard
             let colorMatrixFilterType = stringConstant(named: "kCAFilterColorMatrix"),

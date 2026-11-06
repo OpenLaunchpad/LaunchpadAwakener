@@ -21,12 +21,19 @@ struct DockBuildProfile: Sendable, Equatable {
     /// `-[DockBarSystemDefinedEventHandler handleSystemDefinedEvent:type:]`.
     let dockBarGlobalAddress: UInt
 
+    /// Unslid address of the global that holds the Dock's `DockGlobals`.
+    ///
+    /// `+[DockGlassMaterialLayerController currentDockMaterialEnvironmentWithColorScheme:]` reads it, and
+    /// the `DockBar` global, and traps when either is still empty; the payload checks both first.
+    let dockGlobalsGlobalAddress: UInt
+
     static let knownProfiles: [DockBuildProfile] = [
         // macOS 27.2 (26B123).
         DockBuildProfile(
             executableUUID: UUID(uuidString: "C53975B1-2956-3ED4-B699-D4CE2E6A602C")!,
             bundleVersion: "2571.1.32.402",
-            dockBarGlobalAddress: 0x1_0032_9BA8
+            dockBarGlobalAddress: 0x1_0032_9BA8,
+            dockGlobalsGlobalAddress: 0x1_0032_9C20
         ),
     ]
 

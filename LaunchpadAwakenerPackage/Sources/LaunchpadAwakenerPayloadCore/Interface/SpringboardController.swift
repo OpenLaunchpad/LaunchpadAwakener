@@ -81,7 +81,6 @@ final class SpringboardController {
             metrics: metrics,
             scale: newWindow.backingScaleFactor,
             rootLayer: newWindow.rootLayer,
-            desktopImage: WallpaperSnapshot.captureWallpaperImage(onDisplay: displayIdentifier),
             applyEdit: { edit in
                 Task {
                     await LaunchpadServices.library.apply(edit)
@@ -96,7 +95,8 @@ final class SpringboardController {
             newInterface.animateEntrance(duration: SpringboardPreferences.showAnimationDuration)
         }
         restartIdleTimer()
-        #log(.info, "Shown (\(reason, privacy: .public)): \(newInterface.geometryDescription, privacy: .public)")
+        let backgroundDescription = newInterface.background?.isGlass == true ? "the Dock's glass, variant \(SpringboardPreferences.glassVariant)" : "the stand-in blur"
+        #log(.info, "Shown (\(reason, privacy: .public)) over \(backgroundDescription, privacy: .public): \(newInterface.geometryDescription, privacy: .public)")
     }
 
     /// Hides the springboard. Input goes back at once, as in 15; the window leaves when the exit

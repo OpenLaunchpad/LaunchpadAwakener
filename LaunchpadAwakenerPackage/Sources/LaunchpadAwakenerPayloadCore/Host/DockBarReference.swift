@@ -3,7 +3,7 @@ import Foundation
 import ObjectiveC
 import OSToolbox
 
-/// The Dock's `DockBar`, read from the global listed in the build profile.
+/// The Dock's `DockBar` and `DockGlobals`, read from the globals listed in the build profile.
 ///
 /// macOS 15's `-[DockAppEventHandler handleSpringboardEvent:type:]` compared every click with
 /// `-[DockBar rect]` to leave clicks on the Dock to the Dock. On macOS 27.2 nothing exported leads to
@@ -13,15 +13,30 @@ import OSToolbox
 @MainActor
 enum DockBarReference {
     private static weak var cachedDockBar: NSObject?
+    private static weak var cachedDockGlobals: NSObject?
 
     /// The Dock's `DockBar`; nil when it cannot be found.
     static var dockBar: NSObject? {
         if let cachedDockBar {
             return cachedDockBar
         }
-        let resolvedDockBar = readDockBarGlobal()
+        let resolvedDockBar = DockBuildProfile.current.flatMap { profile in
+            readGlobalObject(atUnslidAddress: profile.dockBarGlobalAddress, expectedClassName: "DockBar")
+        }
         cachedDockBar = resolvedDockBar
         return resolvedDockBar
+    }
+
+    /// The Dock's `DockGlobals`; nil when it cannot be found or does not exist yet.
+    static var dockGlobals: NSObject? {
+        if let cachedDockGlobals {
+            return cachedDockGlobals
+        }
+        let resolvedDockGlobals = DockBuildProfile.current.flatMap { profile in
+            readGlobalObject(atUnslidAddress: profile.dockGlobalsGlobalAddress, expectedClassName: "_TtC8DockCore11DockGlobals")
+        }
+        cachedDockGlobals = resolvedDockGlobals
+        return resolvedDockGlobals
     }
 
     /// The bar's current rectangle in global coordinates with a top-left origin; nil when the
@@ -30,23 +45,29 @@ enum DockBarReference {
         dockBar.map(DockHostInterface.rect(of:))
     }
 
-    /// Reads the global named by the running Dock's profile, and accepts what it holds only when that
-    /// turns out to be a `DockBar`.
-    private static func readDockBarGlobal() -> NSObject? {
-        guard let profile = DockBuildProfile.current else { return nil }
-        let globalAddress = Int(bitPattern: profile.dockBarGlobalAddress) + DockBuildProfile.executableSlide
+    /// Reads a global of the running Dock, and accepts what it holds only when that turns out to be an
+    /// instance of `expectedClassName`.
+    private static func readGlobalObject(atUnslidAddress unslidAddress: UInt, expectedClassName: String) -> NSObject? {
+        let globalAddress = Int(bitPattern: unslidAddress) + DockBuildProfile.executableSlide
         guard
             let globalPointer = UnsafeRawPointer(bitPattern: globalAddress),
             let objectPointer = globalPointer.load(as: UnsafeRawPointer?.self)
         else {
-            #log(.error, "The DockBar global is empty")
+            #log(.error, "The \(expectedClassName, privacy: .public) global is empty")
             return nil
         }
         let object = Unmanaged<AnyObject>.fromOpaque(objectPointer).takeUnretainedValue()
-        guard String(cString: object_getClassName(object)) == "DockBar", let dockBar = object as? NSObject else {
-            #log(.error, "The DockBar global holds a \(String(cString: object_getClassName(object)), privacy: .public); ignoring it")
+        // Compared as classes: the runtime names a Swift class `DockCore.DockGlobals`, not by the mangled
+        // name it is looked up by.
+        guard
+            let expectedClass = NSClassFromString(expectedClassName),
+            let objectClass = object_getClass(object),
+            objectClass == expectedClass,
+            let typedObject = object as? NSObject
+        else {
+            #log(.error, "The \(expectedClassName, privacy: .public) global holds a \(String(cString: object_getClassName(object)), privacy: .public); ignoring it")
             return nil
         }
-        return dockBar
+        return typedObject
     }
 }

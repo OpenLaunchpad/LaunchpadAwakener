@@ -15,7 +15,7 @@ rsync -a --delete /Volumes/DerivedData/Agents.noindex/<agent>/DerivedData/Launch
 ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakener.app'
 ```
 
-日志的 subsystem 是 `com.MxIris.LaunchpadAwakener`，info 级要加 `--info`：`log show --info --last 5m --predicate 'subsystem == "com.MxIris.LaunchpadAwakener"'`。
+日志的 subsystem 是 `com.MxIris.LaunchpadAwakener`，info 级要加 `--info`：`/usr/bin/log show --info --last 5m --predicate 'subsystem == "com.MxIris.LaunchpadAwakener"'`。经 ssh 跑时**必须写全路径**：MacBook 的登录 shell 是 zsh，zsh 有个同名的内建命令 `log`，裸写 `log show …` 只会报 `too many arguments`，配上 `2>/dev/null` 就成了「一条日志也没有」。
 
 出了问题，先经 ssh 退回系统的 Apps 并换掉注入过的 Dock：`touch /tmp/LaunchpadAwakener.disabled; killall Dock`。
 
