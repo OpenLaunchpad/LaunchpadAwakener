@@ -21,6 +21,8 @@ ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakene
 
 **用户要求看界面时**（截图、点击属于交互操作，用户没提就不做）：经 ssh 跑 `open -a Apps` 打开、`screencapture -x` 截图（能截到窗口内容）、`screencapture -v -V <秒>` 录屏后拷回本机用 ffmpeg 抽帧（录屏启动要零点几秒到一两秒，先开录、等一秒再操作）；点击与拖动用在 MacBook 上编译的一个发 `CGEvent` 的小工具，经 ssh 发的事件实测有效。开发构建 20 秒没有输入就自动收起，打开与操作要放在同一条命令里。拖动会改用户的布局，测完要还原。
 
+**和真正的 macOS 15 对照**：用户在 Ultra 上用 VirtualBuddy 跑着一台 macOS 15.5（24F74）虚拟机，机器名 `JHs-macOS-15-VM`，账户 `vm`，`ssh vm@<地址>` 免密（地址由 Ultra 的 `/var/db/dhcpd_leases` 按机器名查，2026-11-06 是 `192.168.64.15`）。虚拟机没装开发工具：发 `CGEvent` 的小工具要在本机用 `xcrun swiftc -target arm64-apple-macos15.0` 编好再拷过去，虚拟机重启后 `/tmp` 会清空。经 ssh 录屏、发事件所需的权限已写进它的权限数据库（当时关着 SIP）。`open -a Launchpad` 打开启动台，用 `screencapture -v` 录屏。虚拟机录屏会掉帧，连着几帧完全相同，只能对照画面构成，不能拿来量时间曲线。
+
 ## 结构
 
 四个二进制，Xcode 项目里只放外壳，代码都在本地 Swift 包：

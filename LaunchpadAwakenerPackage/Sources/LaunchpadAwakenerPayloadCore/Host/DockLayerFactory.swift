@@ -183,8 +183,10 @@ enum QuartzCorePrivate {
         return backdropLayer
     }
 
-    /// An open folder's frosting: blur 30 with hard edges, then saturation 1.8 (15.5 `0x10004BE70`).
-    static func folderBackdropFilters() -> [Any]? {
+    /// Blur 30 with hard edges, then saturation 1.8: the first of 15's filters on the desktop behind
+    /// Launchpad (15.5 `0x100007C48`). 15 also asked them of an open folder's backdrop (`0x10004BE70`),
+    /// but as `backgroundFilters`, which a backdrop does not apply.
+    static func blurAndSaturationFilters() -> [Any]? {
         guard
             let blurFilterType = stringConstant(named: "kCAFilterGaussianBlur"),
             let saturationFilterType = stringConstant(named: "kCAFilterColorSaturate"),
@@ -199,12 +201,12 @@ enum QuartzCorePrivate {
 
     /// What macOS 15 did to the desktop behind Launchpad: blur 30 with hard edges, saturation 1.8, then
     /// every channel at 55 % plus 5.3 % (`-[Springboard init]`, 15.5 `0x100007C48`). There is no other
-    /// dimming. Now only the background when the Dock's own glass is unavailable.
+    /// dimming. The wallpaper background, and the stand-in when the Dock's own glass is unavailable.
     static func desktopBackgroundFilters() -> [Any]? {
         guard
             let colorMatrixFilterType = stringConstant(named: "kCAFilterColorMatrix"),
             let colorMatrixFilter = makeFilter(type: colorMatrixFilterType),
-            let blurAndSaturationFilters = folderBackdropFilters()
+            let blurAndSaturationFilters = Self.blurAndSaturationFilters()
         else { return nil }
         let colorMatrixEntries: [Float] = [
             0.55, 0, 0, 0, 0.05292,

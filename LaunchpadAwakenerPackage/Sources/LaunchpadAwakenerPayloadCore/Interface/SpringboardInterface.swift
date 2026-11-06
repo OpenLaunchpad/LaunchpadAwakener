@@ -366,26 +366,13 @@ final class SpringboardInterface {
 
     // MARK: - Folders
 
-    /// What an open folder's panel frosts, for the background behind it.
-    private var folderFrost: SpringboardFolderPanel.Frost {
-        switch background?.style {
-        case .glass:
-            .windowServerBackdrop
-        case .wallpaper:
-            background?.wallpaperImage.map { .wallpaper($0, screenSize: metrics.input.screenSize) } ?? .windowBackdrop
-        case nil:
-            .windowBackdrop
-        }
-    }
-
     func openFolder(_ folder: LaunchpadFolder, from folderItemLayer: SpringboardItemLayer, completion: (@MainActor () -> Void)? = nil) {
         guard folderPanel == nil, !isAnimatingFolder else { return }
         select(itemAt: nil)
         let newFolderPanel = SpringboardFolderPanel(
             folder: folder,
             metrics: metrics,
-            scale: scale,
-            frost: folderFrost
+            scale: scale
         ) { [weak self] itemLayer in
             self?.putIcons(in: itemLayer)
         }

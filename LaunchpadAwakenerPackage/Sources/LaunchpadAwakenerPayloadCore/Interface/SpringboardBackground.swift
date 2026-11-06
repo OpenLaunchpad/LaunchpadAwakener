@@ -27,8 +27,6 @@ final class SpringboardBackground {
     static let backdropGroupName = "launchpad-background"
 
     let style: Style
-    /// The wallpaper shown, for the wallpaper style; nil when 15's gradient stands in.
-    let wallpaperImage: CGImage?
     /// Fills the screen; the glass's own layers reach past it.
     let layer = CALayer()
     private var glass: DockGlassMaterial?
@@ -37,7 +35,6 @@ final class SpringboardBackground {
     ///   leaves 15's gradient.
     init(style: Style, frame: CGRect, scale: CGFloat, wallpaperImage: CGImage?) {
         self.style = style
-        self.wallpaperImage = style == .wallpaper ? wallpaperImage : nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.frame = frame
