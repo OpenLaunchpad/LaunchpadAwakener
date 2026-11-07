@@ -65,6 +65,10 @@ payload 注入 macOS 27.2 的 Dock，接管所有「打开 Apps」的入口，�
 
 **收起时先交还输入，再放退场动画。** 与 15 一样：退场一开始就归还键盘焦点、事件不再拦截，正在退场的窗口另存一份，动画结束后才移出屏幕；此时再打开会先立刻结束旧的那份。点图标启动的放大淡出放在窗口根图层上，不随界面一起淡出。
 
+**再次打开回到上次的位置，靠收起时记下来，不是靠留着界面。** 15 的 Launchpad 在 Dock 的整个生命周期里只建一次，收起时只清掉搜索、选中与抖动模式，不动页码，也不关文件夹，所以再打开还在原处。复刻每次打开都重建窗口与界面，于是收起时记下 `SpringboardPosition`（主页的页号，开着的文件夹及其页号），下次打开时先不带动画地摆好，再放进场动画；文件夹开着时进场缩放的是文件夹面板，主页停在 0.95，与 15 相同。几条细则：搜索结果按进入搜索前的页记，因为 15 在退场后清空搜索、无动画回到那一页；正在关闭的文件夹和拖动中还没存进库的文件夹按已关闭记；期间布局变了，文件夹还在就在它现在所在的那页打开，页数少了就退到最后一页，文件夹没了就只回到那一页（`resolved(in:)`）。位置只在内存里，Dock 重启后回到第一页，与 15 相同。
+
+**点 Apps 图标关掉 Launchpad，靠时间先后认出这次点击。** 15 的 Dock 点任何图标都先收起 Launchpad 再执行图标的动作，唯独 Launchpad 图标例外，它自己的动作就是切换。27.2 的 Dock 不告诉 payload 点的是哪个图标，所以点 Dock 一律先收起；而 Apps 图标的动作经 `-[WVExpose exitAndDoWork:]` 排到主队列的下一轮才调 `sendLaunchAppsBrowsing`，那时界面已经收起，于是又被打开，看起来就是「点 Apps 只会打开」。现在点 Dock 收起时记下时刻，此后 0.5 秒内到达的「打开 Apps」请求算作这次点击的，不再打开（`SpringboardEntry`）。没有照 15 按图标类型豁免：那要再依赖 Dock 的命中测试与图标类型两个接口，新构建上多两处可能对不上。代价见「已知降级」。
+
 **自动注入的两道保护。** 同一个 Dock 进程的注入与 payload 的暂存都只进行一次（App 启动时的注入与进程监视的注入会同时开始）；注入后 Dock 连续 3 次在 15 秒内退出，就自动关掉自动注入并说明原因，免得一个加载即崩溃的 payload 让 Dock 循环崩溃。
 
 ## 模块结构
@@ -108,13 +112,15 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── SpringboardSearch.swift         # 15.5 的搜索规则（纯计算）
 │   ├── SpringboardPaging.swift         # 15.5 的翻页、方向键与拖动命中规则（纯计算）
 │   ├── SpringboardPinch.swift          # 15.5 的捏合映射与弹簧（纯计算）
+│   ├── SpringboardPosition.swift       # 再次打开时回到的页与文件夹，及其在新布局里的换算（纯计算）
+│   ├── SpringboardEntry.swift          # 「打开 Apps」请求的应答：打开、关闭，或认出点 Apps 图标后不动（纯计算）
 │   └── SpringboardSelfCheck.swift      # 开发构建的离屏自检
 └── Integration/                        # hook 声明与入口、事件的接管
 ```
 
 ## 核心数据流
 
-- **显示**：入口 hook（`-[Spotlight sendLaunchAppsBrowsing]`）→ `SpringboardController.toggle` → 读 Dock 的几何算出 `SpringboardMetrics` → 建窗口与 `SpringboardInterface` → 窗口抬到 27 层、Dock 的窗口抬到 29 层、抢键盘焦点。
+- **显示**：入口 hook（`-[Spotlight sendLaunchAppsBrowsing]`）→ `SpringboardController.toggle`（按 `SpringboardEntry` 决定打开、关闭或不动）→ 读 Dock 的几何算出 `SpringboardMetrics` → 建窗口与 `SpringboardInterface`，摆到上次收起时的 `SpringboardPosition` → 窗口抬到 27 层、Dock 的窗口抬到 29 层、抢键盘焦点。
 - **事件**：事件 hook 把 `CGEvent` 抄成 `SpringboardInputEvent` → 控制器换算成容器坐标（左下为原点、y 向上）→ 交给界面 → 界面返回「无 / 关闭 / 启动」三种动作之一。落在 Dock 栏上的点击交还 Dock。
 - **布局**：`LaunchpadLibrary` 启动时打开库，首次导入，与已安装的 App 对账，发布布局；之后应用目录一有变化就再对账。每次发布都会触发图标预取。
 
@@ -128,13 +134,15 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 拖到 Dock 上、拖动搜索结果、文件夹里的方向键导航都不支持；拖动时文件夹不额外加一行。
 - 捏合没有接入 27 的 Dock 手势系统（那里已经没有它），而是读原始 DockSwipe 事件，并且要用户先关掉 Spotlight 的捏合。
 - 背景默认照 15 截壁纸、加三个滤镜；另有 `springboard-background` 设为 `glass` 时的 Dock 液态玻璃，那时 App 的窗口会被模糊进来。
+- 点 Apps 图标关闭 Launchpad，靠「点 Dock 收起后 0.5 秒内的请求」认出这次点击，不是 15 那样按图标类型豁免（原因见上）。
 
 ## 验证
 
-- 单元测试（`swift test`，只在开发机上跑，不碰 Dock）：库的建立、追加、编辑（移动、溢出、建文件夹及被拖的排在前面、放入、新的末页，以及任何编辑让文件夹只剩一个 App 时解散）与整理；界面在库跟上之前显示的文件夹与库的结果一致；旧库导入（含隐藏页、断了父项的页、下载中的 App、空页）；App 发现、排除名单与 15.5 原文件的逐项核对；对账；主界面与文件夹的几何（以 15.5 规格里 1470×956 屏的手算示例为准）；搜索规则；翻页、方向键与拖动命中规则；捏合映射与弹簧。
+- 单元测试（`swift test`，只在开发机上跑，不碰 Dock）：库的建立、追加、编辑（移动、溢出、建文件夹及被拖的排在前面、放入、新的末页，以及任何编辑让文件夹只剩一个 App 时解散）与整理；界面在库跟上之前显示的文件夹与库的结果一致；旧库导入（含隐藏页、断了父项的页、下载中的 App、空页）；App 发现、排除名单与 15.5 原文件的逐项核对；对账；主界面与文件夹的几何（以 15.5 规格里 1470×956 屏的手算示例为准）；搜索规则；翻页、方向键与拖动命中规则；捏合映射与弹簧；再次打开的位置在布局变化后的换算；「打开 Apps」请求的应答规则。
 - MacBook 上的非交互验证：部署后与 Dock 重启后各注入一次、hook 装上、21 个 Dock 方法签名全部吻合；导入 3 页、2 个文件夹、149 个 App 与旧库一致；开发构建的离屏自检核对 Dock 的 `ECGridLayer` 建出的图标数量与位置、文件夹图标的方圆与 `ECImageGridLayer` 缩略图，以及 Dock 的玻璃建出的图层：一个由窗口服务器采样、带 `glassBackground` 滤镜、组名 `launchpad-background` 的 `CABackdropLayer`，加 `CASDFLayer` 与 `CAPortalLayer`，向屏幕四边外扩 64 点，Dock 未崩溃。
 - 经用户同意的交互验证（2026-11-06，MacBook 上）：经 ssh 截图、录屏，用一个发 `CGEvent` 的小工具模拟点击与拖动，核对了玻璃背景、文件夹打开动画、快速松手建文件夹并自动弹开、从文件夹拖出后解散；录屏逐帧看过，测试用的文件夹已拆掉。
 - 与 macOS 15.5 对照（2026-11-06）：用户在 Ultra 上用 VirtualBuddy 开了一台 15.5（24F74）虚拟机，经 ssh 录下真正的文件夹开合，与 MacBook 上的复刻逐帧对照了图片飞出、标题、页面平移与面板的透明度。虚拟机录屏会掉帧（连着几帧完全相同），只能对照画面构成，量不了时间曲线。用法见项目 `CLAUDE.md`。
+- 交互验证（2026-11-07，MacBook 上，同样的截图与模拟点击）：翻到第 2 页后 Esc 关闭，再打开仍在第 2 页；开着文件夹时用「打开 Apps」关闭，再打开时文件夹仍开着，与关闭前的截图一致；打开时点 Dock 上的 Apps 图标，界面关闭且不再弹回（日志先是 `Hidden (clicked the Dock)`，再是 `Stays hidden`），关闭时再点则打开。测试后已翻回第 1 页。
 - 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合。
 
 ## 已知降级
@@ -146,6 +154,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 背景是打开那一刻的静态截图，动态壁纸不会动（与 15 相同）；截不到时是 15 的径向渐变。
 - 快速放进文件夹后，文件夹图标的缩略图在库发布新布局、页面重建时就滚回顶部；15 要等下次打开再关上这个文件夹才滚回。
 - 捏合在用户关掉 Spotlight 的捏合之前不生效；Dock 能否收到捏合事件尚未在真机上确认。
+- 点 Dock 上别的图标关闭界面后 0.5 秒内按 Launchpad 键或触发角，这一下会被当作 Apps 图标的请求吞掉。
+- 再次打开的位置不跨 Dock 重启保存（与 15 相同）。
 - 只在主显示器上显示。
 
 ## 适配新的 Dock 构建

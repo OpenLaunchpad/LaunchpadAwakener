@@ -50,6 +50,8 @@ final class SpringboardInterface {
     private(set) var folderPanel: SpringboardFolderPanel?
     /// True while a folder opens or closes; input and layout changes wait.
     private(set) var isAnimatingFolder = false
+    /// True from the moment a folder starts to close until its panel is gone.
+    private var isClosingFolder = false
     private var renamingTitle: String?
     /// The latest stored layout, waiting until nothing it would disturb is moving.
     private(set) var pendingLayout: LaunchpadLayout?
@@ -89,6 +91,7 @@ final class SpringboardInterface {
     ///     for once the Dock is up, so the off-screen self-check goes without.
     ///   - wallpaperImage: The wallpaper as captured on opening, for the wallpaper style; nil falls back to
     ///     15's own gradient.
+    ///   - position: Where to open: the page, and the folder open over it, that the last showing was left on.
     init(
         layout: LaunchpadLayout,
         metrics: SpringboardMetrics,
@@ -96,6 +99,7 @@ final class SpringboardInterface {
         rootLayer: CALayer,
         backgroundStyle: SpringboardBackground.Style? = .wallpaper,
         wallpaperImage: CGImage? = nil,
+        position: SpringboardPosition = .firstPage,
         applyEdit: @escaping (LaunchpadEdit) -> Void
     ) {
         self.layout = layout
@@ -148,7 +152,42 @@ final class SpringboardInterface {
         mainPages.currentPageDidChange = { [weak self] in
             self?.select(itemAt: nil)
         }
-        showMainPages(pageIndex: 0)
+        restore(position)
+    }
+
+    // MARK: - Position
+
+    /// Where the springboard stands now, for the next showing to open there. Search results count as the
+    /// page they replaced, since 15 cleared the search once it had hidden and went back to that page
+    /// (`-[ECSBSpringboard clearFilteredItems]`, 15.5 `0x1000F2B9C`). A folder already closing, or one a
+    /// drag made that is not stored yet, counts as closed.
+    var position: SpringboardPosition {
+        let mainPageIndex = isShowingSearchResults ? pageIndexBeforeSearch : mainPages.currentPageIndex
+        guard let folderPanel, !isClosingFolder, !folderPanel.folder.isUnsaved else {
+            return SpringboardPosition(mainPageIndex: mainPageIndex)
+        }
+        return SpringboardPosition(
+            mainPageIndex: mainPageIndex,
+            openFolder: SpringboardPosition.OpenFolder(identifier: folderPanel.folder.identifier, pageIndex: folderPanel.pages.currentPageIndex)
+        )
+    }
+
+    /// Shows the page `position` names and opens its folder over it, all without animation, so that the
+    /// entrance plays on whichever is in front.
+    private func restore(_ position: SpringboardPosition) {
+        let resolution = position.resolved(in: layout)
+        showMainPages(pageIndex: resolution.mainPageIndex)
+        guard let folder = resolution.folder, let folderItemLayer = folderItemLayer(of: folder) else { return }
+        let restoredFolderPanel = SpringboardFolderPanel(
+            folder: folder,
+            metrics: metrics,
+            scale: scale,
+            pageIndex: resolution.folderPageIndex
+        ) { [weak self] itemLayer in
+            self?.putIcons(in: itemLayer)
+        }
+        folderPanel = restoredFolderPanel
+        restoredFolderPanel.showOpen(over: folderItemLayer, springboardLayer: springboardLayer, containerLayer: containerLayer)
     }
 
     // MARK: - Showing and hiding
@@ -408,9 +447,11 @@ final class SpringboardInterface {
         let closingFolder = folderPanel.folder
         let folderItemLayer = folderItemLayer(of: closingFolder)
         isAnimatingFolder = true
+        isClosingFolder = true
         let finish: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
             self.folderPanel = nil
+            self.isClosingFolder = false
             // The page may have been rebuilt meanwhile; show the folder's icon on the page as it is now.
             CATransaction.begin()
             CATransaction.setDisableActions(true)

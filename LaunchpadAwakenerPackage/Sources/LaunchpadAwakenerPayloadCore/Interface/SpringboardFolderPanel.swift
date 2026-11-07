@@ -33,10 +33,13 @@ final class SpringboardFolderPanel {
     let titleEditorLayer = SpringboardTitleEditorLayer()
     private let scale: CGFloat
 
+    /// - Parameter pageIndex: The folder's page to show first; a springboard reopening with this folder
+    ///   open shows the page it was left on.
     init(
         folder: LaunchpadFolder,
         metrics: SpringboardMetrics,
         scale: CGFloat,
+        pageIndex: Int = 0,
         itemLayerWasFilled: @escaping (SpringboardItemLayer) -> Void
     ) {
         self.folder = folder
@@ -81,7 +84,7 @@ final class SpringboardFolderPanel {
         folderLayer.addSublayer(titleEditorLayer)
         CATransaction.commit()
 
-        showPages(itemLayerWasFilled: itemLayerWasFilled, pageIndex: 0)
+        showPages(itemLayerWasFilled: itemLayerWasFilled, pageIndex: pageIndex)
     }
 
     private func showPages(itemLayerWasFilled: @escaping (SpringboardItemLayer) -> Void, pageIndex: Int) {
@@ -140,6 +143,22 @@ final class SpringboardFolderPanel {
 
     /// How many of the first page's icons a folder icon shows as thumbnails.
     static let thumbnailCount = 9
+
+    /// Puts the panel up already open over `folderItemLayer`, with nothing animated: the state
+    /// ``animateOpen(from:springboardLayer:containerLayer:completion:)`` ends in, for a springboard
+    /// reopening with this folder open. The springboard's entrance then grows the panel instead of the
+    /// pages, as 15's did (`-[Springboard prepareForEnterAnimation]`, 15.5 `0x10002D57C`).
+    func showOpen(over folderItemLayer: SpringboardItemLayer, springboardLayer: CALayer, containerLayer: CALayer) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        containerLayer.addSublayer(folderLayer)
+        folderItemLayer.opacity = 0
+        springboardLayer.opacity = 0
+        if !SpringboardPreferences.reducesMotion {
+            springboardLayer.transform = CATransform3DMakeScale(0.95, 0.95, 1)
+        }
+        CATransaction.commit()
+    }
 
     /// Grows the panel out of `folderItemLayer`'s square while the first page's pictures fly out of its
     /// thumbnails into their cells and their titles fade in under them, as 15's `prepareForAnimatedShow`

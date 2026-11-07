@@ -39,6 +39,11 @@ final class SpringboardController {
     private var layout: LaunchpadLayout = .empty
     /// Bumped on every input and every hide, so a stale idle timer cannot hide a later showing.
     private var idleGeneration = 0
+    /// Where the springboard was when it last hid; the next showing opens there.
+    private var lastPosition = SpringboardPosition.firstPage
+    /// When a click on the Dock last closed the springboard, until the next request to open Apps;
+    /// see ``SpringboardEntry``.
+    private var lastDockClickDismissal: ContinuousClock.Instant?
 
     /// A pinch in progress: whether it opens, and how visible it has made the springboard.
     private var pinch: (isOpening: Bool, visibility: Double)?
@@ -55,11 +60,17 @@ final class SpringboardController {
         window?.isOrderedIn ?? false
     }
 
+    /// Answers a request to open Apps: the Launchpad key, a hot corner, the Apps icon in the Dock.
     func toggle(reason: String) {
-        if isVisible {
-            hide(reason: reason)
-        } else {
+        let sinceDockClickDismissal = lastDockClickDismissal.map { ContinuousClock.now - $0 }
+        lastDockClickDismissal = nil
+        switch SpringboardEntry.response(isVisible: isVisible, sinceDockClickDismissal: sinceDockClickDismissal) {
+        case .show:
             show(reason: reason)
+        case .hide:
+            hide(reason: reason)
+        case .stayHidden:
+            #log(.info, "Stays hidden (\(reason, privacy: .public)): the click on the Dock that closed it was on Apps")
         }
     }
 
@@ -86,6 +97,7 @@ final class SpringboardController {
             rootLayer: newWindow.rootLayer,
             backgroundStyle: backgroundStyle,
             wallpaperImage: wallpaperImage,
+            position: lastPosition,
             applyEdit: { edit in
                 Task {
                     await LaunchpadServices.library.apply(edit)
@@ -106,7 +118,7 @@ final class SpringboardController {
         case .glass:
             newInterface.background?.isGlass == true ? "the Dock's glass, variant \(SpringboardPreferences.glassVariant)" : "the stand-in blur"
         }
-        #log(.info, "Shown (\(reason, privacy: .public)) over \(backgroundDescription, privacy: .public): \(newInterface.geometryDescription, privacy: .public)")
+        #log(.info, "Shown (\(reason, privacy: .public)) on \(newInterface.position.description, privacy: .public) over \(backgroundDescription, privacy: .public): \(newInterface.geometryDescription, privacy: .public)")
         #if DEBUG
         SpringboardSelfCheck.logShownBackground(of: newInterface, rootLayer: newWindow.rootLayer)
         #endif
@@ -121,6 +133,8 @@ final class SpringboardController {
         idleGeneration += 1
         stopPinch()
         currentInterface.prepareForHiding()
+        // After the preparation: a drag it cancels may take a folder it had opened away with it.
+        lastPosition = currentInterface.position
         currentWindow.releaseKeyFocus()
         hidingWindow = currentWindow
         hidingInterface = currentInterface
@@ -132,7 +146,7 @@ final class SpringboardController {
         } else {
             finishHiding()
         }
-        #log(.info, "Hidden (\(reason, privacy: .public))")
+        #log(.info, "Hidden (\(reason, privacy: .public)) on \(self.lastPosition.description, privacy: .public)")
     }
 
     /// Removes a springboard that is fading out, now.
@@ -229,7 +243,9 @@ final class SpringboardController {
         case .mouseUp(.left):
             guard interface.dragSession != nil || !isInsideDockBar(inputEvent.location) else {
                 // Whatever the click on the Dock opens takes key focus, so close afterwards, as
-                // macOS 15's Launchpad closed when something was opened from the Dock.
+                // macOS 15's Launchpad closed when something was opened from the Dock. A click on Apps
+                // asks to open Apps a moment later; that request must not open the springboard again.
+                lastDockClickDismissal = .now
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         SpringboardController.shared.hide(reason: "clicked the Dock")
