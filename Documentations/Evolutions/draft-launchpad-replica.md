@@ -6,7 +6,7 @@
 - **最后更新**: 2026-11-08
 - **所属愿景**: 无
 - **关联提案**: 无
-- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批在 `feature/daily-gaps`（worktree `.worktrees/LaunchpadAwakener-DailyGaps`）；验证用原型在分支 `experiment/injection-prototype`
+- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；验证用原型在分支 `experiment/injection-prototype`
 - **配套文档**: [实现说明](../Internal/LaunchpadReplica.md)
 
 ## 摘要
@@ -291,3 +291,4 @@ final class SpringboardController {
 | 2026-11-08 | 拖到 Dock 与拖动搜索结果留作后续项 | 27.2 不能照搬 15 的 CoreDrag 注入（消息 3 会把 Dock 的全局指针卡在 (-1,-1)），推荐的混合做法要往 Dock 的拖动状态里注入消息、只能在真机上拖着验证，配对出错 Dock 会一直留着拖动状态；没有交互验证不该往 Dock 里注入。拖动搜索结果要先清空搜索、把被拖项挪到当前页末尾再接普通拖动，要改拖动的起手。做法记在逆向笔记 4.9.1 |
 | 2026-11-08 | 第 6 批自审（code-review medium）：10 条发现，修 5 条——删除中的图标仍可点击与重复删除、弹出确认时还能翻页、页面重建后选中高亮残留、删除与对账竞争时编辑失败、打开前在主线程查 Spotlight；另 5 条判为误报或不修，记在 [已裁决清单](../Internal/ReviewAdjudications.md) | 修复各带回归测试，界面层里无法在测试进程中建出 Dock 的网格类的两条（翻页、选中高亮）没有测试 seam，只验证了编译与已有测试 |
 | 2026-11-08 | 第 6 批实现完成，待用户看过后收尾；输入法、拖到 Dock、拖动搜索结果是后续项 | — |
+| 2026-11-08 | 第 6 批已做完的部分收尾：合进 `main` 并推送，`feature/daily-gaps` 与它的 worktree 删除。提案保持 In Progress、不取号；拖到 Dock 与拖动搜索结果接着在第 6 批第 5 步做，输入法另起提案 | 用户要求先收尾、再继续做这三项，提案还没做完。文档：实现说明已写进这一批的决策与已知降级，没有调用方契约，不需要使用指南；没有新术语 |
