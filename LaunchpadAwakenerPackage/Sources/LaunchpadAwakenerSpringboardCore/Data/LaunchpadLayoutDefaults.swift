@@ -43,12 +43,25 @@ package struct ApplicationExclusionList: Sendable, Equatable {
     /// `com.apple.launchpad.launcher`.
     package static let appsLauncherBundleIdentifier = "com.apple.apps.launcher"
 
-    /// macOS 15.5's list, plus macOS 27's Apps launcher.
+    /// The standalone Launchpad, debug and release builds alike: a Launchpad does not list a Launchpad,
+    /// as macOS 15's did not list its own launcher.
+    package static let standaloneLaunchpadBundleIdentifierPrefix = "com.MxIris.LaunchpadAwakener.Launchpad"
+
+    /// macOS 15.5's list, plus macOS 27's Apps launcher and the standalone Launchpad.
     package static let standard: ApplicationExclusionList = {
         var exclusionList = macOS15
         exclusionList.excludedIdentifiers.insert(appsLauncherBundleIdentifier)
+        exclusionList.rules.append(.bundleIdentifierHasPrefix(standaloneLaunchpadBundleIdentifierPrefix))
         return exclusionList
     }()
+
+    /// Whether the application is a way into Launchpad or Apps itself — macOS 27's Apps launcher or the
+    /// standalone Launchpad. These leave a layout even when they are already in it. The rest of the
+    /// list only keeps applications from being added: macOS 15 left in place what a user had put in a
+    /// layout itself, an uninstaller included, and so does this.
+    package static func isLaunchpadLauncher(bundleIdentifier: String) -> Bool {
+        bundleIdentifier == appsLauncherBundleIdentifier || bundleIdentifier.hasPrefix(standaloneLaunchpadBundleIdentifierPrefix)
+    }
 
     /// `launchpad.exclude` of macOS 15.5's `LaunchPadLayout.plist`, unchanged.
     package static let macOS15 = ApplicationExclusionList(

@@ -14,6 +14,7 @@
 		1A5C00000000000000000904 /* $(INJECTION_SERVICE_NAME) in Embed Daemon */ = {isa = PBXBuildFile; fileRef = 1A5C00000000000000000201 /* $(INJECTION_SERVICE_NAME) */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		1A5C00000000000000000905 /* LaunchpadAwakenerTextInputCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000803 /* LaunchpadAwakenerTextInputCore */; };
 		1A5C00000000000000000906 /* LaunchpadAwakenerTextInput.app in Embed Text Input Helper */ = {isa = PBXBuildFile; fileRef = 1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		1A5C00000000000000000907 /* LaunchpadAwakenerStandaloneCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000804 /* LaunchpadAwakenerStandaloneCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -81,6 +82,7 @@
 		1A5C00000000000000000201 /* $(INJECTION_SERVICE_NAME) */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "$(INJECTION_SERVICE_NAME)"; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A5C00000000000000000202 /* LaunchpadAwakenerPayload.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = LaunchpadAwakenerPayload.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaunchpadAwakenerTextInput.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A5C00000000000000000204 /* Launchpad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Launchpad.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -115,6 +117,11 @@
 		1A5C00000000000000000404 /* LaunchpadAwakenerTextInput */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = LaunchpadAwakenerTextInput;
+			sourceTree = "<group>";
+		};
+		1A5C00000000000000000405 /* LaunchpadAwakenerStandalone */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LaunchpadAwakenerStandalone;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -152,6 +159,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1A5C00000000000000000541 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A5C00000000000000000907 /* LaunchpadAwakenerStandaloneCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -162,6 +177,7 @@
 				1A5C00000000000000000401 /* LaunchpadAwakenerDaemon */,
 				1A5C00000000000000000402 /* LaunchpadAwakenerPayload */,
 				1A5C00000000000000000404 /* LaunchpadAwakenerTextInput */,
+				1A5C00000000000000000405 /* LaunchpadAwakenerStandalone */,
 				1A5C00000000000000000301 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -173,6 +189,7 @@
 				1A5C00000000000000000201 /* $(INJECTION_SERVICE_NAME) */,
 				1A5C00000000000000000202 /* LaunchpadAwakenerPayload.framework */,
 				1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */,
+				1A5C00000000000000000204 /* Launchpad.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -288,6 +305,29 @@
 			productReference = 1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */;
 			productType = "com.apple.product-type.application";
 		};
+		1A5C00000000000000000104 /* LaunchpadAwakenerStandalone */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A5C00000000000000000750 /* Build configuration list for PBXNativeTarget "LaunchpadAwakenerStandalone" */;
+			buildPhases = (
+				1A5C00000000000000000540 /* Sources */,
+				1A5C00000000000000000541 /* Frameworks */,
+				1A5C00000000000000000542 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1A5C00000000000000000405 /* LaunchpadAwakenerStandalone */,
+			);
+			name = LaunchpadAwakenerStandalone;
+			packageProductDependencies = (
+				1A5C00000000000000000804 /* LaunchpadAwakenerStandaloneCore */,
+			);
+			productName = LaunchpadAwakenerStandalone;
+			productReference = 1A5C00000000000000000204 /* Launchpad.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -310,6 +350,9 @@
 					1A5C00000000000000000103 = {
 						CreatedOnToolsVersion = 27.2;
 					};
+					1A5C00000000000000000104 = {
+						CreatedOnToolsVersion = 27.2;
+					};
 				};
 			};
 			buildConfigurationList = 1A5C00000000000000000700 /* Build configuration list for PBXProject "LaunchpadAwakener" */;
@@ -330,12 +373,20 @@
 				1A5C00000000000000000101 /* LaunchpadAwakenerDaemon */,
 				1A5C00000000000000000102 /* LaunchpadAwakenerPayload */,
 				1A5C00000000000000000103 /* LaunchpadAwakenerTextInput */,
+				1A5C00000000000000000104 /* LaunchpadAwakenerStandalone */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		1A5C00000000000000000502 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A5C00000000000000000542 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -400,6 +451,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		1A5C00000000000000000530 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A5C00000000000000000540 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -686,6 +744,60 @@
 			};
 			name = Release;
 		};
+		1A5C00000000000000000751 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Launchpad;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.MxIris.LaunchpadAwakener.Launchpad.debug;
+				PRODUCT_NAME = Launchpad;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		1A5C00000000000000000752 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Launchpad;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.MxIris.LaunchpadAwakener.Launchpad;
+				PRODUCT_NAME = Launchpad;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -734,6 +846,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		1A5C00000000000000000750 /* Build configuration list for PBXNativeTarget "LaunchpadAwakenerStandalone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A5C00000000000000000751 /* Debug */,
+				1A5C00000000000000000752 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -752,6 +873,10 @@
 		1A5C00000000000000000803 /* LaunchpadAwakenerTextInputCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LaunchpadAwakenerTextInputCore;
+		};
+		1A5C00000000000000000804 /* LaunchpadAwakenerStandaloneCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LaunchpadAwakenerStandaloneCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -56,6 +56,7 @@ enum SpringboardSelfCheck {
             #log(.error, "Self-check: no wallpaper captured after \(captureMilliseconds, privacy: .public) ms; the background falls back to 15's gradient")
         }
 
+        guard host.offersGlassBackground else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + glassCheckDelay) {
             MainActor.assumeIsolated {
                 checkGlassOncePerBuild(frame: detachedRootLayer.frame, scale: scale)

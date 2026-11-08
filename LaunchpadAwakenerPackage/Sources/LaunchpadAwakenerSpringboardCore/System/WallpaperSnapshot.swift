@@ -23,8 +23,10 @@ package enum WallpaperSnapshot {
         UnsafeMutableRawPointer(bitPattern: -2)
     }
 
-    package static func captureWallpaperImage(onDisplay displayIdentifier: CGDirectDisplayID) -> CGImage? {
-        guard var windowIdentifier = wallpaperWindowIdentifier(onDisplay: displayIdentifier) else {
+    /// `dockProcessIdentifier` tells the Dock's own wallpaper window (macOS 26) from other windows; inside
+    /// the Dock it is this process.
+    package static func captureWallpaperImage(onDisplay displayIdentifier: CGDirectDisplayID, dockProcessIdentifier: pid_t = getpid()) -> CGImage? {
+        guard var windowIdentifier = wallpaperWindowIdentifier(onDisplay: displayIdentifier, dockProcessIdentifier: dockProcessIdentifier) else {
             #log(.error, "No wallpaper window on display \(displayIdentifier, privacy: .public)")
             return nil
         }
@@ -45,13 +47,13 @@ package enum WallpaperSnapshot {
     }
 
     /// The on-screen window that covers the display below the desktop icons.
-    private static func wallpaperWindowIdentifier(onDisplay displayIdentifier: CGDirectDisplayID) -> CGWindowID? {
+    private static func wallpaperWindowIdentifier(onDisplay displayIdentifier: CGDirectDisplayID, dockProcessIdentifier: pid_t) -> CGWindowID? {
         guard let windowDescriptions = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else { return nil }
         return wallpaperWindowNumber(
             in: windowDescriptions,
             displayBounds: CGDisplayBounds(displayIdentifier),
             desktopIconWindowLevel: Int(CGWindowLevelForKey(.desktopIconWindow)),
-            dockProcessIdentifier: getpid(),
+            dockProcessIdentifier: dockProcessIdentifier,
             isWindowManagerProcess: isWindowManagerProcess(_:)
         )
     }

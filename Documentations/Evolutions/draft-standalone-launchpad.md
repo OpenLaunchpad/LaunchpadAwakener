@@ -332,7 +332,7 @@ LaunchpadLibrary.Configuration(
    2. ✅ 搬文件：`Data/`、`Interface/` 与事件转换移进 `LaunchpadAwakenerSpringboardCore`，跨模块用到的声明改为 `package`；测试改测新模块。
    3. ◐ 回归（27.2 已做，26 虚拟机待做）：单元测试全过；部署到 MacBook（27.2）与 26 虚拟机，日志里 23 个 Dock 方法签名全部吻合、两个 hook 装上、离屏自检的结果与改动前一致。
 2. ✅ **自己画的图层**：先补逆向 `ECImageGridLayer` 的两个滚动方法；再写四种等价图层与单元测试（布局规则与像素比对）；注入版的离屏自检加上两套图层的像素比对，在 MacBook 上看日志。可以顺带给翻页与选中高亮补上测试。
-3. **独立 App 的骨架**：新 target、`LaunchpadAwakenerStandaloneCore`、窗口与事件、打开与收起、常驻与随登录启动、开发期保险与看门狗、布局库与首次导入、偏好、壁纸、图标样式、`--self-check`。验证：单元测试（从注入版的库导入、壁纸来源的挑选、Dock 几何的换算）；在 MacBook 与 26 虚拟机上用 `--self-check` 做非交互验证，日志里的页数、文件夹数、App 数与注入版的库一致，壁纸来源与图标样式符合预期。
+3. ◐ **独立 App 的骨架**（MacBook 已验证，26 虚拟机待做）：新 target、`LaunchpadAwakenerStandaloneCore`、窗口与事件、打开与收起、常驻与随登录启动、开发期保险与看门狗、布局库与首次导入、偏好、壁纸、图标样式、`--self-check`。验证：单元测试（从注入版的库导入、壁纸来源的挑选、Dock 几何的换算）；在 MacBook 与 26 虚拟机上用 `--self-check` 做非交互验证，日志里的页数、文件夹数、App 数与注入版的库一致，壁纸来源与图标样式符合预期。
 4. **输入法**：`NSTextInputClient` 与编辑器的组字支持。验证：组字规则的单元测试；真机上的输入法要打开界面，属于交互操作，由用户进行或经用户同意后做。
 5. **快捷键与设置窗口**：录制、注册、随登录启动的开关。
 
@@ -367,3 +367,6 @@ LaunchpadLibrary.Configuration(
 | 2026-11-08 | 第 1 批第 3 步：MacBook（27.2）上回归通过；26 虚拟机当时没有运行，没做 | 先用 MacBook 上原有的构建（`main` 的最新构建）重启一次 Dock 取基线日志，再部署拆分后的构建：23 个方法签名吻合、两个 hook 装上，离屏自检的几何、网格、可删 App 数、新装标记数、壁纸尺寸与基线逐行一致，玻璃自检通过，Dock 没有崩溃。26 虚拟机要用户开起来后再补 |
 | 2026-11-08 | 第 2 批完成：四种等价图层与选中材质照逆向写进共用模块，单元测试 10 个；没有宿主时（单元测试）的默认图层也换成它们，原有测试照旧通过。开发构建的离屏自检在 Dock 里逐项对照，MacBook（27.2）上页面网格、缩略图与滚动、选中材质、标题像素全部一致 | `ECImageGridLayer` 的滚动、选中材质与文字图层的绘制细节由逆向补齐，写在 `/Volumes/RE/Dock/27.2/Notes/ECLayerReuse.md` 第 5 节。给翻页与选中高亮补测试这一项没做，留作后续：它们在第 6 批自审时就有回归说明，这一批的目标是等价图层本身 |
 | 2026-11-08 | 新增实现说明 `Internal/StandaloneLaunchpad.md`，登记为配套文档 | 宿主接口的形状、等价图层里看代码看不出的规则，下次维护会踩 |
+| 2026-11-08 | 第 3 批：独立 App 的骨架完成。新 target `LaunchpadAwakenerStandalone`（产物 `Launchpad.app`）、模块 `LaunchpadAwakenerStandaloneCore` 及其测试目标；`RunScript.sh --scheme LaunchpadAwakenerStandalone` 只构建、从不启动它 | MacBook（27.2）上 `--self-check` 通过：从注入版的库导入 4 页、6 个文件夹、149 个 App，壁纸读文件、没弹权限，图标样式与 Dock 相同，窗口 27 层铺满屏幕，什么都没上屏。26 虚拟机仍没开，待补 |
+| 2026-11-08 | 宿主加 `offersGlassBackground`：没有玻璃的宿主上，`springboard-background` 设成 `glass` 也显示 15 的模糊壁纸 | 退到替代模糊会把盖在下面的 App 窗口一起模糊进来，独立版的窗口在一切之上，这种退路没有意义 |
+| 2026-11-08 | 独立版（bundle ID 前缀 `com.MxIris.LaunchpadAwakener.Launchpad`）加进标准排除名单；它与 27 的 `Apps.app` 作为「启动器」即使装着也从布局里拿掉，排除名单的其余部分只挡新加入 | 部署后注入版把独立版当新 App 加进了测试机的布局。第一版把「被排除就拿掉」用在整张名单上，结果测试机布局里本来就有的 App Cleaner & Uninstaller（15 的规则排除名字带 Uninstall 的）也被拿掉了；改为只对启动器生效，先写了能复现的测试（修前失败、修后通过）。测试机上被拿掉的那一项先备份库、再按 15 的排序触发器放回原位（第 3 页第 21 个），两边的库都回到 149 个 App |

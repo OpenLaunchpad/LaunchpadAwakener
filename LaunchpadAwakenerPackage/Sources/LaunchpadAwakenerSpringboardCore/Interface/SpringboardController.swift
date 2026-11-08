@@ -88,7 +88,7 @@ package final class SpringboardController {
         SpringboardIconProvider.shared.refreshIconStyle()
         clearRecentlyAddedMarksOfLaunchedApplications()
         let metrics = Self.metrics(forScreenSize: newWindow.displayBounds.size)
-        let backgroundStyle = SpringboardPreferences.backgroundStyle
+        let backgroundStyle = SpringboardHostSystem.host.offersGlassBackground ? SpringboardPreferences.backgroundStyle : .wallpaper
         // 15 captured the wallpaper afresh each time it opened.
         let wallpaperImage = backgroundStyle == .wallpaper ? SpringboardHostSystem.host.wallpaperImage(onDisplay: displayIdentifier) : nil
         let newInterface = SpringboardInterface(

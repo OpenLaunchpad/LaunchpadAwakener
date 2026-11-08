@@ -89,6 +89,59 @@ struct LaunchpadLibraryTests {
         }
     }
 
+    /// The test MacBook's layout holds App Cleaner & Uninstaller, which macOS 15's exclusion rules keep
+    /// discovery from adding (its name has "Uninstall" in it). It is in the layout all the same, and an
+    /// early version of the launcher rule took it out; it must stay.
+    @Test("an application already in the layout stays, even where macOS 15's exclusion rules would have kept it out")
+    func placedApplicationsMatchingMacOS15ExclusionsStay() async throws {
+        try await withTemporaryDirectory { directoryURL in
+            try Self.installApplications([
+                ApplicationBundleFixture(name: "Alpha", bundleIdentifier: "com.example.alpha"),
+                ApplicationBundleFixture(name: "App Cleaner & Uninstaller", bundleIdentifier: "com.nektony.App-Cleaner-SIII"),
+            ], in: directoryURL)
+            let legacyDatabaseURL = directoryURL.appendingPathComponent("legacy.db")
+            try LegacyLaunchpadDatabaseFixture(pages: [[
+                .application(title: "Alpha", bundleIdentifier: "com.example.alpha"),
+                .application(title: "App Cleaner & Uninstaller", bundleIdentifier: "com.nektony.App-Cleaner-SIII"),
+            ]]).write(to: legacyDatabaseURL)
+            var configuration = Self.configuration(in: directoryURL, legacyDatabaseURL: legacyDatabaseURL)
+            configuration.isStillInstalled = { _ in true }
+            try #require(configuration.exclusionList.excludes(bundleIdentifier: "com.nektony.App-Cleaner-SIII", name: "App Cleaner & Uninstaller"))
+
+            let layout = await Self.startedLibrary(configuration: configuration)
+
+            #expect(layout.applications.map(\.title) == ["Alpha", "App Cleaner & Uninstaller"])
+        }
+    }
+
+    /// Installing the standalone Launchpad put it into the injected one's layout before it was excluded.
+    @Test("a launcher of Apps or of the standalone Launchpad leaves the layout, even though it is still installed")
+    func launchersLeave() async throws {
+        try await withTemporaryDirectory { directoryURL in
+            try Self.installApplications([
+                ApplicationBundleFixture(name: "Alpha", bundleIdentifier: "com.example.alpha"),
+                ApplicationBundleFixture(name: "Launchpad", bundleIdentifier: "com.MxIris.LaunchpadAwakener.Launchpad.debug"),
+            ], in: directoryURL)
+            let legacyDatabaseURL = directoryURL.appendingPathComponent("legacy.db")
+            try LegacyLaunchpadDatabaseFixture(pages: [[
+                .application(title: "Alpha", bundleIdentifier: "com.example.alpha"),
+                .application(title: "Launchpad", bundleIdentifier: "com.MxIris.LaunchpadAwakener.Launchpad.debug"),
+            ]]).write(to: legacyDatabaseURL)
+            var configuration = Self.configuration(in: directoryURL, legacyDatabaseURL: legacyDatabaseURL)
+            configuration.isStillInstalled = { _ in true }
+
+            let layout = await Self.startedLibrary(configuration: configuration)
+
+            #expect(layout.applications.map(\.title) == ["Alpha"])
+        }
+    }
+
+    @Test("the standalone Launchpad is kept out of every layout, in its debug and release builds", arguments: ["com.MxIris.LaunchpadAwakener.Launchpad", "com.MxIris.LaunchpadAwakener.Launchpad.debug"])
+    func standaloneLaunchpadIsExcluded(bundleIdentifier: String) {
+        #expect(ApplicationExclusionList.standard.excludes(bundleIdentifier: bundleIdentifier, name: "Launchpad"))
+        #expect(!ApplicationExclusionList.standard.excludes(bundleIdentifier: "com.MxIris.LaunchpadAwakener", name: "LaunchpadAwakener"))
+    }
+
     @Test("without a macOS 15 layout, the default first page comes first and the rest follows by name")
     func defaultLayoutWithoutLegacyDatabase() async throws {
         try await withTemporaryDirectory { directoryURL in

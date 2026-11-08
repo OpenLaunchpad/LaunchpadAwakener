@@ -47,6 +47,11 @@ final class DockSpringboardHost: SpringboardHost {
         WallpaperSnapshot.captureWallpaperImage(onDisplay: displayIdentifier)
     }
 
+    /// The Dock's own glass, or the stand-in blur where the Dock's glass controller does not match.
+    var offersGlassBackground: Bool {
+        true
+    }
+
     func makeGlassBackground(frame: CGRect, scale: CGFloat, backdropGroupName: String) -> (any SpringboardGlassBackground)? {
         guard let glass = DockGlassMaterial(variant: SpringboardPreferences.glassVariant, isAdaptive: false) else { return nil }
         let isGlassShown = glass.update(frame: frame, cornerRadius: 0, isDark: true, displayScale: scale, backdropGroupName: backdropGroupName)

@@ -29,7 +29,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **自己的库沿用 15 的表与触发器，编辑时改为整组重排。** 导入与追加靠 15 的触发器维护 `ordering`；拖动类的编辑则先关掉触发器（`dbinfo` 的 `ignore_items_update_triggers` 置 1），把涉及的父项的子项按新顺序整组写回、编号从 1 开始，再打开触发器。被移动的项在同一个事务里先挂到父项 -1 上，否则之后再读兄弟列表时它还会出现在原处。编辑后照 15 收拾：一页超过容量就把末尾几项挤到下一页开头，空的文件夹页、文件夹和页面删除。任何把 App 移出文件夹的编辑——移到页上、移进别的文件夹或别的文件夹的页上、建新文件夹——都让只剩一个 App 的原文件夹解散。
 
-**App 只在确实卸载时才从布局里删除。** 搜索目录里没找到、书签解析不到、LaunchServices 也不认识，三者都成立才删，免得装在别处的 App 被误删。
+**App 只在确实卸载时才从布局里删除。** 搜索目录里没找到、书签解析不到、LaunchServices 也不认识，三者都成立才删，免得装在别处的 App 被误删。唯一的例外是「打开 Launchpad 或 Apps 的启动器」——27 的 `Apps.app` 与独立版 Launchpad（bundle ID 以 `com.MxIris.LaunchpadAwakener.Launchpad` 开头），它们装着也照样从布局里拿掉（`ApplicationExclusionList.isLaunchpadLauncher`）：独立版装进 `/Applications` 时曾被当作新 App 加进注入版的布局。排除名单的其余部分只挡新加入，不拿掉已在布局里的：15 的规则会把名字带 Uninstall 的 App 排除在外，可已经在布局里的（测试机上的 App Cleaner & Uninstaller）照样留着，与此前的行为一致。
 
 **图标与 Dock 栏同一套样式。** 描述符复制自 `DockBar.environment.iconAppearanceMonitor.appearance.iconDescription`，再经 IconServices 的 `-[ISIcon initWithURL:]` 取图；Dock 自己走的 `_LSBindingCreateWithURL` 是 C 函数，签名无法校验，所以没用。图标在后台队列渲染，布局一加载就全部预取（MacBook 上 149 个约 2 秒，之后命中 IconServices 的缓存只要几十毫秒）。
 

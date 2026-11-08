@@ -89,4 +89,33 @@ struct LegacyLaunchpadImporterTests {
             #expect(try store.layout().applications.map(\.title) == ["Existing"])
         }
     }
+
+    /// The standalone app starts from the injected springboard's library, which keeps macOS 15's tables.
+    @Test("a library the springboard itself wrote imports with its pages, folders and blue dots")
+    func injectedLibraryImports() throws {
+        try withTemporaryDirectory { directoryURL in
+            let injectedLibraryURL = directoryURL.appendingPathComponent("Injected.db")
+            do {
+                let injectedStore = try LaunchpadStore(databaseURL: injectedLibraryURL)
+                let firstPage = try injectedStore.appendPage(to: injectedStore.rootIdentifier)
+                try injectedStore.appendApplication(LaunchpadApplicationRecord(title: "Alpha", bundleIdentifier: "com.example.alpha"), to: firstPage)
+                let folder = try injectedStore.appendFolder(titled: "Utilities", to: firstPage)
+                try injectedStore.appendApplication(LaunchpadApplicationRecord(title: "Beta", bundleIdentifier: "com.example.beta"), to: folder.firstPage)
+                try injectedStore.appendApplication(LaunchpadApplicationRecord(title: "Gamma", bundleIdentifier: "com.example.gamma"), to: folder.firstPage)
+                let secondPage = try injectedStore.appendPage(to: injectedStore.rootIdentifier)
+                try injectedStore.appendApplication(
+                    LaunchpadApplicationRecord(title: "Delta", bundleIdentifier: "com.example.delta", itemFlags: LaunchpadDatabaseSchema.ItemFlags.recentlyAdded),
+                    to: secondPage
+                )
+            }
+            let standaloneStore = try LaunchpadStore(databaseURL: directoryURL.appendingPathComponent("Standalone.db"))
+
+            try LegacyLaunchpadImporter.importLayout(fromLegacyDatabaseAt: injectedLibraryURL, into: standaloneStore)
+
+            let layout = try standaloneStore.layout()
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["Alpha", "Utilities"], ["Delta"]])
+            #expect(layout.folders.first?.pages.first?.applications.map(\.title) == ["Beta", "Gamma"])
+            #expect(layout.applications.filter(\.isRecentlyAdded).map(\.title) == ["Delta"])
+        }
+    }
 }

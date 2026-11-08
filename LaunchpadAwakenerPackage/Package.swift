@@ -2,10 +2,12 @@
 
 import PackageDescription
 
-// Every line of real code lives here; the Xcode project holds only the four thin binary shells
-// (app, daemon, payload, and the payload's Objective-C entry file). Modules are split by which
-// binary links them, because the app must not pull in the daemon's privileged dependencies and the
-// payload must stay as small as possible — it gets mapped into someone else's process.
+// Every line of real code lives here; the Xcode project holds only the thin binary shells (app,
+// daemon, payload and the payload's Objective-C entry file, text input helper, standalone app).
+// Modules are split by which binary links them, because the app must not pull in the daemon's
+// privileged dependencies and the payload must stay as small as possible — it gets mapped into
+// someone else's process. The springboard itself is one module both of its hosts link: the payload
+// in the Dock and the standalone app.
 let package = Package(
     name: "LaunchpadAwakenerPackage",
     platforms: [
@@ -20,6 +22,8 @@ let package = Package(
         .library(name: "LaunchpadAwakenerPayloadCore", targets: ["LaunchpadAwakenerPayloadCore"]),
         // Linked by the text input helper, the LaunchAgent that hosts the springboard's text fields.
         .library(name: "LaunchpadAwakenerTextInputCore", targets: ["LaunchpadAwakenerTextInputCore"]),
+        // Linked by the standalone app, which draws the springboard in a window of its own.
+        .library(name: "LaunchpadAwakenerStandaloneCore", targets: ["LaunchpadAwakenerStandaloneCore"]),
         // Standalone so it can be reused or tested without dragging in the payload's specifics.
         .library(name: "LaunchpadAwakenerHookKit", targets: ["LaunchpadAwakenerHookKit"]),
         .library(name: "LaunchpadAwakenerShared", targets: ["LaunchpadAwakenerShared"]),
@@ -100,6 +104,17 @@ let package = Package(
             ]
         ),
 
+        // Standalone app side: the springboard's other host — a window of its own over the whole screen,
+        // the replicas of the Dock's layer classes, the wallpaper from its file. Links AppKit.
+        .target(
+            name: "LaunchpadAwakenerStandaloneCore",
+            dependencies: [
+                "LaunchpadAwakenerHookKit",
+                "LaunchpadAwakenerSpringboardCore",
+                .product(name: "OSToolbox", package: "FrameworkToolbox"),
+            ]
+        ),
+
         // Text input helper: hosts the search and rename fields in a window that never goes on screen, so
         // that input methods work in them; the payload shows the window in the Dock and forwards the keys.
         .target(
@@ -127,6 +142,13 @@ let package = Package(
             dependencies: ["LaunchpadAwakenerSpringboardCore", "TestingSupport"],
             // macOS 15.5's own copy, which the exclusion list and default layout are checked against.
             resources: [.copy("Resources/LaunchPadLayout.plist")]
+        ),
+
+        // The standalone host's own rules: which picture of a dynamic wallpaper shows, the icon style
+        // table, the room left for the Dock. Nothing here opens a window.
+        .testTarget(
+            name: "LaunchpadAwakenerStandaloneCoreTests",
+            dependencies: ["LaunchpadAwakenerStandaloneCore"]
         ),
 
         // The Dock's side: the build profiles. Read from the Dock binaries' facts, never from a live Dock.

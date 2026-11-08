@@ -5,7 +5,9 @@ import Foundation
 ///
 /// Additions follow what discovery found. Removals are deliberately conservative: an application the
 /// layout holds is dropped only when discovery did not find it *and* it is not installed anywhere else
-/// either, so a bundle outside the search directories keeps its place.
+/// either, so a bundle outside the search directories keeps its place. The one exception is a launcher
+/// of Launchpad or Apps (``ApplicationExclusionList/isLaunchpadLauncher(bundleIdentifier:)``), which
+/// leaves whether installed or not.
 package struct LayoutReconciliation: Sendable, Equatable {
     /// Applications to put at the end of the layout, in this order.
     package var applicationsToAdd: [DiscoveredApplication] = []
@@ -39,7 +41,10 @@ package struct LayoutReconciliation: Sendable, Equatable {
         }
 
         func isGone(_ application: LaunchpadApplication) -> Bool {
-            !discoveredBundleIdentifiers.contains(application.bundleIdentifier) && !isStillInstalled(application)
+            if ApplicationExclusionList.isLaunchpadLauncher(bundleIdentifier: application.bundleIdentifier) {
+                return true
+            }
+            return !discoveredBundleIdentifiers.contains(application.bundleIdentifier) && !isStillInstalled(application)
         }
 
         for page in layout.pages {

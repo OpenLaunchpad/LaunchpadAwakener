@@ -237,6 +237,13 @@ package struct SpringboardMetrics: Sendable, Equatable {
     /// 79 points: the room left at the default Dock size, 64-point icons in 68-point tiles.
     package static let defaultDockThickness = dockThickness(desiredTileSize: 64, tileSize: 68)
 
+    /// The room left for a Dock whose icons are `desiredTileSize` and that fits the screen, its tiles not
+    /// shrunk: what can be worked out from the Dock's `tilesize` preference alone, outside the Dock.
+    package static func dockThickness(desiredTileSize: Float) -> CGFloat {
+        let tileSize = desiredTileSize + DockTileSpacing(lookingUp: desiredTileSize).tileInset * 2
+        return dockThickness(desiredTileSize: desiredTileSize, tileSize: tileSize)
+    }
+
     /// The inset and the distances macOS 15.5's Dock gave a tile of the size it looked up
     /// (15.5 `0x1000DBB44`).
     private struct DockTileSpacing {

@@ -33,6 +33,9 @@ package protocol SpringboardHost: AnyObject, Sendable {
     func makeWindow(onDisplay displayIdentifier: CGDirectDisplayID) -> (any SpringboardWindow)?
     /// The wallpaper as it is now, for macOS 15's blurred background; nil leaves 15's gradient.
     func wallpaperImage(onDisplay displayIdentifier: CGDirectDisplayID) -> CGImage?
+    /// Whether `springboard-background` set to `glass` means anything here. Where it does not, the
+    /// springboard keeps 15's blurred wallpaper rather than a stand-in blur of whatever is behind it.
+    var offersGlassBackground: Bool { get }
     /// The glass behind the pages when `springboard-background` is `glass`; nil leaves the stand-in blur.
     func makeGlassBackground(frame: CGRect, scale: CGFloat, backdropGroupName: String) -> (any SpringboardGlassBackground)?
     /// A text field another process hosts so that input methods work in it; nil edits the field in place.
@@ -270,6 +273,10 @@ final class DetachedSpringboardHost: SpringboardHost {
 
     func wallpaperImage(onDisplay displayIdentifier: CGDirectDisplayID) -> CGImage? {
         nil
+    }
+
+    var offersGlassBackground: Bool {
+        false
     }
 
     func makeGlassBackground(frame: CGRect, scale: CGFloat, backdropGroupName: String) -> (any SpringboardGlassBackground)? {

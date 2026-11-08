@@ -14,6 +14,7 @@
 # Usage:
 #   ./RunScript.sh                     # build + launch
 #   ./RunScript.sh --no-launch         # build only
+#   ./RunScript.sh --scheme LaunchpadAwakenerStandalone   # build the standalone app; never launched here
 #   ./RunScript.sh --update-packages   # refresh SPM pins first
 #   ./RunScript.sh --clean             # wipe this script's DerivedData first
 #   ./RunScript.sh --dry-run           # print commands without running
@@ -90,7 +91,7 @@ while [[ $# -gt 0 ]]; do
         --clean) CLEAN=true; shift;;
         --no-launch) LAUNCH=false; shift;;
         --dry-run) DRY_RUN=true; shift;;
-        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+        -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
         *) fail "unknown argument: $1";;
     esac
 done
@@ -165,6 +166,19 @@ APP_PATH="$PRODUCTS_DIR/LaunchpadAwakener.app"
 
 if $DRY_RUN; then
     log "Skipping verification and launch (--dry-run)"
+    exit 0
+fi
+
+# --- The standalone app -------------------------------------------------------
+#
+# It injects nothing, so there is no daemon or payload to check for arm64e. And it is never launched
+# here: opened, it covers the whole screen, which on a development machine is exactly what must not
+# happen. It goes to a test machine instead.
+if [[ "$SCHEME" == "LaunchpadAwakenerStandalone" ]]; then
+    STANDALONE_APP_PATH="$PRODUCTS_DIR/Launchpad.app"
+    [[ -d "$STANDALONE_APP_PATH" ]] || fail "expected $STANDALONE_APP_PATH"
+    log "Built $STANDALONE_APP_PATH"
+    log "Not launched: it covers the whole screen, so run it on a test machine only (see CLAUDE.md)."
     exit 0
 fi
 

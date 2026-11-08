@@ -2,6 +2,8 @@
 
 在 macOS 26 与 27 的 Dock 里复刻 macOS 15 的 Launchpad：一个注入 Dock 的 payload，加上负责注入的 App 与特权 daemon。支持 26.0 到 27.2 的每个正式构建，别的构建在补上构建档案之前什么都不装（见实现说明「适配新的 Dock 构建」）。工程由 [InjectionScaffold](https://github.com/Mx-Iris/InjectionScaffold) 生成，方案见提案 [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](Documentations/Evolutions/draft-launchpad-replica.md)。
 
+另有一个不注入 Dock 的独立版 App「Launchpad」：自己开一扇盖住整块主屏幕（连 Dock 与菜单栏）的窗口，画同一套 Launchpad，不需要关 SIP。两版共用 Launchpad 本身的代码，方案见提案 [不注入 Dock 的独立版 Launchpad](Documentations/Evolutions/draft-standalone-launchpad.md)，实现见[独立版实现说明](Documentations/Internal/StandaloneLaunchpad.md)。
+
 ## 只在测试机上运行
 
 **开发机（两台 Mac Studio）上只编译、跑单元测试，绝不运行 App、注入 Dock 或重启 Dock。** 全屏窗口一旦失控，整台机器的输入都会被锁住，只能重启——这在 macOS 26 上真实发生过。运行与验证只在测试机上做：27 用测试用的 MacBook，`ssh JH@192.168.50.13`，macOS 27.2（26B123），SIP 已关，App 装在 `/Applications/LaunchpadAwakener.app`；26 用下面说的虚拟机（虚拟机里失控只锁住虚拟机）。
@@ -19,6 +21,17 @@ ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakene
 
 出了问题，先经 ssh 退回系统的 Apps 并换掉注入过的 Dock：`touch /tmp/LaunchpadAwakener.disabled; killall Dock`。
 
+**独立版**同样只在测试机上运行：一打开就盖住整块屏幕，开发机上绝不打开，`RunScript.sh` 也从不替它启动。部署与非交互验证：
+
+```bash
+queued-build ./RunScript.sh --scheme LaunchpadAwakenerStandalone --derived-data /Volumes/DerivedData/Agents.noindex/<agent>/DerivedData/LaunchpadAwakener
+ssh JH@192.168.50.13 'osascript -e "tell application \"Launchpad\" to quit"'
+rsync -a --delete /Volumes/DerivedData/Agents.noindex/<agent>/DerivedData/LaunchpadAwakener/Build/Products/Debug/Launchpad.app/ JH@192.168.50.13:/Applications/Launchpad.app/
+ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
+```
+
+带 `--self-check` 的开发构建只在离屏建一次界面、把宿主找到的东西（Dock 的位置与厚度、壁纸来源、图标样式、布局库、窗口）写进日志，15 秒后自己退出，不上屏。不带参数打开就是显示界面，属于交互操作，用户没提就不做。界面卡住时：`touch /tmp/LaunchpadAwakener.disabled` 后它不再显示，`pkill -x Launchpad` 直接结束它；主线程卡住超过 3 秒，它自己的看门狗也会经窗口服务器把窗口撤下。
+
 **macOS 26 上的验证**用 Ultra 上 VirtualBuddy 的 macOS 26 虚拟机：26.6.2（25G83），机器名 `VMdexuniji`，账户 `vm`，`ssh vm@<地址>` 免密（地址由 Ultra 的 `/var/db/dhcpd_leases` 按机器名查，2026-11-08 是 `192.168.64.16`），SIP 已关，App 装在 `/Applications/LaunchpadAwakener.app`，daemon 已在登录项里批准。部署照上面的命令，把地址换成虚拟机的。它和 15 的虚拟机一样没装开发工具（`otool`、`strings`、`python3` 会弹安装提示），查东西用 `md5`、`osascript -l JavaScript` 这类系统自带的命令。
 
 **用户要求看界面时**（截图、点击属于交互操作，用户没提就不做）：经 ssh 跑 `open -a Apps` 打开、`screencapture -x` 截图（能截到窗口内容）、`screencapture -v -V <秒>` 录屏后拷回本机用 ffmpeg 抽帧（录屏启动要零点几秒到一两秒，先开录、等一秒再操作）；点击与拖动用在 MacBook 上编译的一个发 `CGEvent` 的小工具，经 ssh 发的事件实测有效。开发构建 20 秒没有输入就自动收起，打开与操作要放在同一条命令里。拖动会改用户的布局，测完要还原。
@@ -27,7 +40,7 @@ ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakene
 
 ## 结构
 
-五个二进制，Xcode 项目里只放外壳，代码都在本地 Swift 包：
+六个二进制，Xcode 项目里只放外壳，代码都在本地 Swift 包：
 
 | 目录 | 是什么 |
 |---|---|
@@ -35,6 +48,7 @@ ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakene
 | `LaunchpadAwakenerDaemon/` | 特权 daemon 的 `main.swift`，两行 |
 | `LaunchpadAwakenerPayload/` | payload 的 `main.m`，提供两条注入入口 |
 | `LaunchpadAwakenerTextInput/` | 文本输入辅助进程的 `main.swift`：嵌在 App 里的 LaunchAgent，替 Launchpad 托管搜索框与改名框，好让输入法能用 |
+| `LaunchpadAwakenerStandalone/` | 独立版 App「Launchpad」的 SwiftUI 外壳：只有 App 结构体与图标 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerShared` | 服务名、版本、路径。**不依赖任何东西** |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerHookKit` | 带签名校验的 Objective-C 方法替换 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppCore` | daemon 生命周期、进程监视、注入编排 |
@@ -42,6 +56,7 @@ ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakene
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore` | Launchpad 本身：布局库与界面层。经宿主接口 `SpringboardHost` 拿窗口、图层类、壁纸这些，不认识 Dock，不链接 AppKit |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore` | 跑在 Dock 里、围着 Launchpad 的代码：Dock 宿主、hook 声明、入口 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore` | 文本输入辅助进程：XPC 服务、托管的 `NSTextField`。只有它链接 AppKit 的私有部分 |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerStandaloneCore` | 独立版的宿主：盖住全屏的窗口与事件、壁纸、图标样式、看门狗、设置。链接 AppKit |
 
 模块按「谁链接它」划分。App 不能链接 daemon 的特权依赖，payload 要尽量小 —— 它会被映射进一个并没有请求它的进程。
 
@@ -66,7 +81,10 @@ ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakene
 ./RunScript.sh              # 构建并启动
 ./RunScript.sh --no-launch  # 只构建
 ./RunScript.sh --dry-run    # 只打印命令
+./RunScript.sh --scheme LaunchpadAwakenerStandalone  # 构建独立版；从不启动它
 ```
+
+独立版不注入，不需要 arm64e 切片，脚本也不替它核对切片。
 
 daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —— 签目标线程 PC 的那条 PAC 指令在 arm64 构建里是空操作。这需要五处配置同时成立，外加一个 `-destination 'generic/platform=macOS'`。
 
@@ -93,6 +111,8 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 - **改 daemon** —— 重新编译后运行 App，它会检测到版本不一致并自动注销重装。前提是**递增了 `InjectionServiceIdentity.daemonVersion`**；不递增这套机制不会触发，内存里还是旧 daemon。
 - **改 payload** —— payload 是加载进目标进程的镜像，卸不掉。必须让目标进程重启（`killall <目标>`）才能换成新版本。
 - **改文本输入辅助进程** —— 它由 launchd 按需拉起后一直常驻。部署换掉它的可执行文件后，它在下一次打开 Launchpad 时自行退出（那一次没有输入法），再下一次 launchd 起的就是新版本；想立刻换就 `pkill -f LaunchpadAwakenerTextInput`。
+- **改共用模块（`LaunchpadAwakenerSpringboardCore`）** —— 两版都受影响：注入版照「改 payload」重启 Dock，独立版照下一条重新打开。
+- **改独立版** —— 它收起后常驻，部署前先让它退出（`tell application "Launchpad" to quit`），换掉后再打开才是新版本。
 
 ## 加 hook
 
