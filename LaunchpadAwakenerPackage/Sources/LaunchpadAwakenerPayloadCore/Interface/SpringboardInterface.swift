@@ -621,13 +621,31 @@ final class SpringboardInterface {
     func commitRenaming() {
         guard let folderPanel, let renaming else { return }
         self.renaming = nil
-        endRemoteRenameField()
+        let folder = folderPanel.folder
         let newTitle = renaming.text.trimmingCharacters(in: .whitespaces)
+        // Text an input method was still composing — the renaming ended by a click elsewhere — comes in
+        // with the helper's final answer, and the name is stored again with it.
+        endRemoteRenameField { [weak self] endedString in
+            self?.applyLateRename(endedString, of: folder, committedTitle: newTitle)
+        }
         endRenaming(in: folderPanel)
         guard !newTitle.isEmpty, newTitle != folderPanel.folder.title else { return }
         folderPanel.setTitle(newTitle)
         folderItemLayer(of: folderPanel.folder)?.labelLayer.setString(newTitle, contentsScale: scale)
         applyEdit(.renameFolder(folderPanel.folder.identifier, title: newTitle))
+    }
+
+    /// Stores the name the hosted field ended with when it differs from the one just committed: text still
+    /// composing when the renaming ended, which the helper committed on its way out.
+    private func applyLateRename(_ endedString: String, of folder: LaunchpadFolder, committedTitle: String) {
+        let lateTitle = endedString.trimmingCharacters(in: .whitespaces)
+        let titleNow = committedTitle.isEmpty ? folder.title : committedTitle
+        guard !lateTitle.isEmpty, lateTitle != titleNow else { return }
+        if let folderPanel, folderPanel.folder.identifier == folder.identifier {
+            folderPanel.setTitle(lateTitle)
+        }
+        folderItemLayer(of: folder)?.labelLayer.setString(lateTitle, contentsScale: scale)
+        applyEdit(.renameFolder(folder.identifier, title: lateTitle))
     }
 
     private func endRenaming(in folderPanel: SpringboardFolderPanel) {
@@ -779,14 +797,21 @@ final class SpringboardInterface {
 
     // MARK: - The hosted search field
 
-    /// The search field's text area in the container, where the hosted field shows.
+    /// The search field's text area in the container, where the hosted field shows. Taken from the metrics,
+    /// not from the layers: an open folder, an opening pinch or the entrance scale the springboard a
+    /// while, and the helper keeps the place it is given.
     var searchFieldTextAreaFrame: CGRect {
-        searchFieldLayer.convert(searchFieldLayer.hostedTextAreaFrame, to: containerLayer)
+        SpringboardSearchFieldLayer.hostedTextAreaFrame(
+            inFieldFrame: metrics.searchFieldFrame.offsetBy(dx: metrics.springboardFrame.minX, dy: metrics.springboardFrame.minY)
+        )
     }
 
     /// Shows the hosted field in the search field, or goes back to drawing the text here.
     func hostSearchField(in hostLayer: CALayer?) {
         searchFieldLayer.hostedTextLayer = hostLayer
+        if hostLayer == nil {
+            searchFieldLayer.isComposingInHostedField = false
+        }
         searchFieldLayer.show(searchEditor.editing)
     }
 
@@ -812,6 +837,7 @@ final class SpringboardInterface {
         field.currentString = { [weak self] in
             self?.searchText ?? ""
         }
+        field.setFocus(searchFieldLayer.hasFocus)
         remoteSearchField = field
         field.begin()
     }
@@ -878,14 +904,16 @@ final class SpringboardInterface {
         field.currentString = { [weak self] in
             self?.renaming?.text ?? ""
         }
+        field.setFocus(true)
         remoteRenameField = field
         field.begin()
     }
 
-    /// Lets the helper's rename field go, and has it host the search field again.
-    private func endRemoteRenameField() {
+    /// Lets the helper's rename field go, and has it host the search field again. `finalString` gets the
+    /// name as the helper ended it, with any text still composing committed.
+    private func endRemoteRenameField(finalString: (@MainActor (String) -> Void)? = nil) {
         guard let remoteRenameField else { return }
-        remoteRenameField.end()
+        remoteRenameField.end(finalString: finalString)
         self.remoteRenameField = nil
         beginRemoteSearchField()
     }
@@ -959,12 +987,14 @@ final class SpringboardInterface {
     private func activateSearchField() {
         searchFieldLayer.isActive = true
         searchFieldLayer.hasFocus = true
+        remoteSearchField?.setFocus(true)
     }
 
     /// Without the focus and with nothing typed, the field goes back to its inactive look (`sub_100064748`).
     private func setSearchFieldFocus(_ hasFocus: Bool) {
         guard hasFocus else {
             searchFieldLayer.hasFocus = false
+            remoteSearchField?.setFocus(false)
             if searchText.isEmpty {
                 searchFieldLayer.isActive = false
             }

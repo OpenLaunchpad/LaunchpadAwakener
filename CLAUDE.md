@@ -89,7 +89,7 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 - **改 App** —— 重新运行即可。
 - **改 daemon** —— 重新编译后运行 App，它会检测到版本不一致并自动注销重装。前提是**递增了 `InjectionServiceIdentity.daemonVersion`**；不递增这套机制不会触发，内存里还是旧 daemon。
 - **改 payload** —— payload 是加载进目标进程的镜像，卸不掉。必须让目标进程重启（`killall <目标>`）才能换成新版本。
-- **改文本输入辅助进程** —— 它由 launchd 按需拉起后一直常驻，换了 App 也还是旧进程。部署后 `pkill -f LaunchpadAwakenerTextInput` 让它退出，payload 下次连它时 launchd 会起新版本。
+- **改文本输入辅助进程** —— 它由 launchd 按需拉起后一直常驻。部署换掉它的可执行文件后，它在下一次打开 Launchpad 时自行退出（那一次没有输入法），再下一次 launchd 起的就是新版本；想立刻换就 `pkill -f LaunchpadAwakenerTextInput`。
 
 ## 加 hook
 

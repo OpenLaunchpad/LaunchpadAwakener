@@ -34,6 +34,8 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     private var isSearchField = true
     private var lastReportedString = ""
     private var lastReportedHasMarkedText = false
+    /// The executable as it was when this process started; a deployment replaces it.
+    private let executableIdentity = TextInputService.currentExecutableIdentity()
 
     func start() {
         textField.isBordered = false
@@ -76,16 +78,16 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         guard xpc_get_type(event) == XPC_TYPE_CONNECTION else { return }
         let connection = event as xpc_connection_t
         let processIdentifier = xpc_connection_get_pid(connection)
-        // Only the Dock shows the field; anything else could read what is typed.
-        guard Self.isDock(processIdentifier: processIdentifier) else {
+        // Only the Dock shows the field; anything else could read what is typed. libxpc enforces the
+        // Dock's signature on every message; the path is only a quick first look.
+        guard
+            Self.isDock(processIdentifier: processIdentifier),
+            xpc_connection_set_peer_code_signing_requirement(connection, TextInputServiceIdentity.peerCodeSigningRequirement) == 0
+        else {
             #log(.error, "Refused a connection from process \(processIdentifier, privacy: .public), which is not the Dock")
             xpc_connection_cancel(connection)
             return
         }
-        if let peer {
-            xpc_connection_cancel(peer)
-        }
-        peer = connection
         let connectionBox = XPCObjectBox(object: connection)
         xpc_connection_set_event_handler(connection) { message in
             let messageBox = XPCObjectBox(object: message)
@@ -105,13 +107,21 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     }
 
     private func handle(_ message: xpc_object_t, from connection: xpc_object_t) {
-        guard connection === peer else { return }
         guard xpc_get_type(message) == XPC_TYPE_DICTIONARY else {
-            // The Dock went away: keep nothing composing and let the field go.
+            // The Dock went away: keep nothing composing and let the field go. Another connection failing
+            // its signature check changes nothing.
+            guard connection === peer else { return }
             #log(.info, "The Dock's connection ended")
             peer = nil
             end()
             return
+        }
+        // A message that passed the signature check: this is the Dock, a restarted one replacing the last.
+        if connection !== peer {
+            if let peer {
+                xpc_connection_cancel(peer)
+            }
+            peer = connection
         }
         guard let requestPointer = xpc_dictionary_get_string(message, MessageKey.request) else { return }
         switch String(cString: requestPointer) {
@@ -119,8 +129,15 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
             begin(with: message)
         case Request.setString:
             setString(xpc_dictionary_get_string(message, MessageKey.string).map { String(cString: $0) } ?? "")
+        case Request.setFocus:
+            showCaret(xpc_dictionary_get_bool(message, MessageKey.hasFocus))
         case Request.end:
             end()
+            // The final text, composing text included, for a rename that ended while text was composing.
+            if let peer, let reply = xpc_dictionary_create_reply(message) {
+                xpc_dictionary_set_string(reply, MessageKey.string, fieldEditor.string)
+                xpc_connection_send_message(peer, reply)
+            }
         default:
             break
         }
@@ -129,6 +146,15 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     // MARK: - Requests
 
     private func begin(with message: xpc_object_t) {
+        // A deployment replaced this executable: the new one hosts the field from the next opening on.
+        guard Self.currentExecutableIdentity() == executableIdentity else {
+            #log(.info, "A new build replaced the helper; exiting so that launchd starts that one")
+            reply(to: message, contextIdentifier: 0, windowNumber: 0)
+            DispatchQueue.main.async {
+                exit(EXIT_SUCCESS)
+            }
+            return
+        }
         // A field editor keeps what it was set up with — the search field's alignment, say — so the new
         // field starts its editing afresh.
         containerView.window?.makeFirstResponder(nil)
@@ -164,6 +190,7 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         } else {
             fieldEditor.setSelectedRange(NSRange(location: (string as NSString).length, length: 0))
         }
+        showCaret(xpc_dictionary_get_bool(message, MessageKey.hasFocus))
         Self.setRemoteViewActivation(true)
         reply(to: message, contextIdentifier: Self.layerHostingContextIdentifier(of: window), windowNumber: window.windowNumber)
         #log(.info, "Hosting the \(self.isSearchField ? "search" : "rename", privacy: .public) field, \(width, privacy: .public)×\(height, privacy: .public)")
@@ -175,6 +202,23 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         xpc_dictionary_set_int64(reply, MessageKey.processIdentifier, Int64(ProcessInfo.processInfo.processIdentifier))
         xpc_dictionary_set_int64(reply, MessageKey.windowNumber, Int64(windowNumber))
         xpc_connection_send_message(peer, reply)
+    }
+
+    /// Without the focus the field shows no caret, as 15's did not. It stays the first responder, so that
+    /// the next key forwarded to it still lands.
+    private func showCaret(_ hasFocus: Bool) {
+        fieldEditor.insertionPointColor = hasFocus ? .white : .clear
+    }
+
+    /// The executable's file number and modification time; a deployment changes both.
+    private static func currentExecutableIdentity() -> String? {
+        guard
+            let executablePath = Bundle.main.executablePath,
+            let attributes = try? FileManager.default.attributesOfItem(atPath: executablePath)
+        else { return nil }
+        let fileNumber = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
+        let modificationTime = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(fileNumber)-\(modificationTime)"
     }
 
     private func setString(_ string: String) {
@@ -295,14 +339,19 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     /// Text services treat the process as the active one while the remote view is active; the ecti service
     /// turned it on with `_TSMRegisterRemoteViewClient` once it was set up.
     private static func setRemoteViewActivation(_ isActive: Bool) {
-        typealias ActivationFunction = @convention(c) (UInt8) -> Void
-        typealias RegistrationFunction = @convention(c) (UInt32) -> Void
-        let processHandle = dlopen(nil, RTLD_NOW)
-        if let symbol = dlsym(processHandle, "_TSMSetRemoteViewActivation") {
-            unsafeBitCast(symbol, to: ActivationFunction.self)(isActive ? 1 : 0)
-        }
-        if isActive, let symbol = dlsym(processHandle, "_TSMRegisterRemoteViewClient") {
-            unsafeBitCast(symbol, to: RegistrationFunction.self)(1)
+        remoteViewActivation?(isActive ? 1 : 0)
+        if isActive {
+            remoteViewClientRegistration?(1)
         }
     }
 }
+
+private typealias RemoteViewActivationFunction = @convention(c) (UInt8) -> Void
+private typealias RemoteViewClientRegistrationFunction = @convention(c) (UInt32) -> Void
+
+/// HIToolbox's `_TSMSetRemoteViewActivation` and `_TSMRegisterRemoteViewClient`, which its stub exports
+/// without declaring; looked up once.
+private nonisolated(unsafe) let remoteViewActivation: RemoteViewActivationFunction? = dlsym(dlopen(nil, RTLD_NOW), "_TSMSetRemoteViewActivation")
+    .map { unsafeBitCast($0, to: RemoteViewActivationFunction.self) }
+private nonisolated(unsafe) let remoteViewClientRegistration: RemoteViewClientRegistrationFunction? = dlsym(dlopen(nil, RTLD_NOW), "_TSMRegisterRemoteViewClient")
+    .map { unsafeBitCast($0, to: RemoteViewClientRegistrationFunction.self) }

@@ -1,7 +1,9 @@
 import CoreGraphics
 import Foundation
 import LaunchpadAwakenerShared
+import ObjectiveC
 import OSToolbox
+import QuartzCore
 import XPC
 
 /// An XPC object handed from libxpc's handler to the main actor; the handlers run on the main queue.
@@ -47,6 +49,7 @@ final class TextInputHelperClient {
         isSearchField: Bool,
         string: String,
         selectsAll: Bool,
+        hasFocus: Bool,
         size: CGSize,
         fontSize: CGFloat,
         screenTopLeft: CGPoint,
@@ -57,6 +60,7 @@ final class TextInputHelperClient {
         xpc_dictionary_set_bool(message, MessageKey.isSearchField, isSearchField)
         xpc_dictionary_set_string(message, MessageKey.string, string)
         xpc_dictionary_set_bool(message, MessageKey.selectsAll, selectsAll)
+        xpc_dictionary_set_bool(message, MessageKey.hasFocus, hasFocus)
         xpc_dictionary_set_double(message, MessageKey.width, Double(size.width))
         xpc_dictionary_set_double(message, MessageKey.height, Double(size.height))
         xpc_dictionary_set_double(message, MessageKey.fontSize, Double(fontSize))
@@ -78,12 +82,53 @@ final class TextInputHelperClient {
         xpc_connection_send_message(connection, message)
     }
 
-    /// Commits any composing text and lets the field go.
-    func end() {
+    func setFocus(_ hasFocus: Bool) {
         guard let connection else { return }
         let message = xpc_dictionary_create(nil, nil, 0)
-        xpc_dictionary_set_string(message, MessageKey.request, Request.end)
+        xpc_dictionary_set_string(message, MessageKey.request, Request.setFocus)
+        xpc_dictionary_set_bool(message, MessageKey.hasFocus, hasFocus)
         xpc_connection_send_message(connection, message)
+    }
+
+    /// Commits any composing text and lets the field go; `completion` gets the final text, composing text
+    /// included, or nil when the helper did not answer.
+    func end(completion: @escaping @MainActor (String?) -> Void) {
+        guard let connection else {
+            completion(nil)
+            return
+        }
+        let message = xpc_dictionary_create(nil, nil, 0)
+        xpc_dictionary_set_string(message, MessageKey.request, Request.end)
+        xpc_connection_send_message_with_reply(connection, message, DispatchQueue.main) { reply in
+            let replyBox = XPCObjectBox(object: reply)
+            MainActor.assumeIsolated {
+                let reply = replyBox.object
+                guard xpc_get_type(reply) == XPC_TYPE_DICTIONARY else {
+                    completion(nil)
+                    return
+                }
+                completion(xpc_dictionary_get_string(reply, MessageKey.string).map { String(cString: $0) })
+            }
+        }
+    }
+
+    /// A `CALayerHost` showing the helper's field, once `-[CALayerHost setContextId:]` is the one this
+    /// payload knows; nil otherwise.
+    static func makeLayerHost(showing hosting: Hosting) -> CALayer? {
+        let selector = NSSelectorFromString("setContextId:")
+        guard
+            let hostClass = NSClassFromString("CALayerHost") as? CALayer.Type,
+            let method = class_getInstanceMethod(hostClass, selector),
+            let typeEncoding = method_getTypeEncoding(method),
+            String(cString: typeEncoding) == "v20@0:8I16"
+        else {
+            #log(.error, "-[CALayerHost setContextId:] is missing or changed; the field is edited here")
+            return nil
+        }
+        let hostLayer = hostClass.init()
+        typealias SetContextIdentifierFunction = @convention(c) (AnyObject, Selector, UInt32) -> Void
+        unsafeBitCast(method_getImplementation(method), to: SetContextIdentifierFunction.self)(hostLayer, selector, hosting.contextIdentifier)
+        return hostLayer
     }
 
     /// Posts a copy of `event` to the helper, marked with its window, as 15's Dock did; mouse events also

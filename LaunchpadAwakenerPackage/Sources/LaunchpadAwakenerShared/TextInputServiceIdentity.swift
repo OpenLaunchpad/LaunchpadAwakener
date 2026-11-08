@@ -20,6 +20,10 @@ public enum TextInputServiceIdentity {
     /// `SMAppService.agent(plistName:)` takes; the build generates the file under this name.
     public static var agentPropertyListName: String { "\(machServiceName).plist" }
 
+    /// The only peer the helper accepts: the Dock, as Apple signed it. Checked by libxpc on every message,
+    /// so neither another process nor a recycled process identifier gets the typed text.
+    public static let peerCodeSigningRequirement = "identifier \"com.apple.dock\" and anchor apple"
+
     /// Keys of the XPC messages between the payload and the helper.
     public enum MessageKey {
         /// Which message it is: one of ``Request``.
@@ -41,6 +45,8 @@ public enum TextInputServiceIdentity {
         public static let hasMarkedText = "hasMarkedText"
         /// Return, Enter or Escape ended the editing: 15's rename field kept the text on all three.
         public static let isEditingComplete = "isEditingComplete"
+        /// Whether the field has the focus: without it, it shows no caret, as 15's did not.
+        public static let hasFocus = "hasFocus"
     }
 
     /// Values of ``MessageKey/request``.
@@ -49,6 +55,8 @@ public enum TextInputServiceIdentity {
         public static let begin = "begin"
         /// Payload to helper: replace the text, the selection going to its end.
         public static let setString = "setString"
+        /// Payload to helper: the field gained or lost the focus (``MessageKey/hasFocus``).
+        public static let setFocus = "setFocus"
         /// Payload to helper: commit any composing text and let the field go.
         public static let end = "end"
         /// Helper to payload: the text or its composing state changed.

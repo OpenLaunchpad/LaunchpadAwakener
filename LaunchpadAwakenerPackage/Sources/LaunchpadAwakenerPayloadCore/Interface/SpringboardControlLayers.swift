@@ -139,9 +139,17 @@ final class SpringboardSearchFieldLayer: CALayer {
         CGSize(width: fieldSize.width - textOriginX - 25 + 2, height: fieldSize.height)
     }
 
-    /// The text area in this layer's coordinates, where the hosted field goes.
+    /// The text area of a field at `fieldFrame`, in the same coordinates: where the hosted field goes.
+    static func hostedTextAreaFrame(inFieldFrame fieldFrame: CGRect) -> CGRect {
+        CGRect(
+            origin: CGPoint(x: fieldFrame.minX + textOriginX - 1, y: fieldFrame.minY),
+            size: hostedTextAreaSize(forFieldSize: fieldFrame.size)
+        )
+    }
+
+    /// The text area in this layer's coordinates.
     var hostedTextAreaFrame: CGRect {
-        CGRect(origin: CGPoint(x: Self.textOriginX - 1, y: 0), size: Self.hostedTextAreaSize(forFieldSize: bounds.size))
+        Self.hostedTextAreaFrame(inFieldFrame: bounds)
     }
 
     /// The field as the text input helper hosts it, for input methods. While it is set it shows the text,

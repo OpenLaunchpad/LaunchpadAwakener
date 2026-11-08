@@ -30,7 +30,11 @@ final class SpringboardRemoteTextField {
     var currentString: (() -> String)?
 
     private var hosting: TextInputHelperClient.Hosting?
+    /// Asked the helper to host it: from then on the helper has to be told to let it go, answered or not.
+    private var hasBegun = false
     private var isEnded = false
+    /// Whether the field has the focus; the helper shows no caret without it.
+    private var hasFocus = false
     /// Whether an input method is composing text in it: every key is the field's then.
     private(set) var isComposing = false
     /// Key codes whose key-down went to the helper; their key-up follows them.
@@ -52,10 +56,12 @@ final class SpringboardRemoteTextField {
         client.interruptionHandler = { [weak self] in
             self?.helperDidGoAway()
         }
+        hasBegun = true
         client.begin(
             isSearchField: configuration.isSearchField,
             string: configuration.string,
             selectsAll: configuration.selectsAll,
+            hasFocus: hasFocus,
             size: configuration.size,
             fontSize: configuration.fontSize,
             screenTopLeft: configuration.screenTopLeft
@@ -65,24 +71,29 @@ final class SpringboardRemoteTextField {
     }
 
     private func didBegin(with newHosting: TextInputHelperClient.Hosting?) {
-        guard !isEnded, let newHosting, let hostClass = NSClassFromString("CALayerHost") as? CALayer.Type else { return }
+        guard !isEnded, let newHosting, let hostLayer = TextInputHelperClient.makeLayerHost(showing: newHosting) else { return }
         hosting = newHosting
-        let hostLayer = hostClass.init()
-        hostLayer.setValue(NSNumber(value: newHosting.contextIdentifier), forKey: "contextId")
         hostLayerDidChange?(hostLayer)
-        // Typed before the helper answered: the hosted field takes over from there.
+        // Typed, or focused, before the helper answered: the hosted field takes over from there.
         if let currentString = currentString?(), currentString != configuration.string {
             TextInputHelperClient.shared.setString(currentString)
         }
+        TextInputHelperClient.shared.setFocus(hasFocus)
         #log(.info, "The \(self.configuration.isSearchField ? "search" : "rename", privacy: .public) field is hosted by process \(newHosting.processIdentifier, privacy: .public)")
     }
 
-    /// Commits any composing text and lets the helper's field go; the layer showing it goes too.
-    func end() {
+    /// Commits any composing text and lets the helper's field go — even one the helper has not answered
+    /// for yet — and the layer showing it goes too. `finalString` gets the text as the helper ended it,
+    /// composing text included.
+    func end(finalString: (@MainActor (String) -> Void)? = nil) {
         guard !isEnded else { return }
         isEnded = true
-        if hosting != nil {
-            TextInputHelperClient.shared.end()
+        if hasBegun {
+            TextInputHelperClient.shared.end { endedString in
+                if let endedString {
+                    finalString?(endedString)
+                }
+            }
         }
         hosting = nil
         isComposing = false
@@ -93,6 +104,15 @@ final class SpringboardRemoteTextField {
         guard hosting != nil else { return }
         isComposing = false
         TextInputHelperClient.shared.setString(string)
+    }
+
+    /// Without the focus the hosted field shows no caret, as 15's did not.
+    func setFocus(_ newHasFocus: Bool) {
+        guard newHasFocus != hasFocus else { return }
+        hasFocus = newHasFocus
+        if hosting != nil {
+            TextInputHelperClient.shared.setFocus(newHasFocus)
+        }
     }
 
     private func receive(_ change: TextInputHelperClient.Change) {
