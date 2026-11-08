@@ -133,8 +133,9 @@ package final class SpringboardController {
     }
 
     /// Hides the springboard. Input goes back at once, as in 15; the window leaves when the exit
-    /// animation ends.
-    package func hide(reason: String, animated: Bool = true) {
+    /// animation ends. `returningToPreviousApplication` is false when something else takes the keyboard
+    /// next: an application opened from the springboard, or the standalone app's settings.
+    package func hide(reason: String, animated: Bool = true, returningToPreviousApplication: Bool = true) {
         guard let currentWindow = window, let currentInterface = interface else { return }
         window = nil
         interface = nil
@@ -146,7 +147,7 @@ package final class SpringboardController {
         }
         // After the preparation: a drag it cancels may take a folder it had opened away with it.
         lastPosition = currentInterface.position
-        currentWindow.releaseKeyFocus()
+        currentWindow.releaseKeyFocus(returningToPreviousApplication: returningToPreviousApplication)
         hidingWindow = currentWindow
         hidingInterface = currentInterface
         if animated {
@@ -362,7 +363,8 @@ package final class SpringboardController {
             launchingIconLayer.add(launchAnimation, forKey: "launch")
             CATransaction.commit()
         }
-        hide(reason: "launching \(application.title)")
+        // The launched application takes the keyboard; handing it back to the one before would race it.
+        hide(reason: "launching \(application.title)", returningToPreviousApplication: false)
     }
 
     private func isInsideDockBar(_ location: CGPoint) -> Bool {
@@ -434,7 +436,7 @@ package final class SpringboardController {
         case (true, false):
             hide(reason: "pinch abandoned")
         case (false, true):
-            window?.releaseKeyFocus()
+            window?.releaseKeyFocus(returningToPreviousApplication: true)
             runVisibilitySpring(from: currentPinch.visibility, velocity: velocity, target: 0) { [weak self] in
                 self?.hide(reason: "spread", animated: false)
             }

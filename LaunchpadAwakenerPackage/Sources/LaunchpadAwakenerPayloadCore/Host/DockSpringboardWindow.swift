@@ -76,8 +76,9 @@ final class DockSpringboardWindow: SpringboardWindow {
         #log(.info, "Ordered in window \(self.windowIdentifier, privacy: .public): level result \(levelResult ?? -1, privacy: .public), key focus result \(keyFocusResult ?? -1, privacy: .public), raised \(self.raisedDockWindowIdentifiers.count, privacy: .public) Dock window(s)")
     }
 
-    /// Gives key focus back without closing, as 15 did the moment its exit animation started.
-    func releaseKeyFocus() {
+    /// Gives key focus back without closing, as 15 did the moment its exit animation started. The Dock never
+    /// becomes the active application, so the keyboard goes back to the one that is, launched or not.
+    func releaseKeyFocus(returningToPreviousApplication: Bool) {
         guard hasKeyFocus else { return }
         SkyLightBridge.releaseKeyFocus(onConnection: connectionIdentifier)
         hasKeyFocus = false
@@ -86,7 +87,7 @@ final class DockSpringboardWindow: SpringboardWindow {
     func orderOut() {
         guard isOrderedIn else { return }
         DockHostInterface.order(window, ordering: 0)
-        releaseKeyFocus()
+        releaseKeyFocus(returningToPreviousApplication: true)
         for raisedDockWindowIdentifier in raisedDockWindowIdentifiers {
             SkyLightBridge.setWindowLevel(
                 Self.dockWindowLevel,

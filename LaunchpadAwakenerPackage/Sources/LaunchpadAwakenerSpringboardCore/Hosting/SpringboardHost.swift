@@ -122,7 +122,10 @@ package protocol SpringboardWindow: AnyObject {
     /// Puts the window on screen above everything and takes the keyboard.
     func orderIn()
     /// Gives the keyboard back without closing, as 15 did the moment its exit animation started.
-    func releaseKeyFocus()
+    /// `returningToPreviousApplication` is false when an application was just opened from the springboard:
+    /// that application takes the keyboard itself, so a host that made itself the active application must
+    /// not hand it to the one that was active before.
+    func releaseKeyFocus(returningToPreviousApplication: Bool)
     func orderOut()
 }
 

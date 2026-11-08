@@ -31,6 +31,9 @@ final class StandaloneSpringboardWindow: SpringboardWindow {
         window.hasShadow = false
         window.isReleasedWhenClosed = false
         window.animationBehavior = .none
+        // Hiding the app is how the keyboard goes back (`releaseKeyFocus`); this window stays for its exit
+        // animation and leaves when that ends.
+        window.canHide = false
         window.acceptsMouseMovedEvents = true
         window.setFrame(screen.frame, display: false)
         // A layer-hosting view: the springboard owns the whole layer tree, as in the Dock's window.
@@ -57,20 +60,31 @@ final class StandaloneSpringboardWindow: SpringboardWindow {
 
     func orderIn() {
         guard !isOrderedIn else { return }
+        // The app hid itself when the springboard last went away; activating it would not show this window.
+        if NSApp.isHidden {
+            NSApp.unhideWithoutActivation()
+        }
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(contentView)
         StandaloneInputMethod.shared.contentView = contentView
         isOrderedIn = true
         StandaloneWatchdog.shared.watch(windowNumber: window.windowNumber)
+        // Opened by the shortcut while another application is active, the window is not key yet; AppKit makes
+        // it key, with the content view still first responder, once the activation goes through.
         #log(.info, "Ordered in window \(self.window.windowNumber, privacy: .public) at level \(self.window.level.rawValue, privacy: .public): key \(self.window.isKeyWindow, privacy: .public), app active \(NSApp.isActive, privacy: .public)")
     }
 
     /// Hands the keyboard back to the application that had it as the exit animation starts, as 15 did;
     /// the window itself stays until the animation ends.
-    func releaseKeyFocus() {
-        guard NSApp.isActive else { return }
-        NSApp.deactivate()
+    ///
+    /// The app made itself active to take the keyboard, and hides itself to give it back, as Command-H
+    /// does: the system then activates the application that was active before it. This window cannot hide
+    /// and plays its exit animation. `NSApp.deactivate()` does not do it on 27 — the app stays active, its
+    /// menus in the menu bar. After a launch it does nothing: the launched application takes the activation.
+    func releaseKeyFocus(returningToPreviousApplication: Bool) {
+        guard returningToPreviousApplication, NSApp.isActive else { return }
+        NSApp.hide(nil)
     }
 
     func orderOut() {

@@ -29,16 +29,30 @@ public struct StandaloneSettingsView: View {
         .frame(width: 380)
         .fixedSize()
     }
+}
 
+/// Opening the settings from outside SwiftUI: the Dock icon's menu.
+@Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "StandaloneSettings")
+@MainActor
+enum StandaloneSettings {
     /// Brings the settings up, as the app menu's Settings… does. The springboard hides first: it covers the
     /// whole screen.
-    @MainActor
-    public static func show() {
-        StandaloneLaunchpad.shared.hide(reason: "showing the settings")
+    ///
+    /// Since macOS 14 SwiftUI opens its Settings scene only through its own menu item — the
+    /// `showSettingsWindow:` action sent along the responder chain is ignored — so this performs that item.
+    static func show() {
+        StandaloneLaunchpad.shared.hide(reason: "showing the settings", returningToPreviousApplication: false)
         NSApp.activate()
-        if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+        guard
+            let applicationMenu = NSApp.mainMenu?.items.first?.submenu,
+            let settingsItemIndex = applicationMenu.items.firstIndex(where: { menuItem in
+                menuItem.keyEquivalent == "," && menuItem.keyEquivalentModifierMask == .command
+            })
+        else {
+            #log(.error, "The app menu has no Settings… item to open the settings with")
+            return
         }
+        applicationMenu.performActionForItem(at: settingsItemIndex)
     }
 }
 

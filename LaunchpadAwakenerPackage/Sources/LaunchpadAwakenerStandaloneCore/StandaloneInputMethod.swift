@@ -115,6 +115,12 @@ final class StandaloneSpringboardContentView: NSView, @MainActor NSTextInputClie
         NSNotFound
     }
 
+    /// The window's level, so the input method puts its candidates above the springboard: without it they
+    /// go just above floating windows, under the springboard's 27. `NSTextView` answers the same way.
+    func windowLevel() -> Int {
+        window?.level.rawValue ?? NSWindow.Level.normal.rawValue
+    }
+
     private static func plainString(of string: Any) -> String {
         (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
     }

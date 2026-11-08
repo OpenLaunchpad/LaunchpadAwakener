@@ -41,8 +41,10 @@ public final class StandaloneLaunchpad {
         SpringboardController.shared.show(reason: reason)
     }
 
-    public func hide(reason: String) {
-        SpringboardController.shared.hide(reason: reason)
+    /// Hides the springboard; the keyboard goes back to the application that had it, unless
+    /// `returningToPreviousApplication` is false because the app keeps it, for its settings.
+    public func hide(reason: String, returningToPreviousApplication: Bool = true) {
+        SpringboardController.shared.hide(reason: reason, returningToPreviousApplication: returningToPreviousApplication)
     }
 
     public func toggle(reason: String) {
@@ -166,7 +168,7 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
     }
 
     @objc private func showSettings(_ sender: Any?) {
-        StandaloneSettingsView.show()
+        StandaloneSettings.show()
     }
 
     /// Whether this launch is the one at login: the open event says so for an item under Open at Login.
