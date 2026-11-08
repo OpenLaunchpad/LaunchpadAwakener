@@ -41,6 +41,9 @@ let package = Package(
         // `@Loggable` and `#log` for the payload's logging. Already in the graph through
         // swift-helper-service; named here because the payload uses it directly.
         .package(url: "https://github.com/Mx-Iris/FrameworkToolbox", from: "0.17.0"),
+        // The standalone app's global shortcut: a recorder for its settings and a Carbon hot key, which
+        // needs no permission. Only the standalone module links it.
+        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", from: "3.1.0"),
     ],
     targets: [
         // Names, versions and paths shared by all three binaries. No dependencies on purpose —
@@ -112,6 +115,7 @@ let package = Package(
                 "LaunchpadAwakenerHookKit",
                 "LaunchpadAwakenerSpringboardCore",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
+                .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
             ]
         ),
 

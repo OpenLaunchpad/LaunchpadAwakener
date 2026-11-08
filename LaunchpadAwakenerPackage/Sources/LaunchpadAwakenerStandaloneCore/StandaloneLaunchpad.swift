@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 import LaunchpadAwakenerSpringboardCore
 import OSToolbox
 import ServiceManagement
@@ -49,6 +50,16 @@ public final class StandaloneLaunchpad {
             hide(reason: reason)
         } else {
             show(reason: reason)
+        }
+    }
+
+    // MARK: - The shortcut
+
+    /// Toggles the springboard whenever the shortcut recorded in the settings is pressed. A Carbon hot key
+    /// underneath, so no permission is asked for.
+    public func listenForShortcut() {
+        KeyboardShortcuts.onKeyDown(for: .toggleLaunchpad) { [weak self] in
+            self?.toggle(reason: "shortcut")
         }
     }
 
@@ -126,6 +137,7 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
             return
         }
         launchpad.registerLoginItemOnFirstLaunch()
+        launchpad.listenForShortcut()
         // Opened at login, it waits in the background for the first click on its Dock icon.
         guard !Self.wasLaunchedAsLoginItem else { return }
         launchpad.show(reason: "launched")
@@ -141,6 +153,20 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
     /// Command-Tab or a click elsewhere: 15's Launchpad went away when another application came forward.
     public func applicationDidResignActive(_ notification: Notification) {
         StandaloneLaunchpad.shared.hide(reason: "another application became active")
+    }
+
+    /// The Dock icon's menu: the way to the settings while the springboard, covering the menu bar, is not
+    /// showing the app's own menu.
+    public func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let dockMenu = NSMenu()
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: "")
+        settingsItem.target = self
+        dockMenu.addItem(settingsItem)
+        return dockMenu
+    }
+
+    @objc private func showSettings(_ sender: Any?) {
+        StandaloneSettingsView.show()
     }
 
     /// Whether this launch is the one at login: the open event says so for an item under Open at Login.
