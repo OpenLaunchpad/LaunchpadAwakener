@@ -163,7 +163,17 @@ final class SpringboardItemLayer: CALayer {
 
     /// Everything the icon draws, in a layer of its own that shakes in jiggle mode, as 15's
     /// `jitterLayer` was; it fills the item, so it shares the item's coordinates.
+    ///
+    /// It does not blend as a group, as 15's did not (`-[ECSBItemLayer initWithScaleFactor:layoutRTL:]`,
+    /// 15.5 `0x100060514`): the selection's plus-darker and a drop target's darkening tint then work on
+    /// the wallpaper behind the item. A layer that blends as a group keeps its sublayers' compositing
+    /// filters to itself, where those two had nothing beneath them and showed as opaque light grey.
     let jitterLayer = CALayer()
+    /// The picture alone, blending as a group the way the Dock's tiles keep theirs in a content layer
+    /// (`-[DOCKTileLayer init]`, 27.2 `0x10007E348`): the compositing filter of the clear and tinted icon
+    /// styles works on the picture, not on the wallpaper. It fills the jitter layer, so the picture's
+    /// frame is in the jitter layer's coordinates.
+    private let imageGroupLayer = CALayer()
     let imageLayer = CALayer()
     let labelLayer = SpringboardLabelLayer()
     private var selectionLayer: CALayer?
@@ -176,8 +186,11 @@ final class SpringboardItemLayer: CALayer {
     override init() {
         super.init()
         imageLayer.contentsGravity = .resizeAspect
-        jitterLayer.addSublayer(imageLayer)
+        imageGroupLayer.addSublayer(imageLayer)
+        jitterLayer.addSublayer(imageGroupLayer)
         jitterLayer.addSublayer(labelLayer)
+        // Core Animation's private `allowsGroupBlending`.
+        jitterLayer.setValue(false, forKey: "allowsGroupBlending")
         addSublayer(jitterLayer)
     }
 
@@ -311,7 +324,7 @@ final class SpringboardItemLayer: CALayer {
             let newBackdropLayer = CALayer()
             newBackdropLayer.backgroundColor = Self.folderBackdropColor
             newBackdropLayer.cornerCurve = .continuous
-            jitterLayer.insertSublayer(newBackdropLayer, below: imageLayer)
+            jitterLayer.insertSublayer(newBackdropLayer, below: imageGroupLayer)
             backdropLayer = newBackdropLayer
         }
         guard thumbnailGridLayer == nil else { return }
@@ -414,6 +427,7 @@ final class SpringboardItemLayer: CALayer {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         jitterLayer.frame = bounds
+        imageGroupLayer.frame = jitterLayer.bounds
         CATransaction.commit()
         guard let metrics, let item else { return }
         CATransaction.begin()
@@ -672,7 +686,7 @@ final class SpringboardItemLayer: CALayer {
                 layer.frame = folderBackdropFrame
                 layer.cornerRadius = folderCornerRadius
                 layer.transform = CATransform3DMakeScale(1.1, 1.1, 1)
-                jitterLayer.insertSublayer(layer, below: imageLayer)
+                jitterLayer.insertSublayer(layer, below: imageGroupLayer)
                 Self.addBlinkAnimation(to: layer)
             }
             backdropLayer = newBackdropLayer
