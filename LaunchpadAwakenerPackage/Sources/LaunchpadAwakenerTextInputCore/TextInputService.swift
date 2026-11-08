@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import LaunchpadAwakenerHookKit
 import LaunchpadAwakenerShared
 import ObjectiveC
 import OSToolbox
@@ -34,6 +35,8 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     private var isSearchField = true
     private var lastReportedString = ""
     private var lastReportedHasMarkedText = false
+    /// Whether the field is set up for the payload's last `begin`: only then is its text the payload's.
+    private var isHosting = false
     /// The executable as it was when this process started; a deployment replaces it.
     private let executableIdentity = TextInputService.currentExecutableIdentity()
 
@@ -109,8 +112,13 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     private func handle(_ message: xpc_object_t, from connection: xpc_object_t) {
         guard xpc_get_type(message) == XPC_TYPE_DICTIONARY else {
             // The Dock went away: keep nothing composing and let the field go. Another connection failing
-            // its signature check changes nothing.
-            guard connection === peer else { return }
+            // its signature check changes nothing, but leaves the fields without input methods.
+            guard connection === peer else {
+                if message === XPC_ERROR_PEER_CODE_SIGNING_REQUIREMENT {
+                    #log(.error, "Refused process \(xpc_connection_get_pid(connection), privacy: .public)'s messages: it is not the Apple-signed Dock")
+                }
+                return
+            }
             #log(.info, "The Dock's connection ended")
             peer = nil
             end()
@@ -132,10 +140,13 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         case Request.setFocus:
             showCaret(xpc_dictionary_get_bool(message, MessageKey.hasFocus))
         case Request.end:
-            end()
-            // The final text, composing text included, for a rename that ended while text was composing.
+            let endedString = end()
+            // The final text, composing text included, for a rename that ended while text was composing;
+            // none when this field was never set up, as the text left is then another field's.
             if let peer, let reply = xpc_dictionary_create_reply(message) {
-                xpc_dictionary_set_string(reply, MessageKey.string, fieldEditor.string)
+                if let endedString {
+                    xpc_dictionary_set_string(reply, MessageKey.string, endedString)
+                }
                 xpc_connection_send_message(peer, reply)
             }
         default:
@@ -146,6 +157,7 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     // MARK: - Requests
 
     private func begin(with message: xpc_object_t) {
+        isHosting = false
         // A deployment replaced this executable: the new one hosts the field from the next opening on.
         guard Self.currentExecutableIdentity() == executableIdentity else {
             #log(.info, "A new build replaced the helper; exiting so that launchd starts that one")
@@ -192,7 +204,9 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         }
         showCaret(xpc_dictionary_get_bool(message, MessageKey.hasFocus))
         Self.setRemoteViewActivation(true)
-        reply(to: message, contextIdentifier: Self.layerHostingContextIdentifier(of: window), windowNumber: window.windowNumber)
+        let contextIdentifier = Self.layerHostingContextIdentifier(of: window)
+        isHosting = contextIdentifier != 0
+        reply(to: message, contextIdentifier: contextIdentifier, windowNumber: window.windowNumber)
         #log(.info, "Hosting the \(self.isSearchField ? "search" : "rename", privacy: .public) field, \(width, privacy: .public)×\(height, privacy: .public)")
     }
 
@@ -230,13 +244,18 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     }
 
     /// Composing text is kept, as clicking away from any text field keeps it; the final text goes back first.
-    private func end() {
+    /// Returns that text, taken before the window goes, when the field was set up for the payload.
+    @discardableResult
+    private func end() -> String? {
+        defer { isHosting = false }
         if fieldEditor.hasMarkedText() {
             fieldEditor.unmarkText()
         }
         reportState(isEditingComplete: false)
+        let endedString = isHosting ? fieldEditor.string : nil
         Self.setRemoteViewActivation(false)
         Self.callMiniViewMethod("_setMiniViewShown:", typeEncoding: "v20@0:8B16", bool: false)
+        return endedString
     }
 
     // MARK: - The field
@@ -307,7 +326,8 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         unsafeBitCast(implementation, to: BoolFunction.self)(NSApp.dockTile, NSSelectorFromString(selectorName), bool)
     }
 
-    /// The method's implementation once its type encoding is the expected one; nil and a log otherwise.
+    /// The method's implementation once its type encoding is the expected one, frame offsets aside; nil and
+    /// a log otherwise.
     private static func implementation(of selectorName: String, on receiver: AnyObject, typeEncoding expectedTypeEncoding: String) -> IMP? {
         guard
             let method = class_getInstanceMethod(object_getClass(receiver), NSSelectorFromString(selectorName)),
@@ -316,7 +336,7 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
             #log(.error, "No -\(selectorName, privacy: .public) on \(String(describing: type(of: receiver)), privacy: .public)")
             return nil
         }
-        guard String(cString: typeEncoding) == expectedTypeEncoding else {
+        guard MethodHookInspector.typeEncodingsMatch(String(cString: typeEncoding), expectedTypeEncoding) else {
             #log(.error, "-\(selectorName, privacy: .public) is \(String(cString: typeEncoding), privacy: .public), not \(expectedTypeEncoding, privacy: .public)")
             return nil
         }

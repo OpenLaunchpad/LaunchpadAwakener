@@ -35,6 +35,8 @@ final class SpringboardRemoteTextField {
     private var isEnded = false
     /// Whether the field has the focus; the helper shows no caret without it.
     private var hasFocus = false
+    /// The focus the helper was asked to begin with; it is told again only if that changed meanwhile.
+    private var hasFocusAtBeginning = false
     /// Whether an input method is composing text in it: every key is the field's then.
     private(set) var isComposing = false
     /// Key codes whose key-down went to the helper; their key-up follows them.
@@ -57,6 +59,7 @@ final class SpringboardRemoteTextField {
             self?.helperDidGoAway()
         }
         hasBegun = true
+        hasFocusAtBeginning = hasFocus
         client.begin(
             isSearchField: configuration.isSearchField,
             string: configuration.string,
@@ -78,20 +81,24 @@ final class SpringboardRemoteTextField {
         if let currentString = currentString?(), currentString != configuration.string {
             TextInputHelperClient.shared.setString(currentString)
         }
-        TextInputHelperClient.shared.setFocus(hasFocus)
+        if hasFocus != hasFocusAtBeginning {
+            TextInputHelperClient.shared.setFocus(hasFocus)
+        }
         #log(.info, "The \(self.configuration.isSearchField ? "search" : "rename", privacy: .public) field is hosted by process \(newHosting.processIdentifier, privacy: .public)")
     }
 
     /// Commits any composing text and lets the helper's field go — even one the helper has not answered
     /// for yet — and the layer showing it goes too. `finalString` gets the text as the helper ended it,
-    /// composing text included.
-    func end(finalString: (@MainActor (String) -> Void)? = nil) {
+    /// composing text included, and whether the helper was hosting the field here: a field it never
+    /// hosted was edited here, and the helper's text is not what was typed.
+    func end(finalString: (@MainActor (_ endedString: String, _ wasHosted: Bool) -> Void)? = nil) {
         guard !isEnded else { return }
         isEnded = true
+        let wasHosted = hosting != nil
         if hasBegun {
             TextInputHelperClient.shared.end { endedString in
                 if let endedString {
-                    finalString?(endedString)
+                    finalString?(endedString, wasHosted)
                 }
             }
         }

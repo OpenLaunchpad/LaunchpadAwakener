@@ -624,9 +624,18 @@ final class SpringboardInterface {
         let folder = folderPanel.folder
         let newTitle = renaming.text.trimmingCharacters(in: .whitespaces)
         // Text an input method was still composing — the renaming ended by a click elsewhere — comes in
-        // with the helper's final answer, and the name is stored again with it.
-        endRemoteRenameField { [weak self] endedString in
-            self?.applyLateRename(endedString, of: folder, committedTitle: newTitle)
+        // with the helper's final answer, and the name is stored again with it. The answer may come after
+        // this interface has gone, so the store is reached without it.
+        let applyEdit = applyEdit
+        endRemoteRenameField { [weak self] endedString, wasHosted in
+            guard let lateTitle = SpringboardRenaming.lateTitle(
+                endedString: endedString,
+                committedTitle: newTitle,
+                previousTitle: folder.title,
+                wasHosted: wasHosted
+            ) else { return }
+            applyEdit(.renameFolder(folder.identifier, title: lateTitle))
+            self?.showLateRename(lateTitle, of: folder)
         }
         endRenaming(in: folderPanel)
         guard !newTitle.isEmpty, newTitle != folderPanel.folder.title else { return }
@@ -635,17 +644,13 @@ final class SpringboardInterface {
         applyEdit(.renameFolder(folderPanel.folder.identifier, title: newTitle))
     }
 
-    /// Stores the name the hosted field ended with when it differs from the one just committed: text still
-    /// composing when the renaming ended, which the helper committed on its way out.
-    private func applyLateRename(_ endedString: String, of folder: LaunchpadFolder, committedTitle: String) {
-        let lateTitle = endedString.trimmingCharacters(in: .whitespaces)
-        let titleNow = committedTitle.isEmpty ? folder.title : committedTitle
-        guard !lateTitle.isEmpty, lateTitle != titleNow else { return }
+    /// Shows the name stored late — text still composing when the renaming ended — on the folder's icon
+    /// and, while it is open, its panel.
+    private func showLateRename(_ lateTitle: String, of folder: LaunchpadFolder) {
         if let folderPanel, folderPanel.folder.identifier == folder.identifier {
             folderPanel.setTitle(lateTitle)
         }
         folderItemLayer(of: folder)?.labelLayer.setString(lateTitle, contentsScale: scale)
-        applyEdit(.renameFolder(folder.identifier, title: lateTitle))
     }
 
     private func endRenaming(in folderPanel: SpringboardFolderPanel) {
@@ -845,7 +850,6 @@ final class SpringboardInterface {
     private func endRemoteSearchField() {
         remoteSearchField?.end()
         remoteSearchField = nil
-        searchFieldLayer.isComposingInHostedField = false
     }
 
     /// The hosted field's text changed: search it, as typing here does.
@@ -910,8 +914,9 @@ final class SpringboardInterface {
     }
 
     /// Lets the helper's rename field go, and has it host the search field again. `finalString` gets the
-    /// name as the helper ended it, with any text still composing committed.
-    private func endRemoteRenameField(finalString: (@MainActor (String) -> Void)? = nil) {
+    /// name as the helper ended it, with any text still composing committed, and whether the helper was
+    /// hosting the field when it ended.
+    private func endRemoteRenameField(finalString: (@MainActor (_ endedString: String, _ wasHosted: Bool) -> Void)? = nil) {
         guard let remoteRenameField else { return }
         remoteRenameField.end(finalString: finalString)
         self.remoteRenameField = nil

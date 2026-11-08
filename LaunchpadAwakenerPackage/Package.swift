@@ -91,6 +91,7 @@ let package = Package(
         .target(
             name: "LaunchpadAwakenerTextInputCore",
             dependencies: [
+                "LaunchpadAwakenerHookKit",
                 "LaunchpadAwakenerShared",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
             ]

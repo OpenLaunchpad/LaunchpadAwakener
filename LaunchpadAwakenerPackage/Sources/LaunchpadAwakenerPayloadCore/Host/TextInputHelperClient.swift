@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LaunchpadAwakenerHookKit
 import LaunchpadAwakenerShared
 import ObjectiveC
 import OSToolbox
@@ -115,20 +116,38 @@ final class TextInputHelperClient {
     /// A `CALayerHost` showing the helper's field, once `-[CALayerHost setContextId:]` is the one this
     /// payload knows; nil otherwise.
     static func makeLayerHost(showing hosting: Hosting) -> CALayer? {
+        guard let layerHostClass else { return nil }
+        let hostLayer = layerHostClass.hostClass.init()
+        layerHostClass.setContextIdentifier(hostLayer, layerHostClass.selector, hosting.contextIdentifier)
+        return hostLayer
+    }
+
+    /// `CALayerHost` and its `-setContextId:`, once the setter's signature is checked, frame offsets
+    /// aside; looked up once.
+    private struct LayerHostClass {
+        typealias SetContextIdentifierFunction = @convention(c) (AnyObject, Selector, UInt32) -> Void
+        let hostClass: CALayer.Type
+        let selector: Selector
+        let setContextIdentifier: SetContextIdentifierFunction
+    }
+
+    private static let layerHostClass = findLayerHostClass()
+
+    private static func findLayerHostClass() -> LayerHostClass? {
         let selector = NSSelectorFromString("setContextId:")
         guard
             let hostClass = NSClassFromString("CALayerHost") as? CALayer.Type,
-            let method = class_getInstanceMethod(hostClass, selector),
-            let typeEncoding = method_getTypeEncoding(method),
-            String(cString: typeEncoding) == "v20@0:8I16"
+            MethodHookInspector.hasMethod(className: "CALayerHost", selector: selector, matchingTypeEncoding: "v20@0:8I16"),
+            let method = class_getInstanceMethod(hostClass, selector)
         else {
-            #log(.error, "-[CALayerHost setContextId:] is missing or changed; the field is edited here")
+            #log(.error, "-[CALayerHost setContextId:] is missing or changed; the fields are edited here")
             return nil
         }
-        let hostLayer = hostClass.init()
-        typealias SetContextIdentifierFunction = @convention(c) (AnyObject, Selector, UInt32) -> Void
-        unsafeBitCast(method_getImplementation(method), to: SetContextIdentifierFunction.self)(hostLayer, selector, hosting.contextIdentifier)
-        return hostLayer
+        return LayerHostClass(
+            hostClass: hostClass,
+            selector: selector,
+            setContextIdentifier: unsafeBitCast(method_getImplementation(method), to: LayerHostClass.SetContextIdentifierFunction.self)
+        )
     }
 
     /// Posts a copy of `event` to the helper, marked with its window, as 15's Dock did; mouse events also
