@@ -71,6 +71,7 @@ struct LaunchpadAwakenerApp: App {
             guard injectionCoordinator.prefersAutomaticInjection else { return }
             injectionCoordinator.startAutomaticInjection()
             LaunchAtLogin.setEnabled(true)
+            TextInputAgent.registerIfNeeded()
             await injectionCoordinator.injectIntoRunningTargets()
         case .staleButNotEnabled, .queryFailed, .reinstallFailed:
             break

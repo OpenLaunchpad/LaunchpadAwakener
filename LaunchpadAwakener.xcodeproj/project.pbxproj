@@ -12,6 +12,8 @@
 		1A5C00000000000000000902 /* LaunchpadAwakenerPayloadCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000802 /* LaunchpadAwakenerPayloadCore */; };
 		1A5C00000000000000000903 /* LaunchpadAwakenerPayload.framework in Embed Payload */ = {isa = PBXBuildFile; fileRef = 1A5C00000000000000000202 /* LaunchpadAwakenerPayload.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		1A5C00000000000000000904 /* $(INJECTION_SERVICE_NAME) in Embed Daemon */ = {isa = PBXBuildFile; fileRef = 1A5C00000000000000000201 /* $(INJECTION_SERVICE_NAME) */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		1A5C00000000000000000905 /* LaunchpadAwakenerTextInputCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000803 /* LaunchpadAwakenerTextInputCore */; };
+		1A5C00000000000000000906 /* LaunchpadAwakenerTextInput.app in Embed Text Input Helper */ = {isa = PBXBuildFile; fileRef = 1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +30,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 1A5C00000000000000000102;
 			remoteInfo = LaunchpadAwakenerPayload;
+		};
+		1A5C00000000000000000604 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A5C00000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A5C00000000000000000103;
+			remoteInfo = LaunchpadAwakenerTextInput;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -54,12 +63,24 @@
 			name = "Embed Daemon";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1A5C00000000000000000506 /* Embed Text Input Helper */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Library/LoginItems;
+			dstSubfolderSpec = 1;
+			files = (
+				1A5C00000000000000000906 /* LaunchpadAwakenerTextInput.app in Embed Text Input Helper */,
+			);
+			name = "Embed Text Input Helper";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1A5C00000000000000000200 /* LaunchpadAwakener.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaunchpadAwakener.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A5C00000000000000000201 /* $(INJECTION_SERVICE_NAME) */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "$(INJECTION_SERVICE_NAME)"; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A5C00000000000000000202 /* LaunchpadAwakenerPayload.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = LaunchpadAwakenerPayload.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaunchpadAwakenerTextInput.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -91,6 +112,11 @@
 			path = LaunchpadAwakenerPayload;
 			sourceTree = "<group>";
 		};
+		1A5C00000000000000000404 /* LaunchpadAwakenerTextInput */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LaunchpadAwakenerTextInput;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -118,6 +144,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1A5C00000000000000000531 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A5C00000000000000000905 /* LaunchpadAwakenerTextInputCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -127,6 +161,7 @@
 				1A5C00000000000000000400 /* LaunchpadAwakener */,
 				1A5C00000000000000000401 /* LaunchpadAwakenerDaemon */,
 				1A5C00000000000000000402 /* LaunchpadAwakenerPayload */,
+				1A5C00000000000000000404 /* LaunchpadAwakenerTextInput */,
 				1A5C00000000000000000301 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -137,6 +172,7 @@
 				1A5C00000000000000000200 /* LaunchpadAwakener.app */,
 				1A5C00000000000000000201 /* $(INJECTION_SERVICE_NAME) */,
 				1A5C00000000000000000202 /* LaunchpadAwakenerPayload.framework */,
+				1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -164,12 +200,15 @@
 				1A5C00000000000000000503 /* Embed Payload */,
 				1A5C00000000000000000504 /* Embed Daemon */,
 				1A5C00000000000000000505 /* Generate LaunchDaemon Property List */,
+				1A5C00000000000000000506 /* Embed Text Input Helper */,
+				1A5C00000000000000000507 /* Generate LaunchAgent Property List */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				1A5C00000000000000000600 /* PBXTargetDependency */,
 				1A5C00000000000000000601 /* PBXTargetDependency */,
+				1A5C00000000000000000605 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				1A5C00000000000000000400 /* LaunchpadAwakener */,
@@ -227,6 +266,28 @@
 			productReference = 1A5C00000000000000000202 /* LaunchpadAwakenerPayload.framework */;
 			productType = "com.apple.product-type.framework";
 		};
+		1A5C00000000000000000103 /* LaunchpadAwakenerTextInput */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A5C00000000000000000740 /* Build configuration list for PBXNativeTarget "LaunchpadAwakenerTextInput" */;
+			buildPhases = (
+				1A5C00000000000000000530 /* Sources */,
+				1A5C00000000000000000531 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1A5C00000000000000000404 /* LaunchpadAwakenerTextInput */,
+			);
+			name = LaunchpadAwakenerTextInput;
+			packageProductDependencies = (
+				1A5C00000000000000000803 /* LaunchpadAwakenerTextInputCore */,
+			);
+			productName = LaunchpadAwakenerTextInput;
+			productReference = 1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -245,6 +306,9 @@
 					};
 					1A5C00000000000000000102 = {
 						CreatedOnToolsVersion = 26.5;
+					};
+					1A5C00000000000000000103 = {
+						CreatedOnToolsVersion = 27.2;
 					};
 				};
 			};
@@ -265,6 +329,7 @@
 				1A5C00000000000000000100 /* LaunchpadAwakener */,
 				1A5C00000000000000000101 /* LaunchpadAwakenerDaemon */,
 				1A5C00000000000000000102 /* LaunchpadAwakenerPayload */,
+				1A5C00000000000000000103 /* LaunchpadAwakenerTextInput */,
 			);
 		};
 /* End PBXProject section */
@@ -295,6 +360,21 @@
 			shellPath = /bin/sh;
 			shellScript = "# SMAppService.daemon(plistName:) reads this file out of the app bundle at registration\n# time. Generating it here instead of checking it in keeps Label / BundleProgram / MachServices\n# in lock-step with INJECTION_SERVICE_NAME, which differs between Debug and Release.\nset -e\n\nLAUNCH_DAEMONS_DIRECTORY=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchDaemons\"\nPROPERTY_LIST_PATH=\"${LAUNCH_DAEMONS_DIRECTORY}/${INJECTION_SERVICE_NAME}.plist\"\nPROPERTY_LIST_BUDDY=/usr/libexec/PlistBuddy\n\nmkdir -p \"${LAUNCH_DAEMONS_DIRECTORY}\"\nrm -f \"${PROPERTY_LIST_PATH}\"\n\nprintf '%s\\n' \\\n  '<?xml version=\"1.0\" encoding=\"UTF-8\"?>' \\\n  '<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">' \\\n  '<plist version=\"1.0\"><dict/></plist>' > \"${PROPERTY_LIST_PATH}\"\n\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :Label string ${INJECTION_SERVICE_NAME}\" \"${PROPERTY_LIST_PATH}\"\n# BundleProgram is relative to the app bundle root, which is how SMAppService locates the\n# executable that Embed Daemon copied into Contents/Library/LaunchServices.\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :BundleProgram string Contents/Library/LaunchServices/${INJECTION_SERVICE_NAME}\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :KeepAlive bool true\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :MachServices dict\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :MachServices:${INJECTION_SERVICE_NAME} bool true\" \"${PROPERTY_LIST_PATH}\"\n\necho \"Generated ${PROPERTY_LIST_PATH}\"\n";
 		};
+		1A5C00000000000000000507 /* Generate LaunchAgent Property List */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Generate LaunchAgent Property List";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# SMAppService.agent(plistName:) reads this file out of the app bundle at registration time.\n# Generated, as the daemon's is, so that Label and MachServices follow TEXT_INPUT_SERVICE_NAME,\n# which differs between Debug and Release.\nset -e\n\nLAUNCH_AGENTS_DIRECTORY=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\nPROPERTY_LIST_PATH=\"${LAUNCH_AGENTS_DIRECTORY}/${TEXT_INPUT_SERVICE_NAME}.plist\"\nPROPERTY_LIST_BUDDY=/usr/libexec/PlistBuddy\n\nmkdir -p \"${LAUNCH_AGENTS_DIRECTORY}\"\nrm -f \"${PROPERTY_LIST_PATH}\"\n\nprintf '%s\\n' \\\n  '<?xml version=\"1.0\" encoding=\"UTF-8\"?>' \\\n  '<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">' \\\n  '<plist version=\"1.0\"><dict/></plist>' > \"${PROPERTY_LIST_PATH}\"\n\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :Label string ${TEXT_INPUT_SERVICE_NAME}\" \"${PROPERTY_LIST_PATH}\"\n# Relative to the app bundle root: where Embed Text Input Helper copied the helper.\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :BundleProgram string Contents/Library/LoginItems/LaunchpadAwakenerTextInput.app/Contents/MacOS/LaunchpadAwakenerTextInput\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :MachServices dict\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :MachServices:${TEXT_INPUT_SERVICE_NAME} bool true\" \"${PROPERTY_LIST_PATH}\"\n# Started by launchd when the payload in the Dock connects, and only in a login session's GUI.\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :LimitLoadToSessionType string Aqua\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :ProcessType string Interactive\" \"${PROPERTY_LIST_PATH}\"\n\necho \"Generated ${PROPERTY_LIST_PATH}\"\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -319,6 +399,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1A5C00000000000000000530 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -331,6 +418,11 @@
 			isa = PBXTargetDependency;
 			target = 1A5C00000000000000000102 /* LaunchpadAwakenerPayload */;
 			targetProxy = 1A5C00000000000000000603 /* PBXContainerItemProxy */;
+		};
+		1A5C00000000000000000605 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A5C00000000000000000103 /* LaunchpadAwakenerTextInput */;
+			targetProxy = 1A5C00000000000000000604 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -372,6 +464,8 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INJECTION_SERVICE_NAME = "com.MxIris.LaunchpadAwakener.service.debug";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				// Must match TextInputServiceIdentity.machServiceName.
+				TEXT_INPUT_SERVICE_NAME = "com.MxIris.LaunchpadAwakener.textinput.debug";
 				// Must stay NO. The local Swift package is built with the project's settings, and
 				// trimming to the active architecture discards the arm64e slice the daemon needs.
 				ONLY_ACTIVE_ARCH = NO;
@@ -414,6 +508,8 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INJECTION_SERVICE_NAME = "com.MxIris.LaunchpadAwakener.service";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				// Must match TextInputServiceIdentity.machServiceName.
+				TEXT_INPUT_SERVICE_NAME = "com.MxIris.LaunchpadAwakener.textinput";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_VERSION = 5.0;
@@ -544,6 +640,52 @@
 			};
 			name = Release;
 		};
+		1A5C00000000000000000741 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(TEXT_INPUT_SERVICE_NAME)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		1A5C00000000000000000742 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(TEXT_INPUT_SERVICE_NAME)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -583,6 +725,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		1A5C00000000000000000740 /* Build configuration list for PBXNativeTarget "LaunchpadAwakenerTextInput" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A5C00000000000000000741 /* Debug */,
+				1A5C00000000000000000742 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -597,6 +748,10 @@
 		1A5C00000000000000000802 /* LaunchpadAwakenerPayloadCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LaunchpadAwakenerPayloadCore;
+		};
+		1A5C00000000000000000803 /* LaunchpadAwakenerTextInputCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LaunchpadAwakenerTextInputCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

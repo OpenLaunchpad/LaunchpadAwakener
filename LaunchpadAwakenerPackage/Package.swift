@@ -18,6 +18,8 @@ let package = Package(
         .library(name: "LaunchpadAwakenerDaemonCore", targets: ["LaunchpadAwakenerDaemonCore"]),
         // Linked by the injected payload target.
         .library(name: "LaunchpadAwakenerPayloadCore", targets: ["LaunchpadAwakenerPayloadCore"]),
+        // Linked by the text input helper, the LaunchAgent that hosts the springboard's text fields.
+        .library(name: "LaunchpadAwakenerTextInputCore", targets: ["LaunchpadAwakenerTextInputCore"]),
         // Standalone so it can be reused or tested without dragging in the payload's specifics.
         .library(name: "LaunchpadAwakenerHookKit", targets: ["LaunchpadAwakenerHookKit"]),
         .library(name: "LaunchpadAwakenerShared", targets: ["LaunchpadAwakenerShared"]),
@@ -50,6 +52,7 @@ let package = Package(
             name: "LaunchpadAwakenerAppCore",
             dependencies: [
                 "LaunchpadAwakenerShared",
+                .product(name: "OSToolbox", package: "FrameworkToolbox"),
                 .product(name: "HelperClient", package: "swift-helper-service"),
                 .product(name: "HelperCommunication", package: "swift-helper-service"),
                 // Interface-only: the app sends these requests but must not link the
@@ -79,6 +82,16 @@ let package = Package(
             dependencies: [
                 "LaunchpadAwakenerShared",
                 "LaunchpadAwakenerHookKit",
+                .product(name: "OSToolbox", package: "FrameworkToolbox"),
+            ]
+        ),
+
+        // Text input helper: hosts the search and rename fields in a window that never goes on screen, so
+        // that input methods work in them; the payload shows the window in the Dock and forwards the keys.
+        .target(
+            name: "LaunchpadAwakenerTextInputCore",
+            dependencies: [
+                "LaunchpadAwakenerShared",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
             ]
         ),
