@@ -45,7 +45,15 @@ final class SpringboardInterface {
     private var selectedItemIndex: Int?
     /// The layer showing the selection, which may sit on a page no longer in front.
     private weak var selectedItemLayer: SpringboardItemLayer?
-    private var searchText = ""
+    /// What is typed in the search field, with its selection and undo history.
+    private var searchEditor = SpringboardFieldEditor(editing: SpringboardTextEditing(selectingAllOf: ""))
+    private var searchText: String {
+        searchEditor.text
+    }
+    /// What the search field holds, its selection included.
+    var searchFieldEditing: SpringboardTextEditing {
+        searchEditor.editing
+    }
     private(set) var isShowingSearchResults = false
     private var searchTask: Task<Void, Never>?
 
@@ -55,7 +63,7 @@ final class SpringboardInterface {
     /// True from the moment a folder starts to close until its panel is gone.
     private var isClosingFolder = false
     /// The open folder's name while it is being renamed, with the selection.
-    private var renaming: SpringboardTextEditing?
+    private var renaming: SpringboardFieldEditor?
     /// The latest stored layout, waiting until nothing it would disturb is moving.
     private(set) var pendingLayout: LaunchpadLayout?
     /// The main page as a drag that ended in a folder left it — its icons with a gap where the dragged one
@@ -69,7 +77,8 @@ final class SpringboardInterface {
         case background(context: GridContext, startLocation: CGPoint, startScrollValue: CGFloat, startTimestamp: UInt64, isDragging: Bool)
         case pagerIndicator(context: GridContext, pageIndex: Int)
         case clearButton
-        case searchField
+        /// A press in the search field, which drags out a selection as in the rename field.
+        case searchField(doubleClickedWord: Range<Int>?)
         case folderTitle
         /// A press in the rename field, which drags out a selection: by character, or by word from
         /// `doubleClickedWord` after a double-click.
@@ -569,15 +578,15 @@ final class SpringboardInterface {
     /// Starts renaming with the whole name selected, as 15's field did.
     private func startRenaming() {
         guard let folderPanel, renaming == nil else { return }
-        let editing = SpringboardTextEditing(selectingAllOf: folderPanel.folder.title)
-        renaming = editing
+        let editor = SpringboardFieldEditor(editing: SpringboardTextEditing(selectingAllOf: folderPanel.folder.title))
+        renaming = editor
         // 15 took the focus from the search field while a title was edited.
         setSearchFieldFocus(false)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         folderPanel.titleLayer.isHidden = true
         folderPanel.titleEditorLayer.isHidden = false
-        folderPanel.titleEditorLayer.show(editing)
+        folderPanel.titleEditorLayer.show(editor.editing)
         CATransaction.commit()
     }
 
@@ -602,69 +611,84 @@ final class SpringboardInterface {
     }
 
     private func handleRenamingKeyDown(keyCode: Int64, characters: String, modifierFlags: CGEventFlags) {
-        guard var editing = renaming, let command = SpringboardTextEditingCommand(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags) else { return }
-        switch command {
-        case .endEditing:
+        guard var editor = renaming, let command = SpringboardTextEditingCommand(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags) else { return }
+        guard command != .endEditing else {
             commitRenaming()
             return
-        case let .insert(typedText):
-            editing.insert(typedText)
-        case let .move(movement, extendingSelection):
-            editing.move(movement, extendingSelection: extendingSelection)
-        case let .delete(deletion):
-            editing.delete(deletion)
-        case .selectAll:
-            editing.selectAll()
         }
-        showRenaming(editing)
+        editor.apply(command, pasteboard: SystemPasteboard())
+        showRenaming(editor)
     }
 
-    private func showRenaming(_ editing: SpringboardTextEditing) {
-        renaming = editing
-        folderPanel?.titleEditorLayer.show(editing)
+    private func showRenaming(_ editor: SpringboardFieldEditor) {
+        renaming = editor
+        folderPanel?.titleEditorLayer.show(editor.editing)
     }
 
     /// A press in the rename field, at `editorPoint` in the editor's coordinates: one click puts the caret
     /// there, or with Shift moves the selection's end there; two select a word, three the whole name.
     private func pressInRenameField(at editorPoint: CGPoint, clickCount: Int64, extendsSelection: Bool) {
-        guard let folderPanel, var editing = renaming else { return }
+        guard let folderPanel, var editor = renaming else { return }
         let editorLayer = folderPanel.titleEditorLayer
-        switch clickCount {
-        case ...1:
-            editing.placeCaret(at: editorLayer.caretOffset(at: editorPoint), extendingSelection: extendsSelection)
-            pointerTracking = .titleEditor(doubleClickedWord: nil)
-        case 2:
-            let wordRange = editing.wordRange(atCharacterOffset: editorLayer.characterOffset(at: editorPoint))
-            editing.select(wordRange)
-            pointerTracking = .titleEditor(doubleClickedWord: wordRange)
-        default:
-            editing.selectAll()
-            pointerTracking = .none
+        let doubleClickedWord = Self.press(
+            in: &editor,
+            clickCount: clickCount,
+            extendsSelection: extendsSelection,
+            caretOffset: editorLayer.caretOffset(at: editorPoint),
+            characterOffset: editorLayer.characterOffset(at: editorPoint)
+        )
+        pointerTracking = clickCount >= 3 ? .none : .titleEditor(doubleClickedWord: doubleClickedWord)
+        showRenaming(editor)
+    }
+
+    /// What a press does in a field: one click puts the caret there, or with Shift moves the selection's
+    /// end there; two select a word, three everything. Returns the word a double-click selected.
+    private static func press(in editor: inout SpringboardFieldEditor, clickCount: Int64, extendsSelection: Bool, caretOffset: Int, characterOffset: Int) -> Range<Int>? {
+        var doubleClickedWord: Range<Int>?
+        editor.select { editing in
+            switch clickCount {
+            case ...1:
+                editing.placeCaret(at: caretOffset, extendingSelection: extendsSelection)
+            case 2:
+                let wordRange = editing.wordRange(atCharacterOffset: characterOffset)
+                editing.select(wordRange)
+                doubleClickedWord = wordRange
+            default:
+                editing.selectAll()
+            }
         }
-        showRenaming(editing)
+        return doubleClickedWord
+    }
+
+    /// A drag from a press in a field moves the selection's end with it, by character, or by word after a
+    /// double-click, always keeping the word double-clicked.
+    private static func drag(in editor: inout SpringboardFieldEditor, doubleClickedWord: Range<Int>?, caretOffset: Int, characterOffset: Int) {
+        editor.select { editing in
+            if let doubleClickedWord {
+                let draggedWord = editing.wordRange(atCharacterOffset: characterOffset)
+                editing.select(
+                    min(doubleClickedWord.lowerBound, draggedWord.lowerBound)..<max(doubleClickedWord.upperBound, draggedWord.upperBound),
+                    caretAtStart: draggedWord.lowerBound < doubleClickedWord.lowerBound
+                )
+            } else {
+                editing.placeCaret(at: caretOffset, extendingSelection: true)
+            }
+        }
     }
 
     /// A drag from a press in the rename field moves the selection's end with it, by character, or by
     /// word after a double-click, always keeping the word double-clicked.
     private func dragInRenameField(to editorPoint: CGPoint, doubleClickedWord: Range<Int>?) {
-        guard let folderPanel, var editing = renaming else { return }
+        guard let folderPanel, var editor = renaming else { return }
         let editorLayer = folderPanel.titleEditorLayer
-        if let doubleClickedWord {
-            let draggedWord = editing.wordRange(atCharacterOffset: editorLayer.characterOffset(at: editorPoint))
-            editing.select(
-                min(doubleClickedWord.lowerBound, draggedWord.lowerBound)..<max(doubleClickedWord.upperBound, draggedWord.upperBound),
-                caretAtStart: draggedWord.lowerBound < doubleClickedWord.lowerBound
-            )
-        } else {
-            editing.placeCaret(at: editorLayer.caretOffset(at: editorPoint), extendingSelection: true)
-        }
-        showRenaming(editing)
+        Self.drag(in: &editor, doubleClickedWord: doubleClickedWord, caretOffset: editorLayer.caretOffset(at: editorPoint), characterOffset: editorLayer.characterOffset(at: editorPoint))
+        showRenaming(editor)
     }
 
     // MARK: - Search
 
     private func searchTextDidChange() {
-        searchFieldLayer.setText(searchText)
+        searchFieldLayer.show(searchEditor.editing)
         searchTask?.cancel()
         guard !searchText.isEmpty else {
             clearSearchResults()
@@ -715,8 +739,54 @@ final class SpringboardInterface {
     }
 
     private func clearSearch() {
-        searchText = ""
+        searchEditor = SpringboardFieldEditor(editing: SpringboardTextEditing(selectingAllOf: ""))
         searchTextDidChange()
+    }
+
+    /// The editing command a key gives the search field, or nil when the key is not the field's. As 15's
+    /// `-[ECSBLayer keyDown:]` (15.5 `0x100081AB0`) sent them: never Tab, Return, Enter, Escape, Up or
+    /// Down; Left only while the field has the focus, Right only then and with something typed;
+    /// Command-arrows turn the pages of results. Any other key activates the field first.
+    private func searchFieldCommand(keyCode: Int64, characters: String, modifierFlags: CGEventFlags) -> SpringboardTextEditingCommand? {
+        let hasCommand = modifierFlags.contains(.maskCommand)
+        switch keyCode {
+        case SpringboardKeyCode.tab, SpringboardKeyCode.returnKey, SpringboardKeyCode.keypadEnter, SpringboardKeyCode.escape,
+             SpringboardKeyCode.upArrow, SpringboardKeyCode.downArrow:
+            return nil
+        case SpringboardKeyCode.leftArrow:
+            guard searchFieldLayer.hasFocus, !hasCommand else { return nil }
+        case SpringboardKeyCode.rightArrow:
+            guard searchFieldLayer.hasFocus, !hasCommand, !searchText.isEmpty else { return nil }
+        default:
+            break
+        }
+        guard let command = SpringboardTextEditingCommand(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags), command != .endEditing else { return nil }
+        return command
+    }
+
+    private func applySearchFieldCommand(_ command: SpringboardTextEditingCommand) {
+        activateSearchField()
+        let textBefore = searchText
+        searchEditor.apply(command, pasteboard: SystemPasteboard())
+        if searchText != textBefore {
+            searchTextDidChange()
+        } else {
+            searchFieldLayer.show(searchEditor.editing)
+        }
+    }
+
+    /// A press in the search field, at `fieldPoint` in the field's coordinates.
+    private func pressInSearchField(at fieldPoint: CGPoint, clickCount: Int64, extendsSelection: Bool) {
+        activateSearchField()
+        let doubleClickedWord = Self.press(
+            in: &searchEditor,
+            clickCount: clickCount,
+            extendsSelection: extendsSelection,
+            caretOffset: searchFieldLayer.caretOffset(at: fieldPoint),
+            characterOffset: searchFieldLayer.characterOffset(at: fieldPoint)
+        )
+        pointerTracking = clickCount >= 3 ? .none : .searchField(doubleClickedWord: doubleClickedWord)
+        searchFieldLayer.show(searchEditor.editing)
     }
 
     /// A click into the field or a typed key makes it active, the loupe and the placeholder moving to the
@@ -776,6 +846,10 @@ final class SpringboardInterface {
         }
         guard dragSession == nil else { return .none }
 
+        if folderPanel == nil, let searchCommand = searchFieldCommand(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags) {
+            applySearchFieldCommand(searchCommand)
+            return .none
+        }
         let pages = frontPages
         if let keyCommand = SpringboardKeyCommand(
             keyCode: keyCode,
@@ -789,19 +863,9 @@ final class SpringboardInterface {
         }
         guard folderPanel == nil else { return .none }
 
-        switch keyCode {
-        case SpringboardKeyCode.delete:
-            guard !searchText.isEmpty else { return .none }
-            searchText.removeLast()
-            searchTextDidChange()
-        case SpringboardKeyCode.tab:
+        if keyCode == SpringboardKeyCode.tab {
             // 15 moved the focus into the field and out again.
             setSearchFieldFocus(!searchFieldLayer.hasFocus)
-        default:
-            guard SpringboardTextEditingCommand.isTypedText(characters, modifierFlags: modifierFlags) else { return .none }
-            activateSearchField()
-            searchText += characters
-            searchTextDidChange()
         }
         return .none
     }
@@ -928,8 +992,7 @@ final class SpringboardInterface {
                 searchFieldLayer.isClearButtonPressed = true
                 pointerTracking = .clearButton
             } else {
-                activateSearchField()
-                pointerTracking = .searchField
+                pressInSearchField(at: fieldPoint, clickCount: clickCount, extendsSelection: modifierFlags.contains(.maskShift))
             }
             return .none
         }
@@ -1021,7 +1084,16 @@ final class SpringboardInterface {
             // As 15's button did, it shows pressed only while the pointer is on it.
             itemLayer.isCloseBoxPressed = itemLayer.isOnCloseBox(itemLayer.convert(containerPoint, from: containerLayer))
             return .none
-        case .none, .pagerIndicator, .searchField, .folderTitle:
+        case let .searchField(doubleClickedWord):
+            Self.drag(
+                in: &searchEditor,
+                doubleClickedWord: doubleClickedWord,
+                caretOffset: searchFieldLayer.caretOffset(at: containerLayer.convert(containerPoint, to: searchFieldLayer)),
+                characterOffset: searchFieldLayer.characterOffset(at: containerLayer.convert(containerPoint, to: searchFieldLayer))
+            )
+            searchFieldLayer.show(searchEditor.editing)
+            return .none
+        case .none, .pagerIndicator, .folderTitle:
             return .none
         }
     }

@@ -46,6 +46,12 @@ struct SpringboardTextEditing: Equatable, Sendable {
         anchorOffset != caretOffset
     }
 
+    /// What is selected, as the pasteboard gets it.
+    var selectedText: String {
+        let characters = Array(text)
+        return String(characters[selectedRange])
+    }
+
     // MARK: - Typing and deleting
 
     /// Replaces the selection with `insertedText`, or inserts it at the caret, and leaves the caret after it.
@@ -181,12 +187,18 @@ enum SpringboardTextEditingCommand: Equatable, Sendable {
     case move(SpringboardTextEditing.Movement, extendingSelection: Bool)
     case delete(SpringboardTextEditing.Deletion)
     case selectAll
+    /// Command-C, X and V, Z and Shift-Command-Z: the Edit menu of the service that hosted 15's fields.
+    case copy
+    case cut
+    case paste
+    case undo
+    case redo
     /// Return, Enter and Escape alike: 15's field ended editing on all three and kept what was typed
     /// (`-[ECTIHelperDelegate control:textView:doCommandBySelector:]`, 15.5 `0x100000FBC`).
     case endEditing
 
     /// The command for a key, or nil for one the field did nothing with here: Tab, Command and Control
-    /// shortcuts other than Command-A, function keys.
+    /// shortcuts other than the Edit menu's, function keys.
     init?(keyCode: Int64, characters: String, modifierFlags: CGEventFlags) {
         let hasCommand = modifierFlags.contains(.maskCommand)
         let hasOption = modifierFlags.contains(.maskAlternate)
@@ -209,8 +221,15 @@ enum SpringboardTextEditingCommand: Equatable, Sendable {
             self = .delete(hasOption ? .wordForward : .characterForward)
         default:
             if hasCommand {
-                guard !extendsSelection, characters.lowercased() == "a" else { return nil }
-                self = .selectAll
+                switch (characters.lowercased(), extendsSelection) {
+                case ("a", false): self = .selectAll
+                case ("c", false): self = .copy
+                case ("x", false): self = .cut
+                case ("v", false): self = .paste
+                case ("z", false): self = .undo
+                case ("z", true): self = .redo
+                default: return nil
+                }
             } else {
                 guard Self.isTypedText(characters, modifierFlags: modifierFlags) else { return nil }
                 self = .insert(characters)

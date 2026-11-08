@@ -135,7 +135,7 @@ struct SpringboardInterfaceTests {
             case .searchField:
                 let searchFieldLayer = SpringboardSearchFieldLayer()
                 searchFieldLayer.configure(scale: 2)
-                return (searchFieldLayer, searchFieldLayer.textLayer, searchFieldLayer.setText)
+                return (searchFieldLayer, searchFieldLayer.textLayer, { searchFieldLayer.show(SpringboardTextEditing(selectingAllOf: $0)) })
             }
         }
 

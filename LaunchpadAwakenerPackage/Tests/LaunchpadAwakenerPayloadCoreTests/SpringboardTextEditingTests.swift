@@ -168,10 +168,10 @@ struct SpringboardTextEditingTests {
         #expect(SpringboardTextEditingCommand(keyCode: keyCode, characters: "", modifierFlags: modifierFlags) == command)
     }
 
-    @Test("Command-A selects everything, other Command shortcuts and Tab do nothing, other keys type")
+    @Test("Command-A selects everything, Command shortcuts outside the Edit menu and Tab do nothing, other keys type")
     func shortcutsAndTyping() {
         #expect(SpringboardTextEditingCommand(keyCode: 0, characters: "a", modifierFlags: .maskCommand) == .selectAll)
-        #expect(SpringboardTextEditingCommand(keyCode: 9, characters: "v", modifierFlags: .maskCommand) == nil)
+        #expect(SpringboardTextEditingCommand(keyCode: 11, characters: "b", modifierFlags: .maskCommand) == nil)
         #expect(SpringboardTextEditingCommand(keyCode: SpringboardKeyCode.tab, characters: "\t", modifierFlags: []) == nil)
         #expect(SpringboardTextEditingCommand(keyCode: 0, characters: "å", modifierFlags: .maskAlternate) == .insert("å"))
     }

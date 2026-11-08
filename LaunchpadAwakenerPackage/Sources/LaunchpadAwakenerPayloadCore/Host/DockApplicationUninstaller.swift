@@ -28,6 +28,11 @@ enum DockApplicationUninstaller {
         return uninstaller
     }
 
+    /// Whether the Dock's uninstaller can be called at all.
+    static var isAvailable: Bool {
+        uninstaller != nil
+    }
+
     /// Whether the uninstaller takes the application: one from the App Store, a web app, a Shortcuts
     /// droplet or a wrapped application (`uninstallabilityOfFileAtURL:` answering 1), which is when 15
     /// showed the close box.

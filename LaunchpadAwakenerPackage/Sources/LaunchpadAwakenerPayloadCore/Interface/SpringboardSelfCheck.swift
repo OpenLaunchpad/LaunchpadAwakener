@@ -28,6 +28,17 @@ enum SpringboardSelfCheck {
         #log(.info, "Self-check: \(interface.geometryDescription, privacy: .public)")
         let summary = interface.firstPageSummary
         #log(.info, "Self-check: \(summary, privacy: .public)")
+        // Asks only; nothing is deleted.
+        if DockApplicationUninstaller.isAvailable {
+            let deletableTitles = layout.applications.filter { application in
+                application.bundleURL.map(DockApplicationUninstaller.canUninstall(applicationAt:)) ?? false
+            }.map(\.title)
+            #log(.info, "Self-check: the Dock's uninstaller would delete \(deletableTitles.count, privacy: .public) of \(layout.applications.count, privacy: .public) application(s): \(deletableTitles.prefix(5).joined(separator: ", "), privacy: .public)")
+        } else {
+            #log(.error, "Self-check: the Dock's uninstaller is out of reach; no close boxes")
+        }
+        let recentlyAddedTitles = layout.applications.filter(\.isRecentlyAdded).map(\.title)
+        #log(.info, "Self-check: \(recentlyAddedTitles.count, privacy: .public) application(s) marked new: \(recentlyAddedTitles.prefix(5).joined(separator: ", "), privacy: .public)")
 
         // Only the size is logged; the image stays in the Dock.
         let captureStartDate = Date()
