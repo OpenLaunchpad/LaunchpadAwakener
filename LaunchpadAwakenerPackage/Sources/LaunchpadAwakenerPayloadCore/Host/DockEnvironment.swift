@@ -17,8 +17,18 @@ enum DockEnvironment {
         selectorName: "notchBounds",
         typeEncoding: "{CGRect={CGPoint=dd}{CGSize=dd}}16@0:8"
     )
+    /// The icon size the Dock is set to.
+    nonisolated static let dockBarDesiredTileSize = DockMethodSignature(className: "DockBar", selectorName: "desiredTileSize", typeEncoding: "f16@0:8")
+    /// The tile the Dock settled on: the icon size plus an inset on each side, smaller when the bar had to shrink to fit.
+    nonisolated static let dockBarTileSize = DockMethodSignature(className: "DockBar", selectorName: "tileSize", typeEncoding: "f16@0:8")
 
-    nonisolated static let requiredMethods: [DockMethodSignature] = [dockBarDisplay, dockBarEnvironment, displayNotchBounds]
+    nonisolated static let requiredMethods: [DockMethodSignature] = [
+        dockBarDisplay,
+        dockBarEnvironment,
+        displayNotchBounds,
+        dockBarDesiredTileSize,
+        dockBarTileSize,
+    ]
 
     /// Swift classes reached through the environment; checked on the object actually returned, and
     /// optional: without them icons fall back to the default style.
@@ -34,12 +44,18 @@ enum DockEnvironment {
         UserDefaults.standard.string(forKey: "orientation").flatMap(DockOrientation.init(rawValue:)) ?? .bottom
     }
 
-    /// How far the Dock reaches into the screen: the height of the bar, or its width at the sides.
-    /// macOS 15 measured its tiles; macOS 27's bar adds the glass around them, and keeping 15's gap above
-    /// that keeps the grid clear of it.
+    /// The room the springboard leaves the Dock, worked out from the Dock's tiles as macOS 15 did; 79 points
+    /// at the default size. 27's glass bar is taller than that (94 points at the default size), so the
+    /// springboard sits a little closer to it than 15's did to its Dock.
     static var dockThickness: CGFloat {
-        guard let barRect = DockBarReference.currentBarRect, !barRect.isEmpty else { return 70 }
-        return dockOrientation == .bottom ? barRect.height : barRect.width
+        guard let dockBar = DockBarReference.dockBar else { return SpringboardMetrics.defaultDockThickness }
+        let desiredTileSize = floatValue(of: dockBar, selector: dockBarDesiredTileSize.selector)
+        let tileSize = floatValue(of: dockBar, selector: dockBarTileSize.selector)
+        guard desiredTileSize.isFinite, tileSize.isFinite, tileSize > 0 else {
+            #log(.error, "The Dock's tile size reads \(tileSize, privacy: .public) (set to \(desiredTileSize, privacy: .public)); leaving the default room")
+            return SpringboardMetrics.defaultDockThickness
+        }
+        return SpringboardMetrics.dockThickness(desiredTileSize: desiredTileSize, tileSize: tileSize)
     }
 
     /// The camera housing's height on the Dock's display; zero without one.
@@ -97,6 +113,13 @@ enum DockEnvironment {
     private static func typeEncoding(of object: NSObject, selector: Selector) -> String? {
         guard let method = class_getInstanceMethod(object_getClass(object), selector), let encoding = method_getTypeEncoding(method) else { return nil }
         return String(cString: encoding)
+    }
+
+    /// Calls a `float`-returning, argument-less method whose signature is already known to match.
+    private static func floatValue(of receiver: NSObject, selector: Selector) -> Float {
+        typealias FloatFunction = @convention(c) (AnyObject, Selector) -> Float
+        let implementation = unsafeBitCast(receiver.method(for: selector), to: FloatFunction.self)
+        return implementation(receiver, selector)
     }
 
     /// Calls an object-returning, argument-less method whose signature is already known to match.

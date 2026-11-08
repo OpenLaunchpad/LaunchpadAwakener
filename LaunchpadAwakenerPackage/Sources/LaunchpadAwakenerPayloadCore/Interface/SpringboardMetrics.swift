@@ -18,7 +18,8 @@ package struct SpringboardMetrics: Sendable, Equatable {
     package struct Input: Sendable, Equatable {
         package var screenSize: CGSize
         package var dockOrientation: DockOrientation
-        /// How far the Dock reaches into the screen.
+        /// The room left for the Dock, as macOS 15 worked it out from the Dock's tiles; see
+        /// ``SpringboardMetrics/dockThickness(desiredTileSize:tileSize:)``.
         package var dockThickness: CGFloat
         /// Height of the camera housing at the top of the screen; zero without one.
         package var notchHeight: CGFloat
@@ -214,6 +215,49 @@ package struct SpringboardMetrics: Sendable, Equatable {
     package func pagerDotFrame(inIndicatorFrame indicatorFrame: CGRect) -> CGRect {
         let inset = CGFloat(Int((Self.pagerIndicatorSide - Self.pagerDotSide) / 2))
         return CGRect(x: indicatorFrame.minX + inset, y: indicatorFrame.minY + inset, width: Self.pagerDotSide, height: Self.pagerDotSide)
+    }
+
+    /// The room macOS 15.5's Launchpad left the Dock: `ceilf(tileSize + distanceTop + distanceBottom)` of the
+    /// `DockBar` (`-[Springboard layout]`, 15.5 `0x10000B10C`), 79 points at the default Dock size.
+    ///
+    /// The Dock makes a tile `desiredTileSize` plus an inset on each side and spaces it by a table of tile
+    /// sizes (15.5 `0x1000DBB44`). Only when the bar does not fit the screen does it shrink `tileSize` and
+    /// look the shrunk size up again (15.5 `0x100027D84`), so the distances belong to whichever size was
+    /// looked up last. 27.2's Dock sizes tiles the same way (27.2 `0x10001149C`), but its glass bar is
+    /// taller: its table puts 5 or 6 points above a tile where 15.5's put 0 to 2 (27.2 `0x100078598`), and
+    /// the bar is 94 points high at the default size. Leaving room for that bar made the icons a size
+    /// smaller than 15's on several screens, so the room is worked out from 15.5's table instead.
+    package static func dockThickness(desiredTileSize: Float, tileSize: Float) -> CGFloat {
+        let desiredSpacing = DockTileSpacing(lookingUp: desiredTileSize)
+        let isShrunkToFit = tileSize != desiredTileSize + desiredSpacing.tileInset * 2
+        let spacing = isShrunkToFit ? DockTileSpacing(lookingUp: tileSize) : desiredSpacing
+        return CGFloat((tileSize + spacing.distanceTop + spacing.distanceBottom).rounded(.up))
+    }
+
+    /// 79 points: the room left at the default Dock size, 64-point icons in 68-point tiles.
+    package static let defaultDockThickness = dockThickness(desiredTileSize: 64, tileSize: 68)
+
+    /// The inset and the distances macOS 15.5's Dock gave a tile of the size it looked up
+    /// (15.5 `0x1000DBB44`).
+    private struct DockTileSpacing {
+        let tileInset: Float
+        let distanceTop: Float
+        let distanceBottom: Float
+
+        init(lookingUp size: Float) {
+            // The table gives one margin per size; the distance above a tile is that margin less both insets.
+            let margin: Float
+            if size > 127 {
+                (tileInset, distanceBottom, margin) = (3, 10, 6)
+            } else if size > 47 {
+                (tileInset, distanceBottom, margin) = (2, 10, 5)
+            } else if size > 31 {
+                (tileInset, distanceBottom, margin) = (1, 7, 4)
+            } else {
+                (tileInset, distanceBottom, margin) = (1, 7, size > 23 ? 4 : 3)
+            }
+            distanceTop = margin - tileInset * 2
+        }
     }
 
     /// 15's icon sizes: a multiple of 8 between 20 and 128 points.
