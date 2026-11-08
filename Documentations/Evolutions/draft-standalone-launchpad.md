@@ -330,7 +330,7 @@ LaunchpadLibrary.Configuration(
 1. **拆出共用模块，注入版行为不变**：
    1. ✅ 宿主接口：界面层的 Dock 调用全部改走 `SpringboardHostSystem`，payload 启动时选定 Dock 宿主。这一步不搬文件。
    2. ✅ 搬文件：`Data/`、`Interface/` 与事件转换移进 `LaunchpadAwakenerSpringboardCore`，跨模块用到的声明改为 `package`；测试改测新模块。
-   3. 回归：单元测试全过；部署到 MacBook（27.2）与 26 虚拟机，日志里 23 个 Dock 方法签名全部吻合、两个 hook 装上、离屏自检的结果与改动前一致。
+   3. ◐ 回归（27.2 已做，26 虚拟机待做）：单元测试全过；部署到 MacBook（27.2）与 26 虚拟机，日志里 23 个 Dock 方法签名全部吻合、两个 hook 装上、离屏自检的结果与改动前一致。
 2. **自己画的图层**：先补逆向 `ECImageGridLayer` 的两个滚动方法；再写四种等价图层与单元测试（布局规则与像素比对）；注入版的离屏自检加上两套图层的像素比对，在 MacBook 上看日志。可以顺带给翻页与选中高亮补上测试。
 3. **独立 App 的骨架**：新 target、`LaunchpadAwakenerStandaloneCore`、窗口与事件、打开与收起、常驻与随登录启动、开发期保险与看门狗、布局库与首次导入、偏好、壁纸、图标样式、`--self-check`。验证：单元测试（从注入版的库导入、壁纸来源的挑选、Dock 几何的换算）；在 MacBook 与 26 虚拟机上用 `--self-check` 做非交互验证，日志里的页数、文件夹数、App 数与注入版的库一致，壁纸来源与图标样式符合预期。
 4. **输入法**：`NSTextInputClient` 与编辑器的组字支持。验证：组字规则的单元测试；真机上的输入法要打开界面，属于交互操作，由用户进行或经用户同意后做。
@@ -364,3 +364,4 @@ LaunchpadLibrary.Configuration(
 | 2026-11-08 | 宿主接口按现有调用的形状落地：图层工厂沿用 `DockLayerFactory` 的形状，网格对调用方就是 `CALayer`，由造它的工厂负责排版、填充与滚动；偏好、布局库配置与图层工厂作为宿主的 `nonisolated` 属性；玻璃背景、卸载器与托管文本框也经宿主取得，没有宿主时（单元测试）用一个什么都不提供的宿主 | 「详细设计」里网格各自一个协议的草图会让每处调用都多一层包装；照现有调用的形状，注入版这边只是把静态调用换成经宿主调用，最不容易改出行为差异 |
 | 2026-11-08 | 第 1 批第 1 步完成：界面层的 Dock 调用全部改走宿主，`swift test` 201 个测试通过，`RunScript.sh` 构建的 daemon 与 payload 仍带 arm64e 切片 | 离屏自检里「玻璃不可用」与「玻璃排不出来」两条日志合成一条，因为是否可用现在由宿主判断 |
 | 2026-11-08 | 第 1 批第 2 步完成：`Data/`、`Interface/` 与几处系统框架的桥接（Core Animation 私有滤镜、IconServices、SkyLight、截壁纸、剪贴板、启动 App）搬进 `LaunchpadAwakenerSpringboardCore`；测试拆成两个目标，Dock 构建档案的测试留在 payload 一侧 | 系统框架的桥接不认识 Dock，独立版也要用，所以跟着搬；payload 用到的十来个声明改为 `package`。`swift test` 合计 201 个测试照旧通过，`RunScript.sh` 构建的切片不变 |
+| 2026-11-08 | 第 1 批第 3 步：MacBook（27.2）上回归通过；26 虚拟机当时没有运行，没做 | 先用 MacBook 上原有的构建（`main` 的最新构建）重启一次 Dock 取基线日志，再部署拆分后的构建：23 个方法签名吻合、两个 hook 装上，离屏自检的几何、网格、可删 App 数、新装标记数、壁纸尺寸与基线逐行一致，玻璃自检通过，Dock 没有崩溃。26 虚拟机要用户开起来后再补 |
