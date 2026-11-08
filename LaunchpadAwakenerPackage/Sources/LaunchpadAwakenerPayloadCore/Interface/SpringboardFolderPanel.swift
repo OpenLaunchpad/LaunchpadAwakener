@@ -120,7 +120,8 @@ final class SpringboardFolderPanel {
         CATransaction.commit()
     }
 
-    /// Where a click starts renaming: the title, widened by 200 points on each side (15's `labelEditLayer`).
+    /// The editor's box while the folder is renamed: the title widened by 200 points on each side, as 15's
+    /// `labelEditLayer` was.
     var titleEditingFrame: CGRect {
         titleLayer.frame.insetBy(dx: -SpringboardFolderMetrics.titleEditingOutset, dy: 0)
     }
@@ -135,7 +136,16 @@ final class SpringboardFolderPanel {
         folderMetrics.panelFrame.contains(pointInFolder(point))
     }
 
+    /// Whether a press at `point` lands on the title itself, its text and 2 points around it — the only
+    /// place a press started renaming in 15 (`-[ECSBGroup leftMouseDown:in:]`, 15.5 `0x1000A368C`, took
+    /// presses on its `labelLayer` alone). The wider editor's box stayed hidden until renaming began.
     func isOnTitle(_ point: CGPoint) -> Bool {
+        titleLayer.frame.contains(pointInFolder(point))
+    }
+
+    /// Whether a press at `point` stays with the editor while the folder is renamed: 15's text field took
+    /// every press inside its box (`-[ECTextInputLayer leftMouseDown:]`, 15.5 `0x100065AB8`).
+    func isInTitleEditor(_ point: CGPoint) -> Bool {
         titleEditingFrame.contains(pointInFolder(point))
     }
 
@@ -416,9 +426,10 @@ final class SpringboardFolderPanel {
 /// Renaming a folder: the title's text, editable, with a blinking caret after it.
 ///
 /// 15 hosted a real text field from another process here, as in the search field; this edits the
-/// Dock's key events directly, so there is no input method either.
+/// Dock's key events directly, so there is no input method either. What is typed shows at once, as in
+/// that text field.
 final class SpringboardTitleEditorLayer: CALayer {
-    private let textLayer = DockLayerFactory.makeTextLayer(withShadow: true)
+    let textLayer = DockLayerFactory.makeTextLayer(withShadow: true)
     private let caretLayer = CALayer()
     private(set) var text = ""
 
@@ -430,6 +441,7 @@ final class SpringboardTitleEditorLayer: CALayer {
         textLayer.alignmentMode = .center
         textLayer.truncationMode = .start
         DockLayerFactory.setTextShadow(of: textLayer, color: CGColor(gray: 0, alpha: 0.2), offset: CGSize(width: 0, height: -1), blur: 2)
+        textLayer.disableTextCrossfade()
         caretLayer.backgroundColor = CGColor(gray: 1, alpha: 1)
         addSublayer(textLayer)
         addSublayer(caretLayer)

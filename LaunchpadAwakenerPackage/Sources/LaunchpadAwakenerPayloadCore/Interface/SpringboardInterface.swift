@@ -802,7 +802,12 @@ final class SpringboardInterface {
         folderPanel?.pages.cancelPendingWheelSettle()
 
         if let folderPanel {
-            if renamingTitle != nil, !folderPanel.isOnTitle(containerPoint) {
+            if renamingTitle != nil {
+                // 15's text field took every press inside its box; any other press ends the renaming.
+                guard !folderPanel.isInTitleEditor(containerPoint) else {
+                    pointerTracking = .none
+                    return .none
+                }
                 commitRenaming()
             }
             if folderPanel.isOnTitle(containerPoint) {
@@ -810,7 +815,8 @@ final class SpringboardInterface {
                 return .none
             }
             guard folderPanel.isInsidePanel(containerPoint) else {
-                // 15 closed an open folder as soon as the press landed outside it.
+                // 15 closed an open folder as soon as the press landed outside it; a press beside the
+                // title's text closed it too.
                 closeFolder()
                 pointerTracking = .none
                 return .none
@@ -977,7 +983,9 @@ final class SpringboardInterface {
             }
             return .none
         case .folderTitle:
-            if let folderPanel, folderPanel.isOnTitle(containerPoint), SpringboardPreferences.allowsRenamingFolders {
+            // The press was the title's, so 15 started renaming wherever it was let go
+            // (`-[ECSBGroup leftMouseUp:in:]`, 15.5 `0x1000A36F0`).
+            if SpringboardPreferences.allowsRenamingFolders {
                 startRenaming()
             }
             return .none

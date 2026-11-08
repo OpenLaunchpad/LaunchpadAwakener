@@ -75,7 +75,7 @@ final class SpringboardSearchFieldLayer: CALayer {
     private let backgroundLayer = CALayer()
     private let loupeLayer = CALayer()
     private let placeholderLayer = DockLayerFactory.makeTextLayer(withShadow: false)
-    private let textLayer = DockLayerFactory.makeTextLayer(withShadow: false)
+    let textLayer = DockLayerFactory.makeTextLayer(withShadow: false)
     private let clearButtonLayer = CALayer()
     private let caretLayer = CALayer()
 
@@ -94,6 +94,7 @@ final class SpringboardSearchFieldLayer: CALayer {
         placeholderLayer.foregroundColor = CGColor(gray: 1, alpha: 0.36)
         placeholderLayer.string = SpringboardStrings.search
         textLayer.foregroundColor = CGColor(gray: 1, alpha: 1)
+        textLayer.disableTextCrossfade()
         caretLayer.backgroundColor = CGColor(gray: 1, alpha: 1)
         caretLayer.isHidden = true
         for sublayer in [backgroundLayer, loupeLayer, placeholderLayer, textLayer, clearButtonLayer, caretLayer] {

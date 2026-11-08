@@ -8,7 +8,8 @@ import QuartzCore
 ///
 /// White, middle truncation, a black 20 % shadow 1 point down with a 2-point blur
 /// (15.5 `-[ECSBLabelLayer initWithString:andScaleFactor:]`, `0x10001FD60`). The text sits 2 points
-/// inside the label on every side. Icons use Medium 13, an open folder's title Light 28.
+/// inside the label on every side. Icons use Medium 13, an open folder's title Light 28. A new string
+/// shows at once, so a renamed folder's title does not fade from the old name to the new one.
 final class SpringboardLabelLayer: CALayer {
     static let textInset: CGFloat = 2
 
@@ -30,6 +31,7 @@ final class SpringboardLabelLayer: CALayer {
         textLayer.truncationMode = .middle
         textLayer.alignmentMode = .center
         DockLayerFactory.setTextShadow(of: textLayer, color: CGColor(gray: 0, alpha: 0.2), offset: CGSize(width: 0, height: -1), blur: 2)
+        textLayer.disableTextCrossfade()
         addSublayer(textLayer)
     }
 
@@ -618,5 +620,16 @@ extension CALayer {
     func setUntransformedFrame(_ frame: CGRect) {
         bounds = CGRect(origin: bounds.origin, size: frame.size)
         position = CGPoint(x: frame.minX + anchorPoint.x * frame.width, y: frame.minY + anchorPoint.y * frame.height)
+    }
+}
+
+extension CATextLayer {
+    /// Makes a new string show at once, as a text field shows what is typed. Core Animation otherwise
+    /// cross-fades a text layer's redrawn contents over a quarter of a second, so a centred name being
+    /// typed showed the old and the new string half a character apart after every key.
+    func disableTextCrossfade() {
+        var textActions = actions ?? [:]
+        textActions["contents"] = NSNull()
+        actions = textActions
     }
 }

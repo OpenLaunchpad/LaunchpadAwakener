@@ -11,7 +11,7 @@ import Foundation
 package struct SpringboardFolderMetrics: Sendable, Equatable {
     package static let panelCornerRadius: CGFloat = 36
     package static let titleFontSize: CGFloat = 28
-    /// The title stays clickable this far to either side of its text (`labelEditLayer`).
+    /// How far the editor reaches to either side of the title while a folder is renamed (`labelEditLayer`).
     package static let titleEditingOutset: CGFloat = 200
 
     package let rowCount: Int
