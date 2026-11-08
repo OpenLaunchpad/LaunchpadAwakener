@@ -65,7 +65,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **搜索框与改名框共用一套编辑，按键照 15 分流。** 搜索框也由 `SpringboardFieldEditor` 维护文字、选区与撤销，光标画在实际位置，选中的部分用改名框同样的颜色，放不下时横向滚动，点击放光标、拖选、双击选词。哪些键归搜索框照 15 的 `-[ECSBLayer keyDown:]`：Tab、Return、Enter、Esc、↑↓ 从不给它；← 只在它有焦点时给它，→ 还要有文字；Command-方向键翻结果页；其余键先激活搜索框再交给它，所以没点进去时直接打字、删除、粘贴也行。
 
-**输入法靠一个托管文本框的辅助进程，照 15 的 ecti 服务做**（提案 [用常驻辅助进程给搜索框与改名框接上输入法](../Evolutions/draft-input-method-helper.md)）。Dock 不加载 AppKit，输入法只认真正的文本框和激活状态的进程，所以 App 里多带一个 LaunchAgent `LaunchpadAwakenerTextInput`：
+**输入法靠一个托管文本框的辅助进程，照 15 的 ecti 服务做**（提案 [用常驻辅助进程给搜索框与改名框接上输入法](../Evolutions/0001-input-method-helper.md)）。Dock 不加载 AppKit，输入法只认真正的文本框和激活状态的进程，所以 App 里多带一个 LaunchAgent `LaunchpadAwakenerTextInput`：
 
 - **启动**：它放在 `Contents/Library/LoginItems/`，App 启动时用 `SMAppService.agent` 注册，不用用户批准。launchd 在 payload 连它的 Mach 服务时才拉起它。它只接受 Dock 的连接（按进程路径核对）。
 - **托管**：它在 Dock 图块的 mini view 窗口里放一个 `NSTextField`，那扇窗口不上屏，却能成为 key 窗口。payload 用 `CALayerHost` 显示这扇窗口的图层托管上下文。
@@ -208,6 +208,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 
 - 透明与着色图标样式下，Dock 在图标背后画的玻璃底没有复刻。
 - 文本输入辅助进程不可用时（在「登录项」里关掉了它，或它反复退出），搜索与改名没有输入法，退回本地编辑。
+- 文本输入辅助进程只在 27.2 上验证过，macOS 26 上没有试过。
 - 改名的选区色固定为 15 深色外观下的蓝色，不随系统强调色变化。
 - 删除确认的气泡是照 15 的尺寸与文案画的，深浅色外观没有与 15 对照过（15.5 虚拟机里没有 App Store 的 App），按钮按下时没有高亮。网页 App 与快捷指令在 15 里用「移除」的文案，复刻一律写「删除」。
 - 玻璃背景：打开期间切换深浅色或辅助功能里的透明度、对比度，要到下次打开才跟上（界面每次打开都重建，没有注册 Dock 的外观观察者）。

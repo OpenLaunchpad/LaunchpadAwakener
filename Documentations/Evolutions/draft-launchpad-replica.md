@@ -6,7 +6,7 @@
 - **最后更新**: 2026-11-08
 - **所属愿景**: 无
 - **关联提案**: 无
-- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；拖到 Dock 与拖动搜索结果在 `feature/drag-to-dock`（worktree `.worktrees/LaunchpadAwakener-DragToDock`）；验证用原型在分支 `experiment/injection-prototype`
+- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；拖动搜索结果在 `feature/drag-to-dock` 上实现、已合进 `main`，分支已删除（拖到 Dock 暂停，没有代码）；输入法见提案 0001；选中高亮的修复在 `fix/search-selection-highlight` 上实现、已合进 `main`，分支已删除；验证用原型在分支 `experiment/injection-prototype`
 - **配套文档**: [实现说明](../Internal/LaunchpadReplica.md)
 
 ## 摘要
@@ -211,7 +211,7 @@ final class SpringboardController {
    3. ✅ 新装 App 名字旁的蓝点，判据与画法照 15 的 `ECFlagLayer`。
    4. ✅ 抖动模式的关闭按钮与删除 App Store 的 App。15 的确认气泡由 `com.apple.dock.ecap` 服务画，27.2 的 Dock.app 里已经没有这个服务，要自己画。
    5. ◐ 把图标拖到 Dock 上加入 Dock，拖动搜索结果：2026-11-08 先留作后续项，同日接着做。拖动搜索结果已做：照 15 先退出搜索，再从 App 真正所在的地方接着拖（见决策日志），2026-11-08 在 MacBook 上交互验证。拖到 Dock 暂停，没有写代码（见决策日志）。
-   6. ◐ 搜索框与改名框的完整文本编辑（光标、选区、复制粘贴、撤销已做；输入法由文本输入辅助进程接上，见提案 [用常驻辅助进程给搜索框与改名框接上输入法](draft-input-method-helper.md)）：搜索框的光标与选区、输入法、复制粘贴、撤销。15 用 `com.apple.dock.ecti` 服务里的真 `NSTextField`，27.2 里这个服务也没有了，方案先逆向再定。
+   6. ✅ 搜索框与改名框的完整文本编辑（光标、选区、复制粘贴、撤销已做；输入法由文本输入辅助进程接上，见提案 [0001 用常驻辅助进程给搜索框与改名框接上输入法](0001-input-method-helper.md)）：搜索框的光标与选区、输入法、复制粘贴、撤销。15 用 `com.apple.dock.ecti` 服务里的真 `NSTextField`，27.2 里这个服务也没有了，方案先逆向再定。
    7. 捏合要用户关掉 Spotlight 的捏合后在真机上试，agent 做不了，留给用户。
 
 **收尾时必须判断两件事**（判断结果写进决策日志，不允许沉默跳过）：
@@ -301,3 +301,4 @@ final class SpringboardController {
 | 2026-11-08 | 支持范围扩到 macOS 26.0 到 27.2 的全部正式构建（含只给特定机型的构建），推翻 2026-11-05「只支持 macOS 27」；仍按构建档案逐个登记，没登记的构建照旧不装 hook。档案多记一项 `DockGlobals` 的类名 | 用户在 26.7 上发现不生效，原因是档案里只有 27.2。逐个核对 26 的 Dock：复刻调用的 23 个方法与两个 hook 的签名都和 27.2 一致，入口同样都经 `-[Spotlight sendLaunchAppsBrowsing]`（26 里旧 Launchpad 的类还在，但 23 处入口被一个恒返回 1 的函数改道到这里），事件同样经 `handleDockBarEvent:type:`；差的只是每个构建的两个全局变量地址，以及 `DockGlobals` 在 26 上是 Objective-C 类。于是沿用档案，不为 26 另写一套。小版本之间 Dock 也会重编（26.7.2 与 26.7 的 UUID 不同），所以每个构建都从 Apple 的完整更新包里取出 Dock 核对。可选的玻璃背景在 26 上接口不同，退回模糊背景，不做适配 |
 | 2026-11-08 | 截壁纸时按属主进程认窗口：WindowManager 的优先，没有就用 Dock 自己的；不再按属主名认 | 在 26.6.2 虚拟机上验证时背景是灰的：26 的壁纸窗口还归 Dock 自己（和 15 一样），复刻只认 WindowManager 的。属主名是本地化的（中文系统上 26 的 Dock 叫「程序坞」），所以改认进程：Dock 用自己的进程号，WindowManager 看可执行文件路径 |
 | 2026-11-08 | 图标里的高亮照 15 穿过抖动层与壁纸混合：抖动层不成组混合，图标图片另放在一个成组混合的容器里 | 用户指出搜索结果的选中项是白底，15 是压暗的壁纸。逆向确认画高亮的 `setMaterialControl:appearance:` 在 15.5 与 27.2 里相同（灰 232/255 加变暗混合），差别在 15 把 `jitterLayer` 的 `allowsGroupBlending` 关掉了，复刻漏了这一项，混合只在抖动层里进行，灰色原样画了出来；拖放目标的方圆也因此成了不透明浅灰。图片另包一层，是为了让透明与着色样式下图标的混合保持原样，Dock 自己的图标格子也把图片单独放在一层里 |
+| 2026-11-08 | 拖动搜索结果、输入法（提案 0001，Implemented）与选中高亮的修复收尾，第 6 批第 6 步完成 | 用户看过后收尾。第 5 步里的拖到 Dock 仍暂停，第 7 步的捏合仍待用户在真机上试，所以本提案仍是 In Progress |
