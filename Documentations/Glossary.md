@@ -36,6 +36,12 @@
 
 - **主要出现在**：`LaunchpadAwakenerSpringboardCore/Hosting/SpringboardHost.swift`、`LaunchpadAwakenerPayloadCore/Host/DockSpringboardHost.swift`、[实现说明](Internal/LaunchpadReplica.md)「模块结构」
 
+### Injected build（注入版）
+
+注入 Dock 的那一版：`LaunchpadAwakener.app` 经特权 daemon 把 payload 注入 Dock，Launchpad 画在 Dock 自己的窗口里，用 Dock 的图层类与玻璃，要关 SIP。与「独立版」相对：两版共用 `LaunchpadAwakenerSpringboardCore`，差别只在宿主。
+
+- **主要出现在**：项目 `CLAUDE.md`、[实现说明](Internal/LaunchpadReplica.md)
+
 ### Jiggle mode（抖动模式）
 
 长按图标或按住 Option 后，当前页面（文件夹开着时是文件夹里）的图标一起抖动的状态，可以接着拖动整理。15 的代码管它叫 `deleting`，因为 15 在这个状态下给 App Store 的 App 显示关闭按钮用来删除；复刻只做了抖动，没做删除。不要和 15 代码里的 `editing` 混淆：那是「正在按着或拖着图标」，与抖动无关。
@@ -65,6 +71,12 @@
 本项目沿用 macOS 15 的叫法：Launchpad 的主界面及其主控。代码里的 `Springboard*` 类型分别对应 15.5 的 `Springboard`、`ECSBSpringboard`、`ECSBLayer`、`ECSBGroupLayer` 等；与 iOS 的 SpringBoard 无关。
 
 - **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/`
+
+### Standalone app（独立版）
+
+不注入 Dock 的那一版：App「Launchpad」（`Launchpad.app`，bundle ID 前缀 `com.MxIris.LaunchpadAwakener.Launchpad`）自己开一扇层级 27、盖住整块主屏幕（连 Dock 与菜单栏）的窗口，用等价图层画同一套 Launchpad，不需要关 SIP。布局存在自己的库里，首次启动从注入版的库导入；注入版把它当作启动器，即使装着也不放进布局。
+
+- **主要出现在**：`LaunchpadAwakenerStandaloneCore/`、`LaunchpadAwakenerStandalone/`、[独立版实现说明](Internal/StandaloneLaunchpad.md)
 
 ### Text input helper（文本输入辅助进程）
 
