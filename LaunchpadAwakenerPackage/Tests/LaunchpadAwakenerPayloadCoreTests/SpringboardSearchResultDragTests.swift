@@ -83,3 +83,31 @@ struct SpringboardSearchResultDragTests {
         #expect(joined.index == 1)
     }
 }
+
+/// Where Escape sends a dragged icon, from where it came and which folder is open.
+@Suite("Cancelling a drag")
+struct SpringboardCancelRouteTests {
+    private static let sourceFolder = LaunchpadItemIdentifier(rowIdentifier: 11)
+    private static let otherFolder = LaunchpadItemIdentifier(rowIdentifier: 30)
+
+    @Test("an icon from a main page goes back to its cell, closing any folder it opened")
+    func fromMainPage() {
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: nil, openFolder: nil) == (.mainPageCell, false))
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: nil, openFolder: Self.otherFolder) == (.mainPageCell, true))
+    }
+
+    @Test("an icon from the folder that is open goes back to its cell there")
+    func fromOpenFolder() {
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: Self.sourceFolder, openFolder: Self.sourceFolder) == (.openFolderCell, false))
+    }
+
+    @Test("an icon from a closed folder goes into that folder's icon")
+    func fromClosedFolder() {
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: Self.sourceFolder, openFolder: nil) == (.folderIcon, false))
+    }
+
+    @Test("with another folder open, that folder closes and the icon goes into its own folder's icon")
+    func fromFolderWithAnotherOpen() {
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: Self.sourceFolder, openFolder: Self.otherFolder) == (.folderIcon, true))
+    }
+}

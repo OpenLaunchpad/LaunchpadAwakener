@@ -111,6 +111,13 @@ final class SpringboardFolderPanel {
         showPages(itemLayerWasFilled: itemLayerWasFilled, pageIndex: pageIndex)
     }
 
+    /// Takes `newFolder` and rebuilds the pages from it, on `pageIndex`.
+    func reload(with newFolder: LaunchpadFolder, pageIndex: Int, itemLayerWasFilled: @escaping (SpringboardItemLayer) -> Void) {
+        folder = newFolder
+        setTitle(newFolder.title)
+        showPages(itemLayerWasFilled: itemLayerWasFilled, pageIndex: pageIndex)
+    }
+
     func setTitle(_ title: String) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)

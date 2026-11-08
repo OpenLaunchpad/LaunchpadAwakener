@@ -47,6 +47,10 @@ final class SpringboardDragSession {
     var isLeavingSearch = false
     /// An Escape that came while leaving the search; carried out once the page is in.
     var isCancelPending = false
+    /// Whether the drag has arranged the main page around itself while starting from a folder: a search
+    /// result joining the page, or an icon carried out of the folder. A cancel back into that folder puts
+    /// the main page back as stored.
+    var hasArrangedMainPage = false
 
     /// The main page as it was when a folder opened under the dragged icon: its icons, with a gap where
     /// the dragged one was. If the drag ends in the folder, the gap stays until the folder closes.
@@ -64,7 +68,7 @@ final class SpringboardDragSession {
     var edgeDirection: Int?
 
     /// - Parameter origin: Where the item really is; the drag starts from there. For a search result that
-    ///   is not the results it was picked up in. Nil means the cell it was picked up from.
+    ///   is not the results it was picked up in.
     init(
         item: LaunchpadItem,
         itemLayer: SpringboardItemLayer,
@@ -76,7 +80,7 @@ final class SpringboardDragSession {
         grabOffset: CGPoint,
         location: CGPoint,
         timestamp: UInt64,
-        origin: SpringboardDragging.Location? = nil
+        origin: SpringboardDragging.Location
     ) {
         self.item = item
         self.itemLayer = itemLayer
@@ -93,12 +97,6 @@ final class SpringboardDragSession {
             sourceItemIndex = indexInFolder
             sourceFolderIdentifier = folderIdentifier
             sourceFolderPageIndex = mainPageIndex
-        case nil:
-            sourceContext = context
-            sourcePageIndex = pageIndex
-            sourceItemIndex = itemIndex
-            sourceFolderIdentifier = nil
-            sourceFolderPageIndex = nil
         }
         self.grabOffset = grabOffset
         self.context = context
@@ -228,6 +226,7 @@ extension SpringboardInterface {
             dragSession.arrangement = joined.items
             dragSession.arrangedLayers = joined.layers
             dragSession.currentIndex = joined.index
+            dragSession.hasArrangedMainPage = true
             animateArrangement()
         }
         dragSession.isLeavingSearch = false
@@ -314,7 +313,8 @@ extension SpringboardInterface {
                 at: pointFromTopLeft,
                 cellSize: pageGrid.cellSize,
                 columnCount: pageGrid.columnCount,
-                itemCount: dragSession.arrangement.count,
+                // An item pushed past a full page waits to spill over; the grid ends at its capacity.
+                itemCount: min(dragSession.arrangement.count, pageGrid.capacity),
                 currentIndex: nil,
                 usesHysteresis: false
             )
@@ -333,7 +333,7 @@ extension SpringboardInterface {
             at: pointFromTopLeft,
             cellSize: pageGrid.cellSize,
             columnCount: pageGrid.columnCount,
-            itemCount: dragSession.arrangement.count,
+            itemCount: min(dragSession.arrangement.count, pageGrid.capacity),
             currentIndex: dragSession.currentIndex,
             usesHysteresis: true
         )
@@ -534,6 +534,7 @@ extension SpringboardInterface {
             dragSession.currentIndex = insertionIndex
             dragSession.wasInsideFolderPanel = false
             dragSession.hasRearranged = true
+            dragSession.hasArrangedMainPage = true
         }
 
         // The panel closes in 0.25 s; 250 ms later the main page moves (`Pager_hideGroupAfter250ms`).
@@ -733,10 +734,11 @@ extension SpringboardInterface {
         dragSession.unsavedFolderTarget = nil
         endHover()
         var closingFolder: LaunchpadFolder?
-        let isSourceFolderOpen = dragSession.sourceContext == .folder
-            && folderPanel != nil
-            && folderPanel?.folder.identifier == dragSession.sourceFolderIdentifier
-        if let folderPanel, !isSourceFolderOpen {
+        let (route, closesOpenFolder) = SpringboardDragging.cancelRoute(
+            sourceFolder: dragSession.sourceFolderIdentifier,
+            openFolder: folderPanel?.folder.identifier
+        )
+        if let folderPanel, closesOpenFolder {
             closingFolder = folderPanel.folder
             if isAnimatingFolder {
                 dismissFolderImmediately()
@@ -744,7 +746,7 @@ extension SpringboardInterface {
                 closeFolder()
             }
         }
-        if dragSession.sourceContext == .folder, !isSourceFolderOpen {
+        if route == .folderIcon {
             // Dragged out of a folder that has closed since — another one may have opened meanwhile — or
             // out of a closed one as a search result: back into the folder's icon, as 15 did.
             showMainPages(pageIndex: dragSession.sourceFolderPageIndex ?? mainPages.currentPageIndex)
@@ -767,8 +769,8 @@ extension SpringboardInterface {
             return
         }
         // Rebuild the pages the drag started on from the stored layout, then send the icon home.
-        let sourcePages = pages(for: dragSession.sourceContext)
-        if dragSession.sourceContext == .main {
+        let sourcePages = pages(for: route == .openFolderCell ? .folder : .main)
+        if route == .mainPageCell {
             showMainPages(pageIndex: dragSession.sourcePageIndex)
             if let closingFolder, folderPanel != nil {
                 // The closing panel shrinks onto the rebuilt page's icon of its folder, shown once it has.
@@ -777,13 +779,14 @@ extension SpringboardInterface {
         } else if let folderPanel {
             // The folder as stored: the open one may be a copy without the dragged application, opened by
             // holding the icon over it after it had left.
-            if let storedFolder = storedFolder(for: folderPanel.folder, in: layout) {
-                folderPanel.update(with: storedFolder) { [weak self] itemLayer in
-                    self?.putIcons(in: itemLayer)
-                }
-            }
-            folderPanel.reloadPages(pageIndex: dragSession.sourcePageIndex) { [weak self] itemLayer in
+            folderPanel.reload(with: storedFolder(for: folderPanel.folder, in: layout) ?? folderPanel.folder, pageIndex: dragSession.sourcePageIndex) { [weak self] itemLayer in
                 self?.putIcons(in: itemLayer)
+            }
+            if dragSession.hasArrangedMainPage {
+                // The main page behind is still arranged around the drag — a search result joined it, or
+                // the icon left this folder and came back: it goes back to the stored layout too.
+                showMainPages(pageIndex: mainPages.currentPageIndex)
+                hideFolderIcon(of: folderPanel.folder)
             }
         }
         guard

@@ -192,6 +192,33 @@ package enum SpringboardDragging {
         return min(index, itemCount - 1)
     }
 
+    // MARK: - Cancelling
+
+    /// Where a cancelled drag sends its icon.
+    package enum CancelRoute: Equatable, Sendable {
+        /// Back to its cell on the main page it came from.
+        case mainPageCell
+        /// Back to its cell in the folder it came from, which is the one open.
+        case openFolderCell
+        /// Into the icon of the folder it came from, which is not open.
+        case folderIcon
+    }
+
+    /// The route for an icon from `sourceFolder` (nil for a main page) while `openFolder` is open (nil for
+    /// none), and whether that folder closes first: any open folder but the icon's own does.
+    package static func cancelRoute(
+        sourceFolder: LaunchpadItemIdentifier?,
+        openFolder: LaunchpadItemIdentifier?
+    ) -> (route: CancelRoute, closesOpenFolder: Bool) {
+        guard let sourceFolder else {
+            return (.mainPageCell, openFolder != nil)
+        }
+        if openFolder == sourceFolder {
+            return (.openFolderCell, false)
+        }
+        return (.folderIcon, openFolder != nil)
+    }
+
     // MARK: - Search results
 
     /// Where an application is in a layout: on a main page, or inside a folder on one.

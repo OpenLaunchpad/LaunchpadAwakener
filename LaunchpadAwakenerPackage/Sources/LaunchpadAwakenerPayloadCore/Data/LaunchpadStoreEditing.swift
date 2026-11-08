@@ -54,15 +54,21 @@ extension LaunchpadStore {
     package func moveItem(_ itemIdentifier: LaunchpadItemIdentifier, toIndex targetIndex: Int, onPage pageIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
         try performTransaction {
             let sourceFolder = try containingFolder(of: itemIdentifier)
-            try detach(itemIdentifier)
-            var pageChildren = try children(of: pageIdentifier)
-            pageChildren.insert(itemIdentifier, at: min(max(targetIndex, 0), pageChildren.count))
-            try setChildren(pageChildren, of: pageIdentifier)
-            try tidyUp(itemsPerPage: itemsPerPage)
+            try place(itemIdentifier, atIndex: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
             if let sourceFolder, try containingFolder(of: itemIdentifier) != sourceFolder {
                 try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
             }
         }
+    }
+
+    /// Puts an item at `targetIndex` on `pageIdentifier` and tidies up, leaving the folder it came from
+    /// as it is.
+    private func place(_ itemIdentifier: LaunchpadItemIdentifier, atIndex targetIndex: Int, onPage pageIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
+        try detach(itemIdentifier)
+        var pageChildren = try children(of: pageIdentifier)
+        pageChildren.insert(itemIdentifier, at: min(max(targetIndex, 0), pageChildren.count))
+        try setChildren(pageChildren, of: pageIdentifier)
+        try tidyUp(itemsPerPage: itemsPerPage)
     }
 
     /// Makes a folder of `targetItem` and `draggedItem` where `targetItem` was. The dragged item comes
@@ -123,25 +129,16 @@ extension LaunchpadStore {
     /// one application or none is dissolved, its last application taking the folder's place, as 15
     /// dissolved it when the second-to-last one was dragged out.
     package func moveItem(_ itemIdentifier: LaunchpadItemIdentifier, outOfFolderTo targetIndex: Int, onPage pageIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
-        try performTransaction {
-            let sourceFolder = try containingFolder(of: itemIdentifier)
-            try moveItem(itemIdentifier, toIndex: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
-            if let sourceFolder {
-                try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
-            }
-        }
+        // Any move out of a folder dissolves the folder it leaves almost empty.
+        try moveItem(itemIdentifier, toIndex: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
     }
 
     /// Moves an item onto a new page after the last one, as dragging past the last page did; a folder it
     /// leaves with one application or none is dissolved.
     package func moveItemToNewLastPage(_ itemIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
         try performTransaction {
-            let sourceFolder = try containingFolder(of: itemIdentifier)
             let newPage = try appendPage(to: rootIdentifier)
             try moveItem(itemIdentifier, toIndex: 0, onPage: newPage, itemsPerPage: itemsPerPage)
-            if let sourceFolder {
-                try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
-            }
         }
     }
 
@@ -178,9 +175,12 @@ extension LaunchpadStore {
         let folderPage = try parent(of: folderIdentifier)
         if let lastApplication = remainingApplications.first {
             let folderIndex = try children(of: folderPage).firstIndex(of: folderIdentifier) ?? 0
-            try moveItem(lastApplication, toIndex: folderIndex, onPage: folderPage, itemsPerPage: itemsPerPage)
+            try place(lastApplication, atIndex: folderIndex, onPage: folderPage, itemsPerPage: itemsPerPage)
         }
-        try removeItem(folderIdentifier)
+        // Tidying up after placing the last application already took the emptied folder away.
+        if (try? type(of: folderIdentifier)) != nil {
+            try removeItem(folderIdentifier)
+        }
         try tidyUp(itemsPerPage: itemsPerPage)
     }
 
