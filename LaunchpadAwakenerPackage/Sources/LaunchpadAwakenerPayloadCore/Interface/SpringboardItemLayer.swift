@@ -505,6 +505,14 @@ final class SpringboardItemLayer: CALayer {
         }
     }
 
+    /// Confirmed for deletion: until the delete is over, the icon takes no presses and shows no close box.
+    var isBeingDeleted = false {
+        didSet {
+            guard isBeingDeleted != oldValue else { return }
+            updateCloseBox()
+        }
+    }
+
     /// Pressed, the close box shows its darker texture, as 15's did while the pointer stayed on it.
     var isCloseBoxPressed = false {
         didSet {
@@ -529,7 +537,7 @@ final class SpringboardItemLayer: CALayer {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
-        guard isJiggling, isDeletable, !isFolder else {
+        guard isJiggling, isDeletable, !isFolder, !isBeingDeleted else {
             closeBoxLayer?.removeFromSuperlayer()
             closeBoxLayer = nil
             isCloseBoxPressed = false

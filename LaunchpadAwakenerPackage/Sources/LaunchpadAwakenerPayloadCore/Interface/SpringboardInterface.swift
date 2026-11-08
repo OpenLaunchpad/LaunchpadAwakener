@@ -301,7 +301,7 @@ final class SpringboardInterface {
             self?.putIcons(in: itemLayer)
         }
         isShowingSearchResults = false
-        selectedItemIndex = nil
+        select(itemAt: nil)
     }
 
     func putIcons(in itemLayer: SpringboardItemLayer) {
@@ -719,7 +719,7 @@ final class SpringboardInterface {
             self?.putIcons(in: itemLayer)
         }
         isShowingSearchResults = true
-        selectedItemIndex = nil
+        select(itemAt: nil)
         CATransaction.begin()
         CATransaction.setDisableActions(!results.isEmpty)
         noResultsLayer.opacity = results.isEmpty ? 1 : 0
@@ -873,7 +873,7 @@ final class SpringboardInterface {
     /// Holding Option jiggles the icons in front, and letting it go stops them
     /// (`-[ECSBSpringboard flagsChanged:]`, 15.5 `0x1000F37AC`).
     func handleModifiersChanged(_ modifierFlags: CGEventFlags) {
-        guard renaming == nil else { return }
+        guard renaming == nil, deletionPanel == nil else { return }
         let pages = frontPages
         pages.isJiggling = optionKeyJiggle.isJiggling(afterOptionIsDown: modifierFlags.contains(.maskAlternate), isJiggling: pages.isJiggling)
     }
@@ -1004,6 +1004,10 @@ final class SpringboardInterface {
         let pointInPagesSuperlayer = containerLayer.convert(containerPoint, to: pages.scrollLayer.superlayer)
         if let pageIndex = pages.pageIndexOfIndicator(at: pointInPagesSuperlayer) {
             pointerTracking = .pagerIndicator(context: context, pageIndex: pageIndex)
+            return .none
+        }
+        if let (pageGrid, gridPoint) = pages.pointInCurrentGrid(pointInPagesSuperlayer), let hit = pageGrid.item(at: gridPoint), hit.itemLayer.isBeingDeleted {
+            pointerTracking = .background(context: context, startLocation: containerPoint, startScrollValue: pages.scrollValue, startTimestamp: timestamp, isDragging: false)
             return .none
         }
         if let (pageGrid, gridPoint) = pages.pointInCurrentGrid(pointInPagesSuperlayer), let hit = pageGrid.item(at: gridPoint),
@@ -1191,7 +1195,7 @@ final class SpringboardInterface {
     // MARK: - Scroll wheel and trackpad
 
     func handleScrollWheel(_ scrollWheel: SpringboardInputEvent.ScrollWheel, timestamp: UInt64) -> Action {
-        guard !isAnimatingFolder, dragSession == nil else { return .none }
+        guard !isAnimatingFolder, dragSession == nil, deletionPanel == nil else { return .none }
         pages(for: folderPanel == nil ? .main : .folder).handleScrollWheel(scrollWheel, timestamp: timestamp)
         return .none
     }
@@ -1199,7 +1203,7 @@ final class SpringboardInterface {
     /// A three-finger swipe turns the pages in front one page, as 15's pager did for the main pages and
     /// an open folder alike.
     func handleNavigationSwipe(_ navigationSwipe: SpringboardInputEvent.NavigationSwipe) -> Action {
-        guard !isAnimatingFolder, dragSession == nil, let pageOffset = navigationSwipe.pageOffset else { return .none }
+        guard !isAnimatingFolder, dragSession == nil, deletionPanel == nil, let pageOffset = navigationSwipe.pageOffset else { return .none }
         frontPages.turn(toPageAt: frontPages.currentPageIndex + pageOffset)
         return .none
     }

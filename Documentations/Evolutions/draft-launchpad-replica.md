@@ -289,3 +289,5 @@ final class SpringboardController {
 | 2026-11-08 | 搜索框照 15 的规则分流按键并有完整的光标与选区；两个框都能复制、剪切、粘贴、撤销。复制粘贴走 HIServices 的 Pasteboard Manager | Dock 已加载 HIServices，Pasteboard Manager 是公开且未废弃的接口；15 的这些行为来自它托管的 `NSTextField` |
 | 2026-11-08 | 输入法留作后续项，另起提案 | 逆向确认 15 靠 ecti 服务里的真 `NSTextField`、TSM 的 remote view 激活与覆写 `_stealKeyFocusWithOptions:` 接输入法；27 要重做就得有一个常驻辅助进程（LaunchAgent）托管文本框并经 `CALayerHost` 贴进 Dock，属于架构改动，第一步还要在真机上证明 Dock 能显示别的进程的图层。调研结论记在逆向笔记 3.1 |
 | 2026-11-08 | 拖到 Dock 与拖动搜索结果留作后续项 | 27.2 不能照搬 15 的 CoreDrag 注入（消息 3 会把 Dock 的全局指针卡在 (-1,-1)），推荐的混合做法要往 Dock 的拖动状态里注入消息、只能在真机上拖着验证，配对出错 Dock 会一直留着拖动状态；没有交互验证不该往 Dock 里注入。拖动搜索结果要先清空搜索、把被拖项挪到当前页末尾再接普通拖动，要改拖动的起手。做法记在逆向笔记 4.9.1 |
+| 2026-11-08 | 第 6 批自审（code-review medium）：10 条发现，修 5 条——删除中的图标仍可点击与重复删除、弹出确认时还能翻页、页面重建后选中高亮残留、删除与对账竞争时编辑失败、打开前在主线程查 Spotlight；另 5 条判为误报或不修，记在 [已裁决清单](../Internal/ReviewAdjudications.md) | 修复各带回归测试，界面层里无法在测试进程中建出 Dock 的网格类的两条（翻页、选中高亮）没有测试 seam，只验证了编译与已有测试 |
+| 2026-11-08 | 第 6 批实现完成，待用户看过后收尾；输入法、拖到 Dock、拖动搜索结果是后续项 | — |

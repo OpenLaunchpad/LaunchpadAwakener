@@ -196,8 +196,8 @@ package enum LaunchpadEdit: Sendable, Equatable {
     case moveOutOfFolder(LaunchpadItemIdentifier, toIndex: Int, onPage: LaunchpadItemIdentifier)
     case moveToNewLastPage(LaunchpadItemIdentifier)
     case renameFolder(LaunchpadItemIdentifier, title: String)
-    /// The application was deleted from the disk.
-    case removeApplication(LaunchpadItemIdentifier)
+    /// The application was deleted from the disk; `folder` is the folder it was in, if any.
+    case removeApplication(LaunchpadItemIdentifier, folder: LaunchpadItemIdentifier?)
 }
 
 extension LaunchpadLibrary {
@@ -206,6 +206,7 @@ extension LaunchpadLibrary {
         guard let store = currentStore else { return }
         do {
             guard try store.clearRecentlyAdded(forBundleIdentifiers: bundleIdentifiers) else { return }
+            #log(.info, "No longer marked new, having been launched: \(bundleIdentifiers.sorted(), privacy: .public)")
             try await publishCurrentLayout()
         } catch {
             #log(.error, "Could not clear the recently added mark of \(bundleIdentifiers.sorted(), privacy: .public): \(String(describing: error), privacy: .public)")
@@ -232,8 +233,8 @@ extension LaunchpadLibrary {
                 try store.moveItemToNewLastPage(itemIdentifier, itemsPerPage: itemsPerPage)
             case let .renameFolder(folderIdentifier, title):
                 try store.renameFolder(folderIdentifier, to: title)
-            case let .removeApplication(itemIdentifier):
-                try store.removeApplication(itemIdentifier, itemsPerPage: itemsPerPage)
+            case let .removeApplication(itemIdentifier, folderIdentifier):
+                try store.removeApplication(itemIdentifier, fromFolder: folderIdentifier, itemsPerPage: itemsPerPage)
             }
             try await publishCurrentLayout()
             return true

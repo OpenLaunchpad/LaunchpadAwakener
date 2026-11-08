@@ -63,12 +63,14 @@ extension SpringboardInterface {
     /// the application (`-[Springboard _uninstallRunnable:]`, the animation at 15.5 `0x1000F5A8C`).
     private func delete(_ application: LaunchpadApplication, itemLayer: SpringboardItemLayer, context: GridContext) {
         guard let bundleURL = application.bundleURL else { return }
+        itemLayer.isBeingDeleted = true
+        let folderIdentifier = context == .folder ? folderPanel?.folder.identifier : nil
         CATransaction.begin()
         CATransaction.setAnimationDuration(0.5)
         CATransaction.setCompletionBlock { [weak self] in
             MainActor.assumeIsolated {
                 DockApplicationUninstaller.uninstall(applicationAt: bundleURL) { [weak self] hasSucceeded in
-                    self?.finishDeleting(application, itemLayer: itemLayer, context: context, hasSucceeded: hasSucceeded)
+                    self?.finishDeleting(application, folderIdentifier: folderIdentifier, itemLayer: itemLayer, context: context, hasSucceeded: hasSucceeded)
                 }
             }
         }
@@ -80,8 +82,9 @@ extension SpringboardInterface {
     /// Once deleted, the page closes the gap in a quarter of a second without pulling icons over from the
     /// next page, and the layout drops the application. A failed delete brings the icon back where it was;
     /// 15 put it in the next free place instead.
-    private func finishDeleting(_ application: LaunchpadApplication, itemLayer: SpringboardItemLayer, context: GridContext, hasSucceeded: Bool) {
+    private func finishDeleting(_ application: LaunchpadApplication, folderIdentifier: LaunchpadItemIdentifier?, itemLayer: SpringboardItemLayer, context: GridContext, hasSucceeded: Bool) {
         guard hasSucceeded else {
+            itemLayer.isBeingDeleted = false
             CATransaction.begin()
             CATransaction.setAnimationDuration(0.25)
             itemLayer.opacity = 1
@@ -97,6 +100,6 @@ extension SpringboardInterface {
             }
             CATransaction.commit()
         }
-        applyEdit(.removeApplication(application.identifier))
+        applyEdit(.removeApplication(application.identifier, folder: folderIdentifier))
     }
 }

@@ -287,17 +287,18 @@ final class SpringboardController {
         }
     }
 
-    /// Drops the blue dot of every marked application launched from elsewhere since it came, before the
-    /// springboard shows it. Only marked applications are looked at, usually none.
+    /// Drops the blue dot of every marked application launched from elsewhere since it came. Spotlight is
+    /// asked in the background, never on the way to showing; the library publishes the result, which a
+    /// showing springboard takes once nothing moves.
     private func clearRecentlyAddedMarksOfLaunchedApplications() {
-        let launchedBundleIdentifiers = Set(layout.applications.filter { application in
-            guard application.isRecentlyAdded, let bundleURL = application.bundleURL else { return false }
-            return RecentlyAddedApplications.hasBeenLaunched(applicationAt: bundleURL)
-        }.map(\.bundleIdentifier))
-        guard !launchedBundleIdentifiers.isEmpty else { return }
-        #log(.info, "Launched since they came, so no longer marked new: \(launchedBundleIdentifiers.sorted(), privacy: .public)")
-        layout = layout.clearingRecentlyAdded(forBundleIdentifiers: launchedBundleIdentifiers)
-        Task {
+        let markedApplications = layout.applications.filter(\.isRecentlyAdded)
+        guard !markedApplications.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            let launchedBundleIdentifiers = RecentlyAddedApplications.launchedBundleIdentifiers(
+                among: markedApplications,
+                hasBeenLaunched: RecentlyAddedApplications.hasBeenLaunched(applicationAt:)
+            )
+            guard !launchedBundleIdentifiers.isEmpty else { return }
             await LaunchpadServices.library.clearRecentlyAdded(forBundleIdentifiers: launchedBundleIdentifiers)
         }
     }

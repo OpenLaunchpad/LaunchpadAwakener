@@ -9,6 +9,15 @@ import Foundation
 /// appears with a purchase receipt, and comes off once LaunchServices has recorded a use of it newer than
 /// the copy.
 package enum RecentlyAddedApplications {
+    /// The marked applications among `applications` that `hasBeenLaunched` says were launched; only
+    /// those are asked about.
+    package static func launchedBundleIdentifiers(among applications: [LaunchpadApplication], hasBeenLaunched: (URL) -> Bool) -> Set<String> {
+        Set(applications.filter { application in
+            guard application.isRecentlyAdded, let bundleURL = application.bundleURL else { return false }
+            return hasBeenLaunched(bundleURL)
+        }.map(\.bundleIdentifier))
+    }
+
     /// Whether the bundle carries the receipt of an App Store purchase.
     package static func isFromAppStore(applicationAt bundleURL: URL) -> Bool {
         FileManager.default.fileExists(atPath: bundleURL.appendingPathComponent("Contents/_MASReceipt/receipt").path)

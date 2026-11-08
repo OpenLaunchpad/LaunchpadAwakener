@@ -143,12 +143,16 @@ extension LaunchpadStore {
     /// Takes out an application that was deleted, as 15 did once its uninstall succeeded
     /// (`-[Springboard _uninstallRunnable:]`): the page closes the gap without pulling items over from
     /// the next one, a folder left with one application dissolves, and an emptied page goes.
-    package func removeApplication(_ itemIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
+    ///
+    /// The bundle is gone by then, so reconciliation may have taken the item out already; the folder it
+    /// was in, `folderIdentifier`, is still tidied the same way.
+    package func removeApplication(_ itemIdentifier: LaunchpadItemIdentifier, fromFolder folderIdentifier: LaunchpadItemIdentifier?, itemsPerPage: Int) throws {
         try performTransaction {
-            let sourceFolder = try containingFolder(of: itemIdentifier)
-            try removeItem(itemIdentifier)
-            if let sourceFolder {
-                try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
+            if (try? type(of: itemIdentifier)) != nil {
+                try removeItem(itemIdentifier)
+            }
+            if let folderIdentifier {
+                try dissolveIfAlmostEmpty(folderIdentifier, itemsPerPage: itemsPerPage)
             }
             try tidyUp(itemsPerPage: itemsPerPage)
         }

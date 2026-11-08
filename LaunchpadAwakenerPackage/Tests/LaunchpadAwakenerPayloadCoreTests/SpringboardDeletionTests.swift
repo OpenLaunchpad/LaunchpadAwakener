@@ -62,10 +62,10 @@ struct SpringboardDeletionTests {
             try store.appendApplication(LaunchpadApplicationRecord(title: "Gamma", bundleIdentifier: "com.example.gamma"), to: folder.firstPage)
             try store.appendApplication(LaunchpadApplicationRecord(title: "Delta", bundleIdentifier: "com.example.delta"), to: pageIdentifier)
 
-            try store.removeApplication(alpha, itemsPerPage: 35)
+            try store.removeApplication(alpha, fromFolder: nil, itemsPerPage: 35)
             #expect(try store.layout().pages.map { $0.items.map(\.title) } == [["Tools", "Delta"]])
 
-            try store.removeApplication(beta, itemsPerPage: 35)
+            try store.removeApplication(beta, fromFolder: folder.folder, itemsPerPage: 35)
             #expect(try store.layout().pages.map { $0.items.map(\.title) } == [["Gamma", "Delta"]])
         }
     }
