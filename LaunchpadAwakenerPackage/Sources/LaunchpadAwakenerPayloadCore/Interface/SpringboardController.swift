@@ -122,6 +122,7 @@ final class SpringboardController {
         #log(.info, "Shown (\(reason, privacy: .public)) on \(newInterface.position.description, privacy: .public) over \(backgroundDescription, privacy: .public): \(newInterface.geometryDescription, privacy: .public)")
         #if DEBUG
         SpringboardSelfCheck.logShownBackground(of: newInterface, rootLayer: newWindow.rootLayer)
+        TextInputProbe.attach(to: newInterface.springboardLayer, fieldFrame: metrics.searchFieldFrame)
         #endif
     }
 
@@ -133,6 +134,9 @@ final class SpringboardController {
         interface = nil
         idleGeneration += 1
         stopPinch()
+        #if DEBUG
+        TextInputProbe.detach()
+        #endif
         currentInterface.prepareForHiding()
         // After the preparation: a drag it cancels may take a folder it had opened away with it.
         lastPosition = currentInterface.position
