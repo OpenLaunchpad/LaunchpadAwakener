@@ -28,6 +28,11 @@ enum SpringboardSelfCheck {
         #log(.info, "Self-check: \(interface.geometryDescription, privacy: .public)")
         let summary = interface.firstPageSummary
         #log(.info, "Self-check: \(summary, privacy: .public)")
+        if let firstPage = layout.pages.first, let comparisons = SpringboardReplicaComparison.compare(firstPage: firstPage, metrics: metrics, scale: scale) {
+            for comparison in comparisons {
+                #log(.info, "Self-check: replica \(comparison, privacy: .public)")
+            }
+        }
         // Asks only; nothing is deleted.
         let host = SpringboardHostSystem.host
         if let uninstaller = host.applicationUninstaller {

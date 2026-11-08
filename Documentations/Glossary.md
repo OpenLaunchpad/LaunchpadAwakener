@@ -48,9 +48,15 @@
 
 - **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardController.swift`、项目 `CLAUDE.md`
 
+### Replica layers（等价图层）
+
+独立版用来代替 Dock 的 `ECGridLayer`、`ECImageGridLayer`、`ECTextLayer`、`ECShadowTextLayer` 与选中材质的纯 Core Animation 实现，照 Dock 的二进制逐条写成，在 Dock 里逐像素对照过。没有选定宿主时（单元测试）也用它们。注入版仍用 Dock 自己的类。
+
+- **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardReplicaLayers.swift`、[独立版实现说明](Internal/StandaloneLaunchpad.md)「关键设计决策」
+
 ### Self-check（离屏自检）
 
-开发构建在 Dock 启动、布局第一次加载时，不上屏地建一次界面，把 Dock 图层类的产物（网格类名、图标与标题的位置、文件夹缩略图、壁纸截图尺寸）写进日志。用来在不打开界面的情况下核对接线。正式构建没有它。
+开发构建在 Dock 启动、布局第一次加载时，不上屏地建一次界面，把 Dock 图层类的产物（网格类名、图标与标题的位置、文件夹缩略图、壁纸截图尺寸）写进日志，并把等价图层与 Dock 的类逐项对照。用来在不打开界面的情况下核对接线。正式构建没有它。
 
 - **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardSelfCheck.swift`
 

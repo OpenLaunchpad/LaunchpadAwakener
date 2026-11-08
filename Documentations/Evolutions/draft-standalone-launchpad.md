@@ -7,7 +7,7 @@
 - **所属愿景**: 无
 - **关联提案**: [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md)（注入版，本提案复用它的数据层与界面层）；[0001 用常驻辅助进程给搜索框与改名框接上输入法](0001-input-method-helper.md)（独立版不需要这个辅助进程）
 - **实现分支 / PR**: `feature/standalone-app`（worktree `.worktrees/LaunchpadAwakener-StandaloneApp`）
-- **配套文档**: 待定 —— 落地时登记实现说明的链接
+- **配套文档**: [独立版 Launchpad：实现说明](../Internal/StandaloneLaunchpad.md)
 
 ## 摘要
 
@@ -331,7 +331,7 @@ LaunchpadLibrary.Configuration(
    1. ✅ 宿主接口：界面层的 Dock 调用全部改走 `SpringboardHostSystem`，payload 启动时选定 Dock 宿主。这一步不搬文件。
    2. ✅ 搬文件：`Data/`、`Interface/` 与事件转换移进 `LaunchpadAwakenerSpringboardCore`，跨模块用到的声明改为 `package`；测试改测新模块。
    3. ◐ 回归（27.2 已做，26 虚拟机待做）：单元测试全过；部署到 MacBook（27.2）与 26 虚拟机，日志里 23 个 Dock 方法签名全部吻合、两个 hook 装上、离屏自检的结果与改动前一致。
-2. **自己画的图层**：先补逆向 `ECImageGridLayer` 的两个滚动方法；再写四种等价图层与单元测试（布局规则与像素比对）；注入版的离屏自检加上两套图层的像素比对，在 MacBook 上看日志。可以顺带给翻页与选中高亮补上测试。
+2. ✅ **自己画的图层**：先补逆向 `ECImageGridLayer` 的两个滚动方法；再写四种等价图层与单元测试（布局规则与像素比对）；注入版的离屏自检加上两套图层的像素比对，在 MacBook 上看日志。可以顺带给翻页与选中高亮补上测试。
 3. **独立 App 的骨架**：新 target、`LaunchpadAwakenerStandaloneCore`、窗口与事件、打开与收起、常驻与随登录启动、开发期保险与看门狗、布局库与首次导入、偏好、壁纸、图标样式、`--self-check`。验证：单元测试（从注入版的库导入、壁纸来源的挑选、Dock 几何的换算）；在 MacBook 与 26 虚拟机上用 `--self-check` 做非交互验证，日志里的页数、文件夹数、App 数与注入版的库一致，壁纸来源与图标样式符合预期。
 4. **输入法**：`NSTextInputClient` 与编辑器的组字支持。验证：组字规则的单元测试；真机上的输入法要打开界面，属于交互操作，由用户进行或经用户同意后做。
 5. **快捷键与设置窗口**：录制、注册、随登录启动的开关。
@@ -365,3 +365,5 @@ LaunchpadLibrary.Configuration(
 | 2026-11-08 | 第 1 批第 1 步完成：界面层的 Dock 调用全部改走宿主，`swift test` 201 个测试通过，`RunScript.sh` 构建的 daemon 与 payload 仍带 arm64e 切片 | 离屏自检里「玻璃不可用」与「玻璃排不出来」两条日志合成一条，因为是否可用现在由宿主判断 |
 | 2026-11-08 | 第 1 批第 2 步完成：`Data/`、`Interface/` 与几处系统框架的桥接（Core Animation 私有滤镜、IconServices、SkyLight、截壁纸、剪贴板、启动 App）搬进 `LaunchpadAwakenerSpringboardCore`；测试拆成两个目标，Dock 构建档案的测试留在 payload 一侧 | 系统框架的桥接不认识 Dock，独立版也要用，所以跟着搬；payload 用到的十来个声明改为 `package`。`swift test` 合计 201 个测试照旧通过，`RunScript.sh` 构建的切片不变 |
 | 2026-11-08 | 第 1 批第 3 步：MacBook（27.2）上回归通过；26 虚拟机当时没有运行，没做 | 先用 MacBook 上原有的构建（`main` 的最新构建）重启一次 Dock 取基线日志，再部署拆分后的构建：23 个方法签名吻合、两个 hook 装上，离屏自检的几何、网格、可删 App 数、新装标记数、壁纸尺寸与基线逐行一致，玻璃自检通过，Dock 没有崩溃。26 虚拟机要用户开起来后再补 |
+| 2026-11-08 | 第 2 批完成：四种等价图层与选中材质照逆向写进共用模块，单元测试 10 个；没有宿主时（单元测试）的默认图层也换成它们，原有测试照旧通过。开发构建的离屏自检在 Dock 里逐项对照，MacBook（27.2）上页面网格、缩略图与滚动、选中材质、标题像素全部一致 | `ECImageGridLayer` 的滚动、选中材质与文字图层的绘制细节由逆向补齐，写在 `/Volumes/RE/Dock/27.2/Notes/ECLayerReuse.md` 第 5 节。给翻页与选中高亮补测试这一项没做，留作后续：它们在第 6 批自审时就有回归说明，这一批的目标是等价图层本身 |
+| 2026-11-08 | 新增实现说明 `Internal/StandaloneLaunchpad.md`，登记为配套文档 | 宿主接口的形状、等价图层里看代码看不出的规则，下次维护会踩 |

@@ -236,12 +236,12 @@ extension SpringboardHostedTextField {
 // MARK: - Until a host is chosen
 
 /// The host until one is chosen, as in unit tests: no window, no wallpaper, no glass, no hosted fields and
-/// no uninstaller, a Dock of the default size, and the plain layers.
+/// no uninstaller, a Dock of the default size, and the replicas of the Dock's layer classes.
 final class DetachedSpringboardHost: SpringboardHost {
     nonisolated init() {}
 
     nonisolated var layerFactory: any SpringboardLayerFactory {
-        PlainSpringboardLayerFactory()
+        ReplicaSpringboardLayerFactory()
     }
 
     nonisolated var preferences: UserDefaults {
@@ -282,36 +282,5 @@ final class DetachedSpringboardHost: SpringboardHost {
 
     func isOnDock(_ globalPoint: CGPoint) -> Bool {
         false
-    }
-}
-
-/// Plain Core Animation layers where the Dock's classes are not to be had: text without its shadow, no
-/// grids, and 15's selection material set directly.
-struct PlainSpringboardLayerFactory: SpringboardLayerFactory {
-    func makePageGridLayer(source: SpringboardGridSource, rowCount: Int, columnCount: Int, scaleFactor: Float) -> CALayer? {
-        nil
-    }
-
-    func layoutPageGridLayer(_ gridLayer: CALayer) {}
-
-    func makeThumbnailGridLayer(source: SpringboardThumbnailSource, rowCount: Int, columnCount: Int, spacing: UInt, scaleFactor: Float) -> CALayer? {
-        nil
-    }
-
-    func layoutThumbnailGridLayer(_ gridLayer: CALayer) {}
-
-    func invalidateThumbnailGridLayer(_ gridLayer: CALayer, source: SpringboardThumbnailSource) {}
-
-    func scrollThumbnailGridLayer(_ gridLayer: CALayer, toAvailableSpace: Bool) {}
-
-    func makeTextLayer(withShadow: Bool) -> CATextLayer {
-        CATextLayer()
-    }
-
-    func setTextShadow(of textLayer: CATextLayer, color: CGColor, offset: CGSize, blur: CGFloat) {}
-
-    func applySelectionMaterial(to layer: CALayer) {
-        layer.backgroundColor = CGColor(srgbRed: 232.0 / 255, green: 232.0 / 255, blue: 232.0 / 255, alpha: 1)
-        layer.compositingFilter = QuartzCorePrivate.stringConstant(named: "kCAFilterPlusD")
     }
 }

@@ -159,6 +159,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/
     ├── SpringboardPinch.swift          # 15.5 的捏合映射与弹簧（纯计算）
     ├── SpringboardPosition.swift       # 再次打开时回到的页与文件夹，及其在新布局里的换算（纯计算）
     ├── SpringboardEntry.swift          # 「打开 Apps」请求的应答：打开、关闭，或认出点 Apps 图标后不动（纯计算）
+    ├── SpringboardReplicaLayers.swift  # Dock 的 EC* 图层类的等价实现（独立版用；见独立版实现说明）
+    ├── SpringboardReplicaComparison.swift # 开发构建：在 Dock 里把等价图层与 Dock 的类对照
     └── SpringboardSelfCheck.swift      # 开发构建的离屏自检
 
 LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/

@@ -5,5 +5,6 @@
 - [Evolutions/0001-input-method-helper.md](Evolutions/0001-input-method-helper.md) —— 用常驻辅助进程给搜索框与改名框接上输入法（Implemented）
 - [Evolutions/draft-standalone-launchpad.md](Evolutions/draft-standalone-launchpad.md) —— 不注入 Dock 的独立版 Launchpad：与注入版共用数据层与界面层（In Progress）
 - [Internal/LaunchpadReplica.md](Internal/LaunchpadReplica.md) —— Launchpad 复刻的实现说明：关键决策、模块结构、验证、新 Dock 构建的适配流程
+- [Internal/StandaloneLaunchpad.md](Internal/StandaloneLaunchpad.md) —— 独立版 Launchpad 的实现说明：宿主接口、Dock 图层类的等价实现、验证
 - [Internal/ReviewAdjudications.md](Internal/ReviewAdjudications.md) —— 代码审查的已裁决清单：判为误报或不修的发现与理由
-- [Glossary.md](Glossary.md) —— 术语表：构建档案、DockSwipe、宿主、退回开关、离屏自检、Springboard、文本输入辅助进程
+- [Glossary.md](Glossary.md) —— 术语表：构建档案、DockSwipe、宿主、退回开关、等价图层、离屏自检、Springboard、文本输入辅助进程
