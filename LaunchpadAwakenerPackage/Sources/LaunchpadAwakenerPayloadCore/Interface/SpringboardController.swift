@@ -260,6 +260,14 @@ final class SpringboardController {
             restartIdleTimer()
             perform(interface.handleScrollWheel(scrollWheel, timestamp: inputEvent.timestamp))
             return true
+        case .navigationSwipe(let navigationSwipe):
+            #if DEBUG
+            #log(.info, "Navigation swipe: motion \(navigationSwipe.motion, privacy: .public), direction flag \(navigationSwipe.directionFlag, privacy: .public)")
+            #endif
+            restartIdleTimer()
+            perform(interface.handleNavigationSwipe(navigationSwipe))
+            // 15's pager turned the page and still answered that it had not handled the gesture.
+            return false
         case .mouseDown, .mouseUp, .mouseDragged:
             return !isInsideDockBar(inputEvent.location)
         case .mouseMoved, .other, .dockSwipe, .systemGestureCancelled:

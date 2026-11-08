@@ -74,6 +74,14 @@ extension SpringboardInputEvent {
         if eventType == 29, hidEventType == 60 {
             return .systemGestureCancelled
         }
+        if eventType == 29, hidEventType == 16 {
+            return .navigationSwipe(
+                NavigationSwipe(
+                    motion: event.getIntegerValueField(field(115)),
+                    directionFlag: event.getIntegerValueField(field(136)) & 1 != 0
+                )
+            )
+        }
         guard eventType == 30, hidEventType == 23 else { return nil }
         let progress = event.getDoubleValueField(field(124))
         let velocity = event.getDoubleValueField(field(129))

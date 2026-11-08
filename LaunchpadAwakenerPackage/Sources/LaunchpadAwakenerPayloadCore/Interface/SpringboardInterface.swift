@@ -1044,6 +1044,14 @@ final class SpringboardInterface {
         return .none
     }
 
+    /// A three-finger swipe turns the pages in front one page, as 15's pager did for the main pages and
+    /// an open folder alike.
+    func handleNavigationSwipe(_ navigationSwipe: SpringboardInputEvent.NavigationSwipe) -> Action {
+        guard !isAnimatingFolder, dragSession == nil, let pageOffset = navigationSwipe.pageOffset else { return .none }
+        frontPages.turn(toPageAt: frontPages.currentPageIndex + pageOffset)
+        return .none
+    }
+
     // MARK: - Log
 
     /// What the Dock's grid made of the first page, for the log: classes, counts and a few frames.

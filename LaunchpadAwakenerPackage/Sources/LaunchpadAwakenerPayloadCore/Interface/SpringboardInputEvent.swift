@@ -46,6 +46,28 @@ struct SpringboardInputEvent: Sendable {
         var isCancelled: Bool { phase & 0x8 != 0 }
     }
 
+    /// A swipe between pages: CGEvent type 29 with HID type 16 (NavigationSwipe), sent when the trackpad
+    /// is set to swipe between pages with three fingers.
+    struct NavigationSwipe: Sendable, Equatable {
+        /// Field 115: 1, 2, 4 or 8 by direction, anything else while no direction is recognised.
+        let motion: Int64
+        /// Bit 0 of field 136; flips which horizontal direction is which.
+        let directionFlag: Bool
+
+        /// The page to turn to, counted from the current one. macOS 15.5 turned one page for every swipe
+        /// with a direction, whatever its phase (`-[ECEvent navigationGestureType]`, `0x10010B89C`;
+        /// `-[ECPagerLayer gesture:]`, `0x1000B78BC`).
+        var pageOffset: Int? {
+            switch motion {
+            case 1: 1
+            case 2: -1
+            case 4: directionFlag ? 1 : -1
+            case 8: directionFlag ? -1 : 1
+            default: nil
+            }
+        }
+    }
+
     enum Kind: Sendable, Equatable {
         case keyDown(keyCode: Int64, characters: String, isRepeat: Bool)
         case keyUp(keyCode: Int64)
@@ -56,6 +78,7 @@ struct SpringboardInputEvent: Sendable {
         case mouseMoved
         case scrollWheel(ScrollWheel)
         case dockSwipe(DockSwipe)
+        case navigationSwipe(NavigationSwipe)
         /// The system called a gesture off (type 29, field 110 = 60).
         case systemGestureCancelled
         /// Gestures, system-defined keys and everything else.

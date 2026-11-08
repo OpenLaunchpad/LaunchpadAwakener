@@ -6,7 +6,7 @@
 - **最后更新**: 2026-11-08
 - **所属愿景**: 无
 - **关联提案**: 无
-- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；验证用原型在分支 `experiment/injection-prototype`
+- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批在 `feature/daily-gaps`（worktree `.worktrees/LaunchpadAwakener-DailyGaps`）；验证用原型在分支 `experiment/injection-prototype`
 - **配套文档**: [实现说明](../Internal/LaunchpadReplica.md)
 
 ## 摘要
@@ -71,7 +71,7 @@ macOS 26 停用了 Launchpad，macOS 27 把它的代码从 Dock 里彻底删除�
 
 ### 非目标
 
-- 删除 App：抖动模式里 App Store 应用左上角的关闭按钮、确认气泡与卸载。抖动模式本身已经做了（见决策日志）。
+- ~~删除 App：抖动模式里 App Store 应用左上角的关闭按钮、确认气泡与卸载。~~ 2026-11-08 移入第 6 批（见决策日志）。
 - 图标角标、App Store 购买时图标飞入与下载进度、VoiceOver 等辅助功能、15 的 Games 分组。
 - 支持 macOS 26，或 27.2 26B123 以外的构建。新构建靠补构建档案逐个适配，不追求自动兼容。
 - 公开发布：不做公证、自动更新与安装引导。
@@ -203,6 +203,14 @@ final class SpringboardController {
 5. ✅ **跟手捏合**：逆向 27 的手势系统，接入渐进进度与松手判断。验证：捏到一半松手会弹回。
    - 2026-11-06：照 15 的状态机读 Dock 收到的原始 DockSwipe 事件，跟手与松手弹簧都有单元测试。只有关掉 Spotlight 自己的捏合（`defaults write com.apple.spotlight trackpadAppBrowseEnabled -bool NO`）后才接管，这一步由用户决定。
    - 待用户验证：Dock 是否真的收得到捏合事件（开发构建会把每个捏合事件写进日志），以及捏到一半松手会弹回。
+6. **补齐日常差距**（2026-11-08 用户要求）：实现说明「已知降级」里平时会碰到的几项，逐项照 15.5 补上，每一小步单独提交，在 MacBook 上做非交互验证。
+   1. 三指轻扫翻页：读 Dock 收到的导航轻扫（手势事件，字段 110 为 16），照 15 的 `-[ECPagerLayer gesture:]` 每个方向有效的事件翻一页，主页与打开的文件夹都适用。
+   2. 文件夹里的方向键导航，规则照 15 的 `-[ECSBGroupPager navigate:withEvent:]`。
+   3. 新装 App 名字旁的蓝点，判据与画法照 15 的 `ECFlagLayer`。
+   4. 抖动模式的关闭按钮与删除 App Store 的 App。15 的确认气泡由 `com.apple.dock.ecap` 服务画，27.2 的 Dock.app 里已经没有这个服务，要自己画。
+   5. 把图标拖到 Dock 上加入 Dock，拖动搜索结果。
+   6. 搜索框与改名框的完整文本编辑：搜索框的光标与选区、输入法、复制粘贴、撤销。15 用 `com.apple.dock.ecti` 服务里的真 `NSTextField`，27.2 里这个服务也没有了，方案先逆向再定。
+   7. 捏合要用户关掉 Spotlight 的捏合后在真机上试，agent 做不了，留给用户。
 
 **收尾时必须判断两件事**（判断结果写进决策日志，不允许沉默跳过）：
 
@@ -273,3 +281,5 @@ final class SpringboardController {
 | 2026-11-08 | 只有按在标题文字上才开始改名，松手在哪都算；标题那一行文字以外的地方照面板外处理，按下就关文件夹；改名中点编辑框内照旧不结束改名。会在眼前换字的文字图层（改名编辑框、标题、搜索框）关掉 Core Animation 的交叉淡化 | 用户对照 15.5 指出：原版点标题那一行不会进入改名，只有点文字才会；复刻打字时文字一闪一闪。逆向确认 15 的 `-[ECSBGroup leftMouseDown:in:]`（`0x1000A368C`）只接落在 `labelLayer` 上的按下，抬起时把按下的图层原样交回、与位置无关；左右各宽 200 点的 `labelEditLayer` 平时隐藏，只是编辑框，里面的 `ECTextInputLayer` 收下框内所有按下。用户确认那一行别处会关文件夹。录屏查明闪烁是文字图层换内容时 0.25 秒的交叉淡化：标题居中，新旧两行错开半个字叠在一起 |
 | 2026-11-08 | 改名框照 15 的文本框编辑：进入时整个名字选中；方向键配 Option、Command、Shift 移动与扩选，Command-A 全选，几种删除，点击放光标、拖选、双击选词，放不下时横向滚动。Esc 与 Return 一样按当前文字提交，推翻 2026-11-06「Esc 取消改名、保留原名」那条。复制粘贴、撤销、输入法不做 | 用户指出改名不能移动光标。逆向 15.5 的文本输入服务 `com.apple.dock.ecti`：改名框是真正的 `NSTextField`，建好即调 `selectText:` 全选（`_handleSetupMessage:forPeer:` `0x100001198`），Esc 的 `cancelOperation:` 与 Return 一样当成编辑结束、按当前文字提交（`control:textView:doCommandBySelector:` `0x100000FBC`），有焦点时方向键照常移动光标。用户选择照 15 连选区一起做、Esc 照 15 改成提交。在 15.5 虚拟机里量了选区色 `#3F638B` 与选区、光标的高度。payload 里没有 AppKit，剪贴板用不了，复制粘贴先不做 |
 | 2026-11-08 | 给 Dock 留的高度改照 15 从格子大小算：经 `-[DockBar desiredTileSize]` 与 `tileSize` 读格子，套 15.5 的留白表，默认大小下是 79 点。推翻 2026-11-05「取 27 的 Dock 栏矩形」那条 | 用户觉得图标大小与原版有差别。量 15.5 虚拟机的截图，原版在默认大小下留 77–81 点，而不是逆向笔记推测的 59 点；27.2 算格子的方法没变，只是玻璃 Dock 的留白表与栏高（94 点）更大。按栏高留，在 1487×936、1512×982 等屏幕上图标比 15 小一档；MacBook 当前的 1739×1080 上两种算法都是 120 点，只是行高差 2 点。照搬 15 的算法也不会压到 Dock，只是界面比 15 更贴近它 |
+| 2026-11-08 | 新增第 6 批「补齐日常差距」：三指轻扫翻页、文件夹方向键、新装 App 的蓝点、删除 App、拖到 Dock 与拖动搜索结果、搜索框与改名框的完整文本编辑。删除 App 从非目标移入这一批 | 用户看过差距清单后要求把平时会碰到的都直接补上，这一批的方案由 agent 起草，用户事前未审阅；按项目惯例记在这份总提案里，不另起提案 |
+| 2026-11-08 | 第 6 批开始实现，在 `feature/daily-gaps` 上 | — |
