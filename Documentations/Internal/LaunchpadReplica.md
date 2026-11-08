@@ -115,7 +115,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 ## 模块结构
 
-复刻分在两个模块里：`LaunchpadAwakenerSpringboardCore` 是 Launchpad 本身（布局库与界面层），不认识 Dock，也不链接 AppKit，经宿主接口 `SpringboardHost` 拿它需要的窗口、图层类、壁纸与图标样式；`LaunchpadAwakenerPayloadCore` 是它在 Dock 里的宿主，加上 hook 与入口。payload 启动时先用 `SpringboardHostSystem.bootstrap(host:)` 选定 Dock 宿主，再装 hook。独立版 App 是另一个宿主，见提案[不注入 Dock 的独立版 Launchpad](../Evolutions/draft-standalone-launchpad.md)。
+复刻分在两个模块里：`LaunchpadAwakenerSpringboardCore` 是 Launchpad 本身（布局库与界面层），不认识 Dock，也不链接 AppKit，经宿主接口 `SpringboardHost` 拿它需要的窗口、图层类、壁纸与图标样式；`LaunchpadAwakenerPayloadCore` 是它在 Dock 里的宿主，加上 hook 与入口。payload 启动时先用 `SpringboardHostSystem.bootstrap(host:)` 选定 Dock 宿主，再装 hook。独立版 App 是另一个宿主，见提案[不注入 Dock 的独立版 Launchpad](../Evolutions/0002-standalone-launchpad.md)。
 
 ```
 LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/

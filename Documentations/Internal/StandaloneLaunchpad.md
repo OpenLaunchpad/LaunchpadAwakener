@@ -1,6 +1,6 @@
 # 独立版 Launchpad：实现说明
 
-> 配套提案见 [不注入 Dock 的独立版 Launchpad](../Evolutions/draft-standalone-launchpad.md)。
+> 配套提案见 [不注入 Dock 的独立版 Launchpad](../Evolutions/0002-standalone-launchpad.md)。
 > 本文记录实际落地的实现、与提案的差异，以及当前覆盖范围与已知降级。面向维护者。
 > 注入版的实现说明见 [Launchpad 复刻：实现说明](LaunchpadReplica.md)，两版共用的界面层细节都在那里。
 
@@ -95,6 +95,6 @@ LaunchpadAwakenerStandalone/LaunchpadApp.swift  # App 外壳：delegate 与设�
 
 ## 延伸阅读
 
-- 配套提案：[不注入 Dock 的独立版 Launchpad](../Evolutions/draft-standalone-launchpad.md)
+- 配套提案：[不注入 Dock 的独立版 Launchpad](../Evolutions/0002-standalone-launchpad.md)
 - 注入版实现说明：[Launchpad 复刻：实现说明](LaunchpadReplica.md)
 - Dock 图层类的逆向笔记：`/Volumes/RE/Dock/27.2/Notes/ECLayerReuse.md`

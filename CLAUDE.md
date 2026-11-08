@@ -2,7 +2,7 @@
 
 在 macOS 26 与 27 的 Dock 里复刻 macOS 15 的 Launchpad：一个注入 Dock 的 payload，加上负责注入的 App 与特权 daemon。支持 26.0 到 27.2 的每个正式构建，别的构建在补上构建档案之前什么都不装（见实现说明「适配新的 Dock 构建」）。工程由 [InjectionScaffold](https://github.com/Mx-Iris/InjectionScaffold) 生成，方案见提案 [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](Documentations/Evolutions/draft-launchpad-replica.md)。
 
-另有一个不注入 Dock 的独立版 App「Launchpad」：自己开一扇盖住整块主屏幕（连 Dock 与菜单栏）的窗口，画同一套 Launchpad，不需要关 SIP。两版共用 Launchpad 本身的代码，方案见提案 [不注入 Dock 的独立版 Launchpad](Documentations/Evolutions/draft-standalone-launchpad.md)，实现见[独立版实现说明](Documentations/Internal/StandaloneLaunchpad.md)。
+另有一个不注入 Dock 的独立版 App「Launchpad」：自己开一扇盖住整块主屏幕（连 Dock 与菜单栏）的窗口，画同一套 Launchpad，不需要关 SIP。两版共用 Launchpad 本身的代码，方案见提案 [不注入 Dock 的独立版 Launchpad](Documentations/Evolutions/0002-standalone-launchpad.md)，实现见[独立版实现说明](Documentations/Internal/StandaloneLaunchpad.md)。
 
 ## 只在测试机上运行
 

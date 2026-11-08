@@ -1,12 +1,12 @@
-# Draft - 不注入 Dock 的独立版 Launchpad
+# 0002 - 不注入 Dock 的独立版 Launchpad
 
-- **状态**: In Progress
+- **状态**: Implemented
 - **作者**: JH
 - **创建日期**: 2026-11-08
 - **最后更新**: 2026-11-08
 - **所属愿景**: 无
 - **关联提案**: [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md)（注入版，本提案复用它的数据层与界面层）；[0001 用常驻辅助进程给搜索框与改名框接上输入法](0001-input-method-helper.md)（独立版不需要这个辅助进程）
-- **实现分支 / PR**: `feature/standalone-app`（worktree `.worktrees/LaunchpadAwakener-StandaloneApp`）
+- **实现分支 / PR**: `feature/standalone-app`，已合进 `main`，分支与 worktree 已删除
 - **配套文档**: [独立版 Launchpad：实现说明](../Internal/StandaloneLaunchpad.md)
 
 ## 摘要
@@ -375,3 +375,4 @@ LaunchpadLibrary.Configuration(
 | 2026-11-08 | 实现完成，待用户看过后收尾。注入版提案的决策日志已记下本提案；术语表登记「注入版」「独立版」（「宿主」「等价图层」随第 1、2 批登记）；配套文档是[独立版实现说明](../Internal/StandaloneLaunchpad.md) | 还差的验证：26 虚拟机上的回归与独立版自检（虚拟机没开着），以及要打开界面的交互验证（输入法、快捷键、设置窗口、Cmd-Tab 与系统提示窗口是否在上方），都等用户 |
 | 2026-11-08 | 经用户同意在 MacBook 上做交互验证，测出并修好三处：收起后焦点不交还（改为 `NSApp.hide`，窗口 `canHide = false` 以播完退场动画；从界面里打开 App 与打开设置时不交还，宿主接口的 `releaseKeyFocus` 为此加 `returningToPreviousApplication`）；候选窗被界面盖住（内容视图报出窗口层级 27）；设置窗口打不开（改为执行 App 菜单里 SwiftUI 生成的「设置…」菜单项） | `NSApp.deactivate()` 在 27 上不交出激活：退场时窗口还在最前面，App 照样是前台。macOS 14 起 SwiftUI 不理会顺着响应链发出的 `showSettingsWindow:`。修好后拼音在搜索框与改名框里组字、上屏，快捷键从别的 App 打开界面并能直接打字，收起后前台回到之前的 App；测试前备份的布局库已还原，录下的快捷键已清掉。26 虚拟机这次不验，用户决定 |
 | 2026-11-08 | 用户看出独立版的搜索框没复刻完（没有圆角底和放大镜，占位符是英文）。宿主加 `resourceBundle`，15 的贴图、界面语言与「未命名」都从它读：注入版是 `Bundle.main`，独立版是系统的 Dock.app；语言按 Dock 包自己的语言列表对照用户偏好来算 | 共用模块原先从 `Bundle.main` 读这些资源，在独立版里那是只有英文的 Launchpad.app；而主包以外的包又跟着主包的语言走，所以语言不能直接问 Dock 的包。注入版的结果不变：离屏自检两版都报 zh_CN「搜索」、3 张搜索框贴图都在，同屏截图一致 |
+| 2026-11-08 | Implemented，编号 0002 | 用户看过后收尾。文档的判断：配套的实现说明已登记在头部；没有给外部调用方的契约，不需要使用指南；「宿主」「等价图层」「注入版」「独立版」已登记进术语表。后续项：26 虚拟机上的注入版回归与独立版自检（用户决定这次不验）；界面开着时按 Cmd-逗号，设置窗口开在界面下面；Cmd-Tab 切换器与音量提示没在界面之上试过，通知横幅在界面之下；独立版自己的文字只有英文；可选的两个测试（删除确认时翻页、页面重建后残留选中高亮）没补；非目标里的系统入口、捏合与删除 App |
