@@ -41,9 +41,13 @@
     - HIToolbox 导出的 `_TSMSetRemoteViewActivation`、`_TSMRegisterRemoteViewClient`
     - CoreGraphics 导出的 `CGEventPostToPid`、`CGEventSetWindowLocation`
   - Dock 进程有发事件的权限（`kTCCServicePostEvent`）。
-- **还没验证、由第一步原型回答的**：
-  - 27.2 的 Dock 进程里，`CALayerHost` 能否显示另一个进程的上下文。27.2 的 `CALayerHost` 多了 `hostingToken`，可能限制跨进程显示。
-  - Dock 持有焦点时，转发过去的按键能否进入辅助进程的输入法。
+- **第一步原型验证过的**（2026-11-08，测试用的 MacBook，macOS 27.2；代码在分支 `experiment/input-method-probe`）：
+  - Dock 里的 `CALayerHost` 只设 `contextId`，就能显示辅助进程窗口的上下文（`window._contextForLayerHosting.contextId`），不需要 `hostingToken`。
+  - 27.2 的 Dock 不再通知 App「mini view 已显示」，所以辅助进程要自己调 `-[NSDockTile _setMiniViewShown:YES]`：
+    - 不调的话，mini view 窗口成不了 key 窗口，覆写的抢焦点方法根本不会被调用，转发的按键进不了文本框。
+    - 调了之后，AppKit 会调用覆写的 `_stealKeyFocusWithOptions:`。窗口成为 key，App 算作已激活，第一响应者是字段编辑器，按键能打字。
+  - 转发事件时照 15 把字段 51 设成辅助进程的窗口编号。不设它行不行，没单独验证。
+  - 拼音组字正常，空格能上屏。候选窗要照 15 把窗口层级设成 27（`_setMiniViewWindowLevel:27`），才会出现在 Launchpad 上方。它出现在框的正下方，位置取自辅助进程窗口在屏幕上的位置。
 
 ## 提议方案
 
@@ -124,7 +128,7 @@ App 与辅助进程都不需要新的权限或 entitlement：发事件的是 Doc
 
 ## 落地步骤
 
-1. **原型（一次性）**：辅助进程手工编译，payload 里加调试代码。在 MacBook 上依次证明：
+1. ✅ **原型（一次性）**：2026-11-08 证明可行，结论见「前期调研」。辅助进程手工编译，payload 里加调试代码。在 MacBook 上依次证明：
    - Dock 里的 `CALayerHost` 能显示辅助进程的文本框；
    - 转发的按键能打字，点按能放光标；
    - 拼音组字与候选窗的位置正确。
@@ -150,3 +154,4 @@ App 与辅助进程都不需要新的权限或 entitlement：发事件的是 Doc
 | 2026-11-08 | 用户要求接着做，并选择提案写完直接按它做；提案由 agent 起草，用户事前未审阅 | — |
 | 2026-11-08 | 开始实现，在 `feature/input-method-helper` 上。新增进程属于完整档，按完整模板写 | — |
 | 2026-11-08 | 辅助进程做成 LaunchAgent，不做 XPC 服务，也不交给 App 本身托管 | 理由见「替代方案考量」 |
+| 2026-11-08 | 第一步原型证明可行，按方案继续；原型代码推到 `experiment/input-method-probe` | 显示、打字、拼音组字与候选窗都在 MacBook 上看到了。比 15 多两处调用：辅助进程自己声明 mini view 已显示，并把窗口层级设成 27 |
