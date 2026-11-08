@@ -76,8 +76,8 @@ final class SpringboardSearchFieldLayer: CALayer {
 
     private let backgroundLayer = CALayer()
     private let loupeLayer = CALayer()
-    private let placeholderLayer = DockLayerFactory.makeTextLayer(withShadow: false)
-    let textLayer = DockLayerFactory.makeTextLayer(withShadow: false)
+    private let placeholderLayer = SpringboardHostSystem.layerFactory.makeTextLayer(withShadow: false)
+    let textLayer = SpringboardHostSystem.layerFactory.makeTextLayer(withShadow: false)
     private let clearButtonLayer = CALayer()
     /// The typed text's area, which clips it once it scrolls.
     private let clippingLayer = CALayer()
@@ -343,7 +343,7 @@ final class SpringboardSearchFieldLayer: CALayer {
 
 /// "No Results", in 15's large grey shadowed type over the page area.
 final class SpringboardNoResultsLayer: CALayer {
-    private let textLayer = DockLayerFactory.makeTextLayer(withShadow: true)
+    private let textLayer = SpringboardHostSystem.layerFactory.makeTextLayer(withShadow: true)
 
     override init() {
         super.init()
@@ -353,7 +353,7 @@ final class SpringboardNoResultsLayer: CALayer {
         textLayer.foregroundColor = CGColor(red: 0.2039, green: 0.2039, blue: 0.2039, alpha: 1)
         textLayer.alignmentMode = .center
         textLayer.compositingFilter = QuartzCorePrivate.stringConstant(named: "kCAFilterPlusL")
-        DockLayerFactory.setTextShadow(of: textLayer, color: CGColor(gray: 0, alpha: 0.2), offset: CGSize(width: 0, height: -1), blur: 2)
+        SpringboardHostSystem.layerFactory.setTextShadow(of: textLayer, color: CGColor(gray: 0, alpha: 0.2), offset: CGSize(width: 0, height: -1), blur: 2)
         // Core Animation's private `allowsGroupBlending`, which 15 turned off for this container.
         setValue(false, forKey: "allowsGroupBlending")
         addSublayer(textLayer)

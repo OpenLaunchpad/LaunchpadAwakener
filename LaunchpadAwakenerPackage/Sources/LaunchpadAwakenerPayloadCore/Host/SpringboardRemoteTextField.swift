@@ -10,16 +10,7 @@ import QuartzCore
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "SpringboardRemoteTextField")
 @MainActor
 final class SpringboardRemoteTextField {
-    struct Configuration {
-        let isSearchField: Bool
-        let string: String
-        let selectsAll: Bool
-        /// The text area's size, which the hosted field fills.
-        let size: CGSize
-        let fontSize: CGFloat
-        /// The text area's top-left corner on screen, from the top left of the main display.
-        let screenTopLeft: CGPoint
-    }
+    typealias Configuration = SpringboardHostedTextFieldConfiguration
 
     let configuration: Configuration
     /// Called with the layer showing the hosted field once the helper hosts it, and with nil when it goes.

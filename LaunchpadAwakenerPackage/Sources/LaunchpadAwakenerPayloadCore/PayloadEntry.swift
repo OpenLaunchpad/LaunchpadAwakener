@@ -48,6 +48,8 @@ public enum PayloadEntry {
             "Payload attached to \(ProcessInfo.processInfo.processName, privacy: .public) (\(ProcessInfo.processInfo.processIdentifier, privacy: .public))"
         )
 
+        // Before any hook can call into the springboard.
+        SpringboardHostSystem.bootstrap(host: DockSpringboardHost())
         installHooks()
     }
 

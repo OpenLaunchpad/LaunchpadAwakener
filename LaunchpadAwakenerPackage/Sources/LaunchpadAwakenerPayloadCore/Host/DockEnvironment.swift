@@ -72,22 +72,13 @@ enum DockEnvironment {
 
     // MARK: - Icon appearance
 
-    /// The icon style the Dock draws its own tiles in, as `IconAppearance` holds it.
+    /// The icon style the Dock draws its own tiles in, as `IconAppearance` holds it; the compositing filter
+    /// that goes with it is ``SpringboardIconStyle/glassCompositingFilterName``.
     struct IconAppearance {
         /// An `ISImageDescriptor` set up for the current style; copy before changing it.
         let iconDescriptor: NSObject
         /// `IconStyle`: 0 and 1 default, 2 and 3 clear, 4 and 5 tinted (light and dark each).
         let style: UInt8
-
-        /// The compositing filter the Dock gives its tile images in this style
-        /// (`IconStyle_GlassCompositingFilter`, 27.2 `0x10016AC54`).
-        var glassCompositingFilterName: String? {
-            switch style {
-            case 2, 3, 4: QuartzCorePrivate.stringConstant(named: "kCAFilterClearIconBlendMode")
-            case 5: QuartzCorePrivate.stringConstant(named: "kCAFilterScreenBlendMode")
-            default: nil
-            }
-        }
     }
 
     /// `DockBar.environment.iconAppearanceMonitor.appearance`; nil when any step is missing.

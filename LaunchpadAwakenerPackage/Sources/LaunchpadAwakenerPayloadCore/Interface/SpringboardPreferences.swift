@@ -3,8 +3,8 @@ import Foundation
 /// The Dock preferences macOS 15's Launchpad read, for example
 /// `defaults write com.apple.dock springboard-columns -int 8` followed by `killall Dock`.
 ///
-/// Inside the Dock, `UserDefaults.standard` is the `com.apple.dock` domain. Rows and columns are clamped
-/// to 2…100 as 15 clamped them (`sub_100008170`).
+/// Read from the host's ``SpringboardHost/preferences``: the `com.apple.dock` domain in the Dock and in the
+/// standalone app alike. Rows and columns are clamped to 2…100 as 15 clamped them (`sub_100008170`).
 enum SpringboardPreferences {
     static var rowCount: Int {
         clampedGridCount(forKey: "springboard-rows", defaultCount: 5)
@@ -21,18 +21,18 @@ enum SpringboardPreferences {
     /// `springboard-zoom-style`: 0 widens only the side margins on wide screens, 1 only the top,
     /// 2 also the bottom.
     static var zoomStyle: Int {
-        UserDefaults.standard.integer(forKey: "springboard-zoom-style")
+        SpringboardHostSystem.preferences.integer(forKey: "springboard-zoom-style")
     }
 
     /// `springboard-page-duration`, in seconds; 0.5 unless set.
     static var pageAnimationDuration: CFTimeInterval {
-        let duration = UserDefaults.standard.double(forKey: "springboard-page-duration")
+        let duration = SpringboardHostSystem.preferences.double(forKey: "springboard-page-duration")
         return duration > 0 ? duration : 0.5
     }
 
     /// `springboard-reverse-scroll-gesture`: whether content moves with the fingers. On unless set.
     static var reversesScrollGesture: Bool {
-        UserDefaults.standard.object(forKey: "springboard-reverse-scroll-gesture") as? Bool ?? true
+        SpringboardHostSystem.preferences.object(forKey: "springboard-reverse-scroll-gesture") as? Bool ?? true
     }
 
     /// `springboard-show-duration` and `springboard-hide-duration`, in seconds; 0.25 unless set.
@@ -57,7 +57,7 @@ enum SpringboardPreferences {
     }
 
     private static func positiveDuration(forKey key: String) -> CFTimeInterval? {
-        let duration = UserDefaults.standard.double(forKey: key)
+        let duration = SpringboardHostSystem.preferences.double(forKey: key)
         return duration > 0 ? duration : nil
     }
 
@@ -65,23 +65,23 @@ enum SpringboardPreferences {
     /// or nothing, macOS 15's blurred wallpaper. Not one of macOS 15's keys; read each time the springboard
     /// opens.
     static var backgroundStyle: SpringboardBackground.Style {
-        UserDefaults.standard.string(forKey: "springboard-background").flatMap(SpringboardBackground.Style.init(rawValue:)) ?? .wallpaper
+        SpringboardHostSystem.preferences.string(forKey: "springboard-background").flatMap(SpringboardBackground.Style.init(rawValue:)) ?? .wallpaper
     }
 
     /// `springboard-glass-variant`: which of the Dock's glasses the glass background uses — 0 the Dock's
     /// own, 2 the same without foreground effects, 4 the Command-Tab switcher's. 0 unless set. Not one of
     /// macOS 15's keys; read each time the springboard opens.
     static var glassVariant: Int {
-        UserDefaults.standard.integer(forKey: "springboard-glass-variant")
+        SpringboardHostSystem.preferences.integer(forKey: "springboard-glass-variant")
     }
 
     /// `springboard-edit-group-title`: whether clicking an open folder's title renames it. On unless set.
     static var allowsRenamingFolders: Bool {
-        UserDefaults.standard.object(forKey: "springboard-edit-group-title") as? Bool ?? true
+        SpringboardHostSystem.preferences.object(forKey: "springboard-edit-group-title") as? Bool ?? true
     }
 
     private static func clampedGridCount(forKey key: String, defaultCount: Int) -> Int {
-        guard UserDefaults.standard.object(forKey: key) != nil else { return defaultCount }
-        return min(max(UserDefaults.standard.integer(forKey: key), 2), 100)
+        guard SpringboardHostSystem.preferences.object(forKey: key) != nil else { return defaultCount }
+        return min(max(SpringboardHostSystem.preferences.integer(forKey: key), 2), 100)
     }
 }

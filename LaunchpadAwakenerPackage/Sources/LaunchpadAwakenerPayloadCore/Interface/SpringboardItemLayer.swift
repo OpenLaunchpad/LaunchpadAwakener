@@ -13,7 +13,7 @@ import QuartzCore
 final class SpringboardLabelLayer: CALayer {
     static let textInset: CGFloat = 2
 
-    let textLayer: CATextLayer = DockLayerFactory.makeTextLayer(withShadow: true)
+    let textLayer: CATextLayer = SpringboardHostSystem.layerFactory.makeTextLayer(withShadow: true)
     private var font: CTFont = SpringboardTypography.labelFont
 
     convenience init(font: CTFont) {
@@ -30,7 +30,7 @@ final class SpringboardLabelLayer: CALayer {
         textLayer.foregroundColor = CGColor(gray: 1, alpha: 1)
         textLayer.truncationMode = .middle
         textLayer.alignmentMode = .center
-        DockLayerFactory.setTextShadow(of: textLayer, color: CGColor(gray: 0, alpha: 0.2), offset: CGSize(width: 0, height: -1), blur: 2)
+        SpringboardHostSystem.layerFactory.setTextShadow(of: textLayer, color: CGColor(gray: 0, alpha: 0.2), offset: CGSize(width: 0, height: -1), blur: 2)
         textLayer.disableTextCrossfade()
         addSublayer(textLayer)
     }
@@ -119,7 +119,7 @@ final class SpringboardLabelLayer: CALayer {
 }
 
 /// Feeds a folder icon's thumbnails to the Dock's `ECImageGridLayer`, as 15's `ECSBGroup` did.
-final class SpringboardThumbnailSource: NSObject {
+package final class SpringboardThumbnailSource: NSObject {
     var images: [CGImage?] = []
     var scale: CGFloat = 2
 
@@ -329,7 +329,7 @@ final class SpringboardItemLayer: CALayer {
         }
         guard thumbnailGridLayer == nil else { return }
         thumbnailSource.scale = scale
-        guard let newThumbnailGridLayer = DockLayerFactory.makeImageGridLayer(
+        guard let newThumbnailGridLayer = SpringboardHostSystem.layerFactory.makeThumbnailGridLayer(
             source: thumbnailSource,
             rowCount: 3,
             columnCount: 3,
@@ -366,7 +366,7 @@ final class SpringboardItemLayer: CALayer {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         thumbnailSource.images = thumbnails
-        DockLayerFactory.invalidateImageGridLayer(thumbnailGridLayer, source: thumbnailSource)
+        SpringboardHostSystem.layerFactory.invalidateThumbnailGridLayer(thumbnailGridLayer, source: thumbnailSource)
         CATransaction.commit()
     }
 
@@ -411,7 +411,7 @@ final class SpringboardItemLayer: CALayer {
     /// icon was held over the folder (`-[ECSBGroupItemLayer setDarkenedForDrop:]`, `0x100076F0C`), or back.
     func scrollThumbnails(toAvailableSpace: Bool) {
         guard let thumbnailGridLayer else { return }
-        DockLayerFactory.scrollImageGridLayer(thumbnailGridLayer, toAvailableSpace: toAvailableSpace)
+        SpringboardHostSystem.layerFactory.scrollThumbnailGridLayer(thumbnailGridLayer, toAvailableSpace: toAvailableSpace)
     }
 
     /// The point size to render a folder's thumbnails at: the grid's row height less the spacing,
@@ -470,7 +470,7 @@ final class SpringboardItemLayer: CALayer {
             backdropLayer?.cornerRadius = folderCornerRadius
             if let thumbnailGridLayer {
                 thumbnailGridLayer.frame = thumbnailGridFrame
-                DockLayerFactory.layoutImageGridLayer(thumbnailGridLayer)
+                SpringboardHostSystem.layerFactory.layoutThumbnailGridLayer(thumbnailGridLayer)
             }
         } else if let backdropLayer {
             // An application showing the drop-target preview: a folder square 10 % larger than a folder's.
@@ -739,7 +739,7 @@ final class SpringboardItemLayer: CALayer {
         if isSelected {
             let newSelectionLayer = CALayer()
             newSelectionLayer.backgroundColor = CGColor(gray: 0, alpha: 0.14)
-            DockLayerFactory.setMaterialControl(3, appearance: 1, of: newSelectionLayer)
+            SpringboardHostSystem.layerFactory.applySelectionMaterial(to: newSelectionLayer)
             // 15 put it at index 0 of the jitter layer, under the icon and its title.
             jitterLayer.insertSublayer(newSelectionLayer, at: 0)
             selectionLayer = newSelectionLayer

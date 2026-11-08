@@ -30,10 +30,10 @@ final class SpringboardController {
     private static let launchAnimationDuration: CFTimeInterval = 0.25
 
     /// The springboard on screen and taking input; nil once it starts to hide.
-    private var window: SpringboardWindow?
+    private var window: (any SpringboardWindow)?
     private var interface: SpringboardInterface?
     /// A springboard fading out: no longer taking input, removed once its exit animation ends.
-    private var hidingWindow: SpringboardWindow?
+    private var hidingWindow: (any SpringboardWindow)?
     private var hidingInterface: SpringboardInterface?
     /// The latest layout from ``LaunchpadServices/library``; empty until the library has loaded.
     private var layout: LaunchpadLayout = .empty
@@ -81,7 +81,7 @@ final class SpringboardController {
         guard !isVisible else { return }
         finishHiding()
         let displayIdentifier = CGMainDisplayID()
-        guard let newWindow = SpringboardWindow(displayIdentifier: displayIdentifier) else {
+        guard let newWindow = SpringboardHostSystem.host.makeWindow(onDisplay: displayIdentifier) else {
             #log(.error, "Could not create the springboard window")
             return
         }
@@ -90,7 +90,7 @@ final class SpringboardController {
         let metrics = Self.metrics(forScreenSize: newWindow.displayBounds.size)
         let backgroundStyle = SpringboardPreferences.backgroundStyle
         // 15 captured the wallpaper afresh each time it opened.
-        let wallpaperImage = backgroundStyle == .wallpaper ? WallpaperSnapshot.captureWallpaperImage(onDisplay: displayIdentifier) : nil
+        let wallpaperImage = backgroundStyle == .wallpaper ? SpringboardHostSystem.host.wallpaperImage(onDisplay: displayIdentifier) : nil
         let newInterface = SpringboardInterface(
             layout: layout,
             metrics: metrics,
@@ -184,12 +184,13 @@ final class SpringboardController {
     }
 
     private static func metrics(forScreenSize screenSize: CGSize) -> SpringboardMetrics {
-        SpringboardMetrics(
+        let dockGeometry = SpringboardHostSystem.host.dockGeometry
+        return SpringboardMetrics(
             SpringboardMetrics.Input(
                 screenSize: screenSize,
-                dockOrientation: DockEnvironment.dockOrientation,
-                dockThickness: DockEnvironment.dockThickness,
-                notchHeight: DockEnvironment.notchHeight,
+                dockOrientation: dockGeometry.orientation,
+                dockThickness: dockGeometry.thickness,
+                notchHeight: dockGeometry.notchHeight,
                 rowCount: SpringboardPreferences.rowCount,
                 columnCount: SpringboardPreferences.columnCount,
                 zoomStyle: SpringboardPreferences.zoomStyle,
@@ -361,7 +362,7 @@ final class SpringboardController {
     }
 
     private func isInsideDockBar(_ location: CGPoint) -> Bool {
-        DockBarReference.currentBarRect?.contains(location) ?? false
+        SpringboardHostSystem.host.isOnDock(location)
     }
 
     private func restartIdleTimer() {

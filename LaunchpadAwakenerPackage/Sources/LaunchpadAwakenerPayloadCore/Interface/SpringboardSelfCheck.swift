@@ -29,9 +29,10 @@ enum SpringboardSelfCheck {
         let summary = interface.firstPageSummary
         #log(.info, "Self-check: \(summary, privacy: .public)")
         // Asks only; nothing is deleted.
-        if DockApplicationUninstaller.isAvailable {
+        let host = SpringboardHostSystem.host
+        if let uninstaller = host.applicationUninstaller {
             let deletableTitles = layout.applications.filter { application in
-                application.bundleURL.map(DockApplicationUninstaller.canUninstall(applicationAt:)) ?? false
+                application.bundleURL.map(uninstaller.canUninstall(applicationAt:)) ?? false
             }.map(\.title)
             #log(.info, "Self-check: the Dock's uninstaller would delete \(deletableTitles.count, privacy: .public) of \(layout.applications.count, privacy: .public) application(s): \(deletableTitles.prefix(5).joined(separator: ", "), privacy: .public)")
         } else {
@@ -42,7 +43,7 @@ enum SpringboardSelfCheck {
 
         // Only the size is logged; the image stays in the Dock.
         let captureStartDate = Date()
-        let wallpaperImage = WallpaperSnapshot.captureWallpaperImage(onDisplay: CGMainDisplayID())
+        let wallpaperImage = host.wallpaperImage(onDisplay: CGMainDisplayID())
         let captureMilliseconds = Int(Date().timeIntervalSince(captureStartDate) * 1000)
         if let wallpaperImage {
             #log(.info, "Self-check: wallpaper captured, \(wallpaperImage.width, privacy: .public)×\(wallpaperImage.height, privacy: .public) pixels in \(captureMilliseconds, privacy: .public) ms; background filters \(QuartzCorePrivate.desktopBackgroundFilters()?.count ?? 0, privacy: .public)")
@@ -64,13 +65,9 @@ enum SpringboardSelfCheck {
         let markerPath = "/tmp/LaunchpadAwakener.glass-checked-\(payloadBuildStamp)"
         guard !FileManager.default.fileExists(atPath: markerPath) else { return }
         FileManager.default.createFile(atPath: markerPath, contents: nil)
-        guard DockGlassMaterial.isAvailable else {
-            #log(.error, "Self-check: the Dock's glass is unavailable; the background is the stand-in blur")
-            return
-        }
         let background = SpringboardBackground(style: .glass, frame: frame, scale: scale, wallpaperImage: nil)
         guard background.isGlass else {
-            #log(.error, "Self-check: the Dock's glass could not be laid out; the background is the stand-in blur")
+            #log(.error, "Self-check: the Dock's glass is unavailable or could not be laid out; the background is the stand-in blur")
             return
         }
         #log(.info, "Self-check: glass, variant \(SpringboardPreferences.glassVariant, privacy: .public): \(describe(background.layer), privacy: .public)")

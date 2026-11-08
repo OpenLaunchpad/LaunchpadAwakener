@@ -60,10 +60,10 @@ final class SpringboardInterface {
     /// The search field as the text input helper hosts it, for input methods. While it is hosted, the keys
     /// the field takes and the clicks in it go there, and its text comes back here; otherwise, or when the
     /// helper is not there, the field is edited here.
-    private(set) var remoteSearchField: SpringboardRemoteTextField?
+    private(set) var remoteSearchField: (any SpringboardHostedTextField)?
     /// The open folder's name as the helper hosts it while it is renamed. The helper hosts one field at a
     /// time; renaming never overlaps typing a search.
-    private var remoteRenameField: SpringboardRemoteTextField?
+    private var remoteRenameField: (any SpringboardHostedTextField)?
     /// Where a rectangle of the container lies on screen: its top-left corner, from the top left of the
     /// main display, which the helper places its field at for input methods' candidate windows. Set by the
     /// controller, which knows the display; without it no field is hosted.
@@ -825,14 +825,14 @@ final class SpringboardInterface {
     func beginRemoteSearchField() {
         guard !isGoing, remoteSearchField == nil, let screenTopLeft else { return }
         let textArea = searchFieldTextAreaFrame
-        let field = SpringboardRemoteTextField(configuration: SpringboardRemoteTextField.Configuration(
+        guard let field = SpringboardHostSystem.host.makeHostedTextField(configuration: SpringboardHostedTextFieldConfiguration(
             isSearchField: true,
             string: searchText,
             selectsAll: false,
             size: textArea.size,
             fontSize: CTFontGetSize(SpringboardTypography.searchFont),
             screenTopLeft: screenTopLeft(textArea)
-        ))
+        )) else { return }
         field.hostLayerDidChange = { [weak self] hostLayer in
             self?.hostSearchField(in: hostLayer)
         }
@@ -877,7 +877,7 @@ final class SpringboardInterface {
         Self.forward(to: remoteRenameField, isMouseEvent: isMouseEvent)
     }
 
-    private static func forward(to field: SpringboardRemoteTextField?, isMouseEvent: Bool) -> Bool {
+    private static func forward(to field: (any SpringboardHostedTextField)?, isMouseEvent: Bool) -> Bool {
         guard let field, field.isHosted else { return false }
         return isMouseEvent ? field.forwardCurrentMouseEvent() : field.forwardCurrentKeyEvent()
     }
@@ -891,14 +891,14 @@ final class SpringboardInterface {
         endRemoteSearchField()
         let editorLayer = folderPanel.titleEditorLayer
         let editorFrame = editorLayer.convert(editorLayer.bounds, to: containerLayer)
-        let field = SpringboardRemoteTextField(configuration: SpringboardRemoteTextField.Configuration(
+        guard let field = SpringboardHostSystem.host.makeHostedTextField(configuration: SpringboardHostedTextFieldConfiguration(
             isSearchField: false,
             string: renaming.text,
             selectsAll: true,
             size: editorFrame.size,
             fontSize: CTFontGetSize(SpringboardTypography.folderTitleFont),
             screenTopLeft: screenTopLeft(editorFrame)
-        ))
+        )) else { return }
         field.hostLayerDidChange = { [weak self] hostLayer in
             self?.folderPanel?.titleEditorLayer.hostedTextLayer = hostLayer
         }

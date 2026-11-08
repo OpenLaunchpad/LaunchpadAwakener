@@ -11,7 +11,7 @@ import QuartzCore
 /// and took key focus without activating any application. ``orderOut()`` undoes all of it.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "SpringboardWindow")
 @MainActor
-final class SpringboardWindow {
+final class DockSpringboardWindow: SpringboardWindow {
     static let dockWindowLevel: Int32 = 20
     static let springboardWindowLevel: Int32 = 27
     static let raisedDockWindowLevel: Int32 = 29

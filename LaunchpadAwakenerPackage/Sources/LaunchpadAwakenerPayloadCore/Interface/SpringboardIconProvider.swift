@@ -39,15 +39,15 @@ final class SpringboardIconProvider {
     /// The compositing filter the Dock gives icons in the current style; nil for the default style.
     private(set) var glassCompositingFilterName: String?
 
-    /// Reads the Dock's icon style; call before a batch of requests, such as on every show.
+    /// Reads the host's icon style; call before a batch of requests, such as on every show.
     func refreshIconStyle() {
-        let iconAppearance = DockEnvironment.iconAppearance
-        if let iconAppearance, iconAppearance.style != currentStyle {
-            #log(.info, "Icon style is now \(iconAppearance.style, privacy: .public)")
+        let iconStyle = SpringboardHostSystem.host.iconStyle
+        if let iconStyle, iconStyle.style != currentStyle {
+            #log(.info, "Icon style is now \(iconStyle.style, privacy: .public)")
         }
-        currentStyle = iconAppearance?.style ?? 0
-        iconDescriptorTemplate = iconAppearance?.iconDescriptor
-        glassCompositingFilterName = iconAppearance?.glassCompositingFilterName
+        currentStyle = iconStyle?.style ?? 0
+        iconDescriptorTemplate = iconStyle?.iconDescriptor
+        glassCompositingFilterName = iconStyle?.glassCompositingFilterName
     }
 
     /// The icon, if it is ready; otherwise starts rendering it and returns nil.

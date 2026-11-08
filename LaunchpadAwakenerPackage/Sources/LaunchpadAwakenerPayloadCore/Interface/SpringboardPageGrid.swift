@@ -7,7 +7,7 @@ import QuartzCore
 /// The grid asks for the item count once, when it is created, then calls `makeLayerForLayer:` for each
 /// item and `setContentInLayers:withDataRange:forLayer:usingScaleFactor:` to fill them. It holds the
 /// source weakly, so ``SpringboardPageGrid`` keeps it.
-final class SpringboardGridSource: NSObject {
+package final class SpringboardGridSource: NSObject {
     let items: [LaunchpadItem]
     private let metrics: SpringboardMetrics
     private let scale: CGFloat
@@ -66,7 +66,7 @@ final class SpringboardPageGrid {
     init?(items: [LaunchpadItem], metrics: SpringboardMetrics, rowCount: Int, scale: CGFloat, itemLayerWasFilled: @escaping (SpringboardItemLayer) -> Void) {
         let source = SpringboardGridSource(items: items, metrics: metrics, scale: scale)
         source.itemLayerWasFilled = itemLayerWasFilled
-        guard let gridLayer = DockLayerFactory.makeGridLayer(
+        guard let gridLayer = SpringboardHostSystem.layerFactory.makePageGridLayer(
             source: source,
             rowCount: rowCount,
             columnCount: metrics.input.columnCount,
@@ -101,7 +101,7 @@ final class SpringboardPageGrid {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         gridLayer.frame = pageFrame.offsetBy(dx: centeredRowOffset, dy: 0)
-        DockLayerFactory.layoutGridLayer(gridLayer)
+        SpringboardHostSystem.layerFactory.layoutPageGridLayer(gridLayer)
         CATransaction.commit()
     }
 

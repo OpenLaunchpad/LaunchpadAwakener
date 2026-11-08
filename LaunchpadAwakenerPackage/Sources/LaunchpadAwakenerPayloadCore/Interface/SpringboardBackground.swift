@@ -9,10 +9,10 @@ import QuartzCore
 /// `_applyDesktopFilters` `0x10002E120`), or 15's own radial gradient when there is no picture
 /// (`-[Springboard _newDesktopLayer]`, `0x100090670`). App windows stay hidden behind it, as in 15.
 ///
-/// `springboard-background` set to `glass` puts the Dock's own Liquid Glass there instead
-/// (``DockGlassMaterial``), over whatever is behind the window: always in its dark appearance, so 15's
-/// white titles stay legible, and reaching past every edge so that its rim stays off screen. Without
-/// the Dock's glass, a window-server backdrop with 15's filters stands in.
+/// `springboard-background` set to `glass` puts the host's glass there instead — in the Dock, the Dock's
+/// own Liquid Glass — over whatever is behind the window: always in its dark appearance, so 15's white
+/// titles stay legible, and reaching past every edge so that its rim stays off screen. Without a glass
+/// from the host, a window-server backdrop with 15's filters stands in.
 @MainActor
 final class SpringboardBackground {
     enum Style: String {
@@ -29,7 +29,7 @@ final class SpringboardBackground {
     let style: Style
     /// Fills the screen; the glass's own layers reach past it.
     let layer = CALayer()
-    private var glass: DockGlassMaterial?
+    private var glass: (any SpringboardGlassBackground)?
 
     /// - Parameter wallpaperImage: The wallpaper as captured on opening, for the wallpaper style; nil
     ///   leaves 15's gradient.
@@ -59,15 +59,11 @@ final class SpringboardBackground {
     }
 
     private func addGlass(scale: CGFloat) {
-        let glass = DockGlassMaterial(variant: SpringboardPreferences.glassVariant, isAdaptive: false)
-        let isGlassShown = glass?.update(
+        if let glass = SpringboardHostSystem.host.makeGlassBackground(
             frame: layer.bounds.insetBy(dx: -Self.glassOutset, dy: -Self.glassOutset),
-            cornerRadius: 0,
-            isDark: true,
-            displayScale: scale,
+            scale: scale,
             backdropGroupName: Self.backdropGroupName
-        ) ?? false
-        if let glass, isGlassShown {
+        ) {
             layer.addSublayer(glass.rootLayer)
             self.glass = glass
             return

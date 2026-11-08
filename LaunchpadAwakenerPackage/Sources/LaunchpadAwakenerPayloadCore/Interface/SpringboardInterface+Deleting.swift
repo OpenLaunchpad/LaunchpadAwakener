@@ -16,7 +16,7 @@ extension SpringboardInterface {
             itemLayer.isDeletable = isDeletable
             return
         }
-        let isDeletable = DockApplicationUninstaller.canUninstall(applicationAt: bundleURL)
+        let isDeletable = SpringboardHostSystem.host.applicationUninstaller?.canUninstall(applicationAt: bundleURL) ?? false
         deletabilityByBundlePath[bundleURL.path] = isDeletable
         itemLayer.isDeletable = isDeletable
     }
@@ -69,7 +69,11 @@ extension SpringboardInterface {
         CATransaction.setAnimationDuration(0.5)
         CATransaction.setCompletionBlock { [weak self] in
             MainActor.assumeIsolated {
-                DockApplicationUninstaller.uninstall(applicationAt: bundleURL) { [weak self] hasSucceeded in
+                guard let uninstaller = SpringboardHostSystem.host.applicationUninstaller else {
+                    self?.finishDeleting(application, folderIdentifier: folderIdentifier, itemLayer: itemLayer, context: context, hasSucceeded: false)
+                    return
+                }
+                uninstaller.uninstall(applicationAt: bundleURL) { [weak self] hasSucceeded in
                     self?.finishDeleting(application, folderIdentifier: folderIdentifier, itemLayer: itemLayer, context: context, hasSucceeded: hasSucceeded)
                 }
             }

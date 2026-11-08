@@ -452,7 +452,7 @@ final class SpringboardTitleEditorLayer: CALayer {
     /// The area the text shows in, which clips it once it scrolls.
     private let clippingLayer = CALayer()
     private let selectionLayer = CALayer()
-    let textLayer = DockLayerFactory.makeTextLayer(withShadow: true)
+    let textLayer = SpringboardHostSystem.layerFactory.makeTextLayer(withShadow: true)
     private let caretLayer = CALayer()
     private(set) var editing = SpringboardTextEditing(selectingAllOf: "")
     private var textLine = SpringboardTextLine(text: "", font: SpringboardTypography.folderTitleFont)
@@ -473,7 +473,7 @@ final class SpringboardTitleEditorLayer: CALayer {
         textLayer.alignmentMode = .left
         textLayer.truncationMode = .none
         textLayer.isWrapped = false
-        DockLayerFactory.setTextShadow(of: textLayer, color: CGColor(gray: 0, alpha: 0.2), offset: CGSize(width: 0, height: -1), blur: 2)
+        SpringboardHostSystem.layerFactory.setTextShadow(of: textLayer, color: CGColor(gray: 0, alpha: 0.2), offset: CGSize(width: 0, height: -1), blur: 2)
         textLayer.disableTextCrossfade()
         caretLayer.backgroundColor = CGColor(gray: 1, alpha: 1)
         clippingLayer.addSublayer(selectionLayer)
