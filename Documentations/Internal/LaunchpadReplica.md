@@ -5,19 +5,21 @@
 
 ## 背景与目标
 
-payload 注入 macOS 27.2 的 Dock，接管所有「打开 Apps」的入口，在 Dock 自己的窗口与图层类上画出 macOS 15 的 Launchpad。布局首次从 15 留下的数据库导入，之后存在 `~/Library/Application Support/LaunchpadAwakener/Launchpad.db`。完整动机见提案。
+payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的入口，在 Dock 自己的窗口与图层类上画出 macOS 15 的 Launchpad。布局首次从 15 留下的数据库导入，之后存在 `~/Library/Application Support/LaunchpadAwakener/Launchpad.db`。完整动机见提案。
 
 ## 关键设计决策
 
-**只认构建档案里的 Dock。** `DockBuildProfile` 以 Dock 可执行文件 arm64e 切片的 `LC_UUID` 为键，存着只对这一个构建成立的事实（目前是 `DockBar` 与 `DockGlobals` 两个全局变量的地址）。UUID 不在表里，payload 一个 hook 都不装，所有入口照旧打开系统的 Apps。这是有意的：地址在别的构建里毫无意义，读错地址会让 Dock 崩溃。
+**只认构建档案里的 Dock。** `DockBuildProfile` 以 Dock 可执行文件 arm64e 切片的 `LC_UUID` 为键，存着只对这一个构建成立的事实：`DockBar` 与 `DockGlobals` 两个全局变量的地址、`DockGlobals` 的类名，以及这个 Dock 随哪些系统版本发布（只写进日志）。UUID 不在表里，payload 一个 hook 都不装，所有入口照旧打开系统的 Apps。这是有意的：地址在别的构建里毫无意义，读错地址会让 Dock 崩溃。表里登记了 26.0 到 27.2 全部 24 个正式构建（含只给特定机型的构建），它们一共只有 16 个不同的 Dock：点版本常常带着逐字节相同的 Dock，但也有像 26.7.2 这样版本号不变却重编了的。`DockBuildProfileTests.supportedReleases` 列着这 24 个版本，每个都要恰好对上一条档案。
 
-**`DockBar` 只能经全局变量拿到。** 27.2 里没有任何导出的路径通向它；`-[DockBar rect]` 和 `-[DockBar setRollTile:]` 在鼠标划过 Dock 时都不会被调用，所以「hook 这两个方法、在调用时记下接收者」的办法拿不到它（原型试过）。`DockGlobals` 同样只能经全局变量拿到。读全局变量后还会核对对象的类：按类对象比较，不比类名，因为运行时给 Swift 类的名字是 `DockCore.DockGlobals`，不是查找它用的改编名 `_TtC8DockCore11DockGlobals`。
+**`DockBar` 只能经全局变量拿到。** 27.2 里没有任何导出的路径通向它；`-[DockBar rect]` 和 `-[DockBar setRollTile:]` 在鼠标划过 Dock 时都不会被调用，所以「hook 这两个方法、在调用时记下接收者」的办法拿不到它（原型试过）。`DockGlobals` 同样只能经全局变量拿到。读全局变量后还会核对对象的类：按类对象比较，不比类名，因为运行时给 Swift 类的名字是 `DockCore.DockGlobals`，不是查找它用的改编名 `_TtC8DockCore11DockGlobals`。26 的 `DockGlobals` 还是 Objective-C 类 `DockGlobals`，所以要查的类名也记在构建档案里。
+
+**26 与 27 用同一套复刻。** 26 的 Dock 里旧 Launchpad 的类（`Springboard`、`LPSpringboard`、`ECSB*`、`ECPager*`）都还在，但 23 处入口经一个恒返回 1 的函数一律改道到 `-[Spotlight sendLaunchAppsBrowsing]`，和 27 一样，所以拦这一个方法就接管了 Launchpad 键、Dock 上的 Apps 图标、触发角与 Apps 本身。复刻调用的 23 个方法与两个 hook 在 26.0 到 27.2 的每个构建里签名都相同。几处差别：26 的 `-[DockAppEventHandler handleMachMessage:size:]` 在 Exposé 或旧 Springboard 捕获事件时不调 `handleDockBarEvent:type:`（后者在 26 上从不捕获，Mission Control 打开时复刻收不到事件，和 15 一样）；26 的玻璃控制器没有 `updateUsingLayoutConfiguration:environment:`，可选的玻璃背景退回模糊；26 与 27.0 的 Dock 自己接捏合（见已知降级）。
 
 **事件入口：hook 事件总入口加抢键盘焦点，不全局抢占事件。** 打开时 `CPSStealKeyFocusOnConnection(cid, 1152)`，关闭时归还，事件经 `-[DockAppEventHandler handleDockBarEvent:type:]` 接管——这正是 15 的做法。没有走 27 的 Cmd-Tab 切换器那种自建连接加 `CGSSetEventCapture`：一旦失控，整台机器的输入都会被锁住，26 上那次只能重启就是这种情形。也没有改用 `ECModalEventController`：它自建连接时只按 Dock 栏窗口的坐标做命中测试，处理者栈又与堆栈展开、Cmd-Tab 共用，打开 Launchpad 时会互相挤掉。
 
 **判断「点在 Dock 上」只能用 `DockBar` 的 `rect`。** 27.2 的 Dock 窗口几乎铺满屏幕，用窗口范围判断会把所有点击都当成点在 Dock 上。
 
-**payload 里不用 AppKit，也不用 `Bundle.module`。** 27.2 的 Dock 不链接 AppKit，字体一律用 Core Text 建，显示器信息用 CoreGraphics 和 Dock 自己的 `DisplayDescriptor`。SwiftPM 生成的 `Bundle.module` 找不到资源时直接 `fatalError`，在注入的框架里就是让 Dock 崩溃，所以 15.5 的 `LaunchPadLayout.plist` 只放在测试资源里，排除名单与默认首页以 Swift 常量随 payload 发布，由测试逐项核对。界面贴图（`ecsb_*`、`ectl_*`）在运行时从 27 的 Dock.app 里读。
+**payload 里不用 AppKit，也不用 `Bundle.module`。** 27.2 的 Dock 不链接 AppKit，字体一律用 Core Text 建，显示器信息用 CoreGraphics 和 Dock 自己的 `DisplayDescriptor`。SwiftPM 生成的 `Bundle.module` 找不到资源时直接 `fatalError`，在注入的框架里就是让 Dock 崩溃，所以 15.5 的 `LaunchPadLayout.plist` 只放在测试资源里，排除名单与默认首页以 Swift 常量随 payload 发布，由测试逐项核对。界面贴图（`ecsb_*`、`ectl_*`）在运行时从 Dock.app 里读，26 与 27 的 Dock.app 都带着这些文件。
 
 **调 Dock 内部方法一律先校验签名。** `DockHostInterface.requiredMethods` 汇总了界面层要调的所有 Dock 方法，任何一个的类型编码与 27.2 元数据不符，就整批不装 hook。经对象拿到的 Swift 类（`IconAppearance` 等）在调用前按对象的实际类校验，失败就降级。两个容易错的地方：`EC*` 类的 `scaleFactor` 都是 `float`（编码 `f`），按 `CGFloat` 传会错位；头文件里的 ivar 偏移是编译期的值，运行时会滑动，要用 `ivar_getOffset`。
 
@@ -163,6 +165,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 改名框的编辑（2026-11-08，先在 15.5 虚拟机里看原版，再在 MacBook 上截图、录屏核对）：原版进入改名时整个名字蓝底选中，→ 后光标到末尾，← 逐字左移，Esc 后名字不变；复刻的选区高度与原版一致，颜色读数的细微差别来自 MacBook 截图的 P3 色彩空间。MacBook 上核对了进入时全选、→ ← 后在中间插字、拖选、超出框宽时横向滚动且光标贴在右边缘、↑ 回到开头、Esc 按当前文字提交；录屏里选区、打字、删除都在一帧之内换上。双击选词与按住 Shift、Option 的操作模拟工具发不出来，只有单元测试。测试用的文件夹已改回原名。
 - 图标大小与 15.5 对照（2026-11-08）：在 15.5 虚拟机的截图（1487×936 屏，Dock 默认大小）上逐像素量网格：列距 169、行距 145、图标 96 点、首行图标顶边距屏幕顶 72 点，与公式在留 79 点时的结果一致；图标图片占图标框的比例两边相同（约 81%），文件夹方块都是图标边长减 20 点。改后部署到 MacBook，自检日志为 Dock 79、单元格 193×171、图标 120（1739×1080 屏），正是 15 在这块屏幕上的结果。没有做交互验证。
 - 第 6 批的非交互验证（2026-11-08，MacBook 上）：部署后 hook 装上、23 个 Dock 方法签名全部吻合；开发构建的自检显示 Dock 的卸载器可用，149 个 App 里有 39 个可删（都是 App Store 的，只问不删）；19 个 App 带「新」标记，都是从 15 的库里带过来的，下次打开时启动过的会清掉。三指轻扫、文件夹方向键、关闭按钮与删除、搜索框编辑与复制粘贴都没有做交互验证。
+- 各构建的离线核对（2026-11-08）：26.0 到 27.2 的 24 个正式构建都从 Apple 的完整更新包里取出 Dock，去重后 16 个二进制，逐个核对了复刻用到的类与方法的声明，并在 IDA 里读出两个全局变量；读法先在 27.2 上验证过，得出的正是档案里原有的两个地址。单元测试核对档案恰好覆盖这 24 个版本、地址落在可执行文件里且按指针对齐、`DockGlobals` 的类名与大版本相符。
 - 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认气泡的样子与真删一个 App。
 
 ## 已知降级
@@ -174,18 +177,27 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 玻璃背景：打开期间切换深浅色或辅助功能里的透明度、对比度，要到下次打开才跟上（界面每次打开都重建，没有注册 Dock 的外观观察者）。
 - 背景是打开那一刻的静态截图，动态壁纸不会动（与 15 相同）；截不到时是 15 的径向渐变。
 - 快速放进文件夹后，文件夹图标的缩略图在库发布新布局、页面重建时就滚回顶部；15 要等下次打开再关上这个文件夹才滚回。
-- 捏合在用户关掉 Spotlight 的捏合之前不生效；Dock 能否收到捏合事件尚未在真机上确认。
+- 捏合在用户关掉 Spotlight 的捏合之前不生效；Dock 能否收到捏合事件尚未在真机上确认。26 与 27.0 上捏合不归 Spotlight 进程，而由 Dock 自己的 `Spotlight` 对象跟手打开系统的 Apps（`-[Spotlight fluidGestureStart:]` 一族，27.2 删掉了），不经过 `sendLaunchAppsBrowsing`，复刻拦不到；同样要先在触控板设置里关掉系统的捏合。
 - 点 Dock 上别的图标关闭界面后 0.5 秒内按 Launchpad 键或触发角，这一下会被当作 Apps 图标的请求吞掉。
 - 再次打开的位置不跨 Dock 重启保存（与 15 相同）。
 - 只在主显示器上显示。
 - 新装 App 的蓝点：从 Launchpad 以外启动后，要到下次打开 Launchpad 才消失，并且依赖 Spotlight 记下的使用时间；关掉 Spotlight 索引时只有从 Launchpad 启动才会清掉。测试版 App 的黄点与屏幕使用时间的沙漏标记没有做。
+- macOS 26 上没有玻璃背景：26 的 `DockGlassMaterialLayerController` 用的是 `configureUsingConfiguration:` 与 `rebuildLayersWithEnvironment:`，签名核对不过，`springboard-background` 设成 `glass` 也退回带 15 三个滤镜的模糊。
+- macOS 26 上透明与着色图标的混合没有与 26 的 Dock 对照过：26 没有 `kCAFilterClearIconBlendMode`，复刻按 27 的映射在透明与浅色着色样式下不加滤镜、深色着色用 Screen，而 26 的 `-[DOCKTileLayer init]` 默认给格子图片的是 Screen。
+- 新一代芯片的 Mac 上，27 的 Dock 可能加载另一个切片 `arm64e.x1`（macOS 27 新增的 `CPU_SUBTYPE_ARM64E_X1`）：它的 UUID 与地址都和 arm64e 切片不同，档案没有登记。手边没有这类 Mac，payload 能否注入这种进程也没验证过。
 
 ## 适配新的 Dock 构建
 
+2026-11-08 用这套步骤补齐了 26.0 到 27.2 的全部构建。
+
 1. 新系统上 payload 会在日志里写出 `Unknown Dock build <UUID>`，什么也不装。
-2. 用 `idax binary --arch arm64e` 为新 Dock 建 IDA 库，并用 swift-section 导出头文件（见 reverse-engineering skill）。
-3. 找 `DockBar` 全局变量：在 `-[DockBarSystemDefinedEventHandler handleSystemDefinedEvent:type:]` 等方法里看它从哪个全局变量取 `DockBar`。找 `DockGlobals` 全局变量：`+[DockGlassMaterialLayerController currentDockMaterialEnvironmentWithColorScheme:]` 会读它和 `DockBar` 的全局变量，两个都空就 `brk`。
-4. 在 `DockBuildProfile.knownProfiles` 加一条（UUID、版本、两个地址），部署到测试机，看日志里 `Checked N Dock method(s), M mismatch(es)`：有不符的，日志会写出新的类型编码，逐个核对后更新签名。
+2. 取那个构建的 Dock。`/Volumes/RE/Dock/` 下已有的目录先看 README 里列的版本；没有就从 Apple 的完整更新包里取。`/Volumes/Firmwares/macOS/` 存着 26.0 到 27.2 的全部包（`<版本>_<build>_universal.zip`，只给特定机型的构建以机型命名）。更新的版本用 `ipsw download appledb --os macOS --type ota --release --json` 查出 `active_url` 与 `sha256`，`aria2c` 开 16 个连接下载，再用 `openssl dgst -sha256` 核对（`aria2c` 自带的校验是单线程的，17 GB 要十几分钟）。旧包所在的 CDN 节点慢，一个包十几 MiB/s，多个包要并行下。
+3. 取出 Dock：`ipsw ota extract <包> --pattern 'System/Library/CoreServices/Dock\.app/Contents/(MacOS/Dock|Info\.plist|version\.plist)$' --confirm --output <目录>`，约一分钟。`TMPDIR` 与输出目录要在同一个卷上，否则最后一步改名报 `cross-device link`。先比 arm64e 切片的 UUID：和已登记的相同就只在那条档案里加上这个版本。
+4. 把新 Dock 放进 `/Volumes/RE/Dock/<版本>/`，用 reverse-engineering skill 的脚本导出头文件，用 `idax binary --arch arm64e` 建 IDA 库（27 的 Dock 另有 `arm64e.x1` 切片，不加 `--arch` 会选错）。
+5. 核对签名：用 `ipsw class-dump <Dock> --arch arm64e --re -V` 导出声明，把复刻用到的类（`WALayerKitWindow`、`WAWindow`、`DockBar`、`DisplayDescriptor`、`EC*` 图层、`Spotlight`、`DockAppEventHandler`、玻璃的四个类、`IconAppearance`、`Environment`、卸载器与 `CALayer` 的分类）和同一大版本已登记的构建逐个对照。26.0 到 27.2 里不同的只有复刻没用到的方法。
+6. 找两个全局变量：`-[DockBarSystemDefinedEventHandler handleSystemDefinedEvent:type:]` 处理 Launchpad 键（系统定义事件子类型 9、键码 104）的分支里，向一个全局变量发 `keyFocusController`——那是 `DockBar`；向另一个发 `slowMotionAllowed`——那是 `DockGlobals`。看汇编里 `ADRL` 加 `LDR` 取的地址，26.0 到 27.2 都是这样。这个方法的地址取自第 5 步导出里的注释。
+7. 在 `DockBuildProfile.knownProfiles` 加一条（UUID、系统版本、版本号、两个地址；26 用 `macOS26Profile`，27 用 `macOS27Profile`，二者只差 `DockGlobals` 的类名），把版本加进 `DockBuildProfileTests.supportedReleases`，并在 RE 目录的 README 里记下来源与两个地址的出处。
+8. 部署到同一大版本的测试机，看日志里 `Checked N Dock method(s), M mismatch(es)` 与 `Installed 2 hook(s)`：有不符的，日志会写出新的类型编码，逐个核对后更新签名。
 
 ## 延伸阅读
 

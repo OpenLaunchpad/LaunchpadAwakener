@@ -33,7 +33,7 @@ enum DockBarReference {
             return cachedDockGlobals
         }
         let resolvedDockGlobals = DockBuildProfile.current.flatMap { profile in
-            readGlobalObject(atUnslidAddress: profile.dockGlobalsGlobalAddress, expectedClassName: "_TtC8DockCore11DockGlobals")
+            readGlobalObject(atUnslidAddress: profile.dockGlobalsGlobalAddress, expectedClassName: profile.dockGlobalsClassName)
         }
         cachedDockGlobals = resolvedDockGlobals
         return resolvedDockGlobals

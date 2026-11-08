@@ -20,7 +20,7 @@
 
 ### DockBuildProfile（构建档案）
 
-以 Dock 可执行文件 arm64e 切片的 `LC_UUID` 为键、记着只对那一个 Dock 构建成立的事实的一条记录（目前是 `DockBar` 全局变量的地址）。不在表里的构建，payload 一个 hook 都不装。
+以 Dock 可执行文件 arm64e 切片的 `LC_UUID` 为键、记着只对那一个 Dock 构建成立的事实的一条记录：`DockBar` 与 `DockGlobals` 两个全局变量的地址、`DockGlobals` 的类名，以及它随哪些系统版本发布。不在表里的构建，payload 一个 hook 都不装。表里登记了 macOS 26.0 到 27.2 的全部正式构建。
 
 - **主要出现在**：`LaunchpadAwakenerPayloadCore/Host/DockBuildProfile.swift`、[实现说明](Internal/LaunchpadReplica.md)「适配新的 Dock 构建」
 
