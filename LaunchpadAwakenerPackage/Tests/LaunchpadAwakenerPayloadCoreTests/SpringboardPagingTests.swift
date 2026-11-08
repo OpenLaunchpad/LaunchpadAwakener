@@ -70,6 +70,71 @@ struct SpringboardNavigationTests {
     }
 }
 
+/// What a key does over the pages in front, by `-[ECSBPager navigate:withEvent:]` (15.5 `0x10005A534`)
+/// and, in an open folder, `-[ECSBGroupPager navigate:withEvent:]` (`0x10006A6BC`) and `keyDown:`
+/// (`0x10006A608`).
+@Suite("Keys over the pages by macOS 15's rules")
+struct SpringboardKeyCommandTests {
+    private static func command(
+        _ keyCode: Int64,
+        command hasCommand: Bool = false,
+        inFolder isInFolder: Bool = false,
+        selection hasSelection: Bool = true,
+        canTurnBackward: Bool = true,
+        canTurnForward: Bool = true
+    ) -> SpringboardKeyCommand? {
+        SpringboardKeyCommand(
+            keyCode: keyCode,
+            hasCommand: hasCommand,
+            isInFolder: isInFolder,
+            hasSelection: hasSelection,
+            canTurnBackward: canTurnBackward,
+            canTurnForward: canTurnForward
+        )
+    }
+
+    @Test("arrows move the selection on the main pages and in a folder alike", arguments: [false, true])
+    func arrows(isInFolder: Bool) {
+        #expect(Self.command(SpringboardKeyCode.leftArrow, inFolder: isInFolder) == .navigate(.left))
+        #expect(Self.command(SpringboardKeyCode.rightArrow, inFolder: isInFolder) == .navigate(.right))
+        #expect(Self.command(SpringboardKeyCode.upArrow, inFolder: isInFolder) == .navigate(.up))
+        #expect(Self.command(SpringboardKeyCode.downArrow, inFolder: isInFolder) == .navigate(.down))
+    }
+
+    @Test("Command-arrows turn the page, and act as plain arrows where there is no page to turn to", arguments: [false, true])
+    func commandArrows(isInFolder: Bool) {
+        #expect(Self.command(SpringboardKeyCode.leftArrow, command: true, inFolder: isInFolder) == .turnPage(by: -1))
+        #expect(Self.command(SpringboardKeyCode.rightArrow, command: true, inFolder: isInFolder) == .turnPage(by: 1))
+        #expect(Self.command(SpringboardKeyCode.leftArrow, command: true, inFolder: isInFolder, canTurnBackward: false) == .navigate(.left))
+        #expect(Self.command(SpringboardKeyCode.rightArrow, command: true, inFolder: isInFolder, canTurnForward: false) == .navigate(.right))
+    }
+
+    @Test("Return performs the selected item", arguments: [SpringboardKeyCode.returnKey, SpringboardKeyCode.keypadEnter])
+    func returnKey(keyCode: Int64) {
+        #expect(Self.command(keyCode) == .performSelectedItem(opensFoldersOnly: false))
+        #expect(Self.command(keyCode, inFolder: true) == .performSelectedItem(opensFoldersOnly: false))
+    }
+
+    @Test("Command-Down opens a selected folder on the main pages; a folder holds none, so there it is Down")
+    func commandDown() {
+        #expect(Self.command(SpringboardKeyCode.downArrow, command: true) == .performSelectedItem(opensFoldersOnly: true))
+        #expect(Self.command(SpringboardKeyCode.downArrow, command: true, inFolder: true) == .navigate(.down))
+    }
+
+    @Test("Command-Up closes a folder with a selection and selects the folder; otherwise it is Up")
+    func commandUp() {
+        #expect(Self.command(SpringboardKeyCode.upArrow, command: true, inFolder: true) == .closeFolderSelectingIt)
+        #expect(Self.command(SpringboardKeyCode.upArrow, command: true, inFolder: true, selection: false) == .navigate(.up))
+        #expect(Self.command(SpringboardKeyCode.upArrow, command: true) == .navigate(.up))
+    }
+
+    @Test("other keys are not navigation")
+    func otherKeys() {
+        #expect(Self.command(SpringboardKeyCode.tab) == nil)
+        #expect(Self.command(SpringboardKeyCode.delete, inFolder: true) == nil)
+    }
+}
+
 @Suite("Dragging by macOS 15's rules")
 struct SpringboardDraggingTests {
     private static let cellSize = CGSize(width: 100, height: 100)

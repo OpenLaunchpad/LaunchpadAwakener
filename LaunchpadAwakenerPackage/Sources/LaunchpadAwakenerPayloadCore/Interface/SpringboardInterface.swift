@@ -43,6 +43,8 @@ final class SpringboardInterface {
 
     private var pageIndexBeforeSearch = 0
     private var selectedItemIndex: Int?
+    /// The layer showing the selection, which may sit on a page no longer in front.
+    private weak var selectedItemLayer: SpringboardItemLayer?
     private var searchText = ""
     private(set) var isShowingSearchResults = false
     private var searchTask: Task<Void, Never>?
@@ -406,19 +408,24 @@ final class SpringboardInterface {
 
     // MARK: - Selection
 
+    /// Selects an item on the page in front, an open folder's or the main one's; nil selects nothing.
     private func select(itemAt itemIndex: Int?) {
-        for (index, itemLayer) in currentItemLayers.enumerated() {
-            itemLayer.isSelected = index == itemIndex
-        }
+        selectedItemLayer?.isSelected = false
+        selectedItemLayer = nil
+        selectedItemIndex = nil
+        guard let itemIndex, currentItemLayers.indices.contains(itemIndex) else { return }
+        let itemLayer = currentItemLayers[itemIndex]
+        itemLayer.isSelected = true
+        selectedItemLayer = itemLayer
         selectedItemIndex = itemIndex
     }
 
     private var currentItemLayers: [SpringboardItemLayer] {
-        mainPages.currentPageGrid?.itemLayers ?? []
+        frontPages.currentPageGrid?.itemLayers ?? []
     }
 
     private var currentItems: [LaunchpadItem] {
-        mainPages.currentPageGrid?.items ?? []
+        frontPages.currentPageGrid?.items ?? []
     }
 
     // MARK: - Folders
@@ -434,6 +441,9 @@ final class SpringboardInterface {
             self?.putIcons(in: itemLayer)
         }
         folderPanel = newFolderPanel
+        newFolderPanel.pages.currentPageDidChange = { [weak self] in
+            self?.select(itemAt: nil)
+        }
         isAnimatingFolder = true
         newFolderPanel.animateOpen(from: folderItemLayer, springboardLayer: springboardLayer, containerLayer: containerLayer) { [weak self] in
             self?.isAnimatingFolder = false
@@ -456,6 +466,8 @@ final class SpringboardInterface {
             guard let self else { return }
             self.folderPanel = nil
             self.isClosingFolder = false
+            // The selection was the folder's; 15 left the main pages with none (`-[ECSBPager hideGroup]`).
+            self.select(itemAt: nil)
             // The page may have been rebuilt meanwhile; show the folder's icon on the page as it is now.
             CATransaction.begin()
             CATransaction.setDisableActions(true)
@@ -744,26 +756,22 @@ final class SpringboardInterface {
             }
             return .dismiss(reason: "escape")
         }
-        guard folderPanel == nil, dragSession == nil else { return .none }
+        guard dragSession == nil else { return .none }
 
-        let hasCommand = modifierFlags.contains(.maskCommand)
+        let pages = frontPages
+        if let keyCommand = SpringboardKeyCommand(
+            keyCode: keyCode,
+            hasCommand: modifierFlags.contains(.maskCommand),
+            isInFolder: folderPanel != nil,
+            hasSelection: selectedItemIndex != nil,
+            canTurnBackward: pages.currentPageIndex > 0,
+            canTurnForward: pages.currentPageIndex < pages.pageGrids.count - 1
+        ) {
+            return perform(keyCommand)
+        }
+        guard folderPanel == nil else { return .none }
+
         switch keyCode {
-        case SpringboardKeyCode.returnKey, SpringboardKeyCode.keypadEnter:
-            return actionForSelectedItem()
-        case SpringboardKeyCode.leftArrow where hasCommand:
-            turnPageKeepingSelection(by: -1)
-        case SpringboardKeyCode.rightArrow where hasCommand:
-            turnPageKeepingSelection(by: 1)
-        case SpringboardKeyCode.downArrow where hasCommand:
-            return actionForSelectedItem(opensFoldersOnly: true)
-        case SpringboardKeyCode.leftArrow:
-            navigate(.left)
-        case SpringboardKeyCode.rightArrow:
-            navigate(.right)
-        case SpringboardKeyCode.upArrow:
-            navigate(.up)
-        case SpringboardKeyCode.downArrow:
-            navigate(.down)
         case SpringboardKeyCode.delete:
             guard !searchText.isEmpty else { return .none }
             searchText.removeLast()
@@ -788,6 +796,20 @@ final class SpringboardInterface {
         pages.isJiggling = optionKeyJiggle.isJiggling(afterOptionIsDown: modifierFlags.contains(.maskAlternate), isJiggling: pages.isJiggling)
     }
 
+    private func perform(_ keyCommand: SpringboardKeyCommand) -> Action {
+        switch keyCommand {
+        case .navigate(let direction):
+            navigate(direction)
+        case .turnPage(let pageOffset):
+            turnPageKeepingSelection(by: pageOffset)
+        case .performSelectedItem(let opensFoldersOnly):
+            return actionForSelectedItem(opensFoldersOnly: opensFoldersOnly)
+        case .closeFolderSelectingIt:
+            closeFolderSelectingIt()
+        }
+        return .none
+    }
+
     private func navigate(_ direction: SpringboardNavigation.Direction) {
         select(itemAt: SpringboardNavigation.selectedIndex(
             after: direction,
@@ -797,12 +819,25 @@ final class SpringboardInterface {
         ))
     }
 
-    /// Command-arrows turn the page; a selection moves to the new page's first item.
+    /// Command-arrows turn the page in front; a selection moves to the new page's first item.
     private func turnPageKeepingSelection(by pageOffset: Int) {
         let hadSelection = selectedItemIndex != nil
-        mainPages.turn(toPageAt: mainPages.currentPageIndex + pageOffset)
+        let pages = frontPages
+        pages.turn(toPageAt: pages.currentPageIndex + pageOffset)
         if hadSelection, !currentItems.isEmpty {
             select(itemAt: 0)
+        }
+    }
+
+    /// Command-Up in a folder: it closes, and once it has, it is the selection on the main page
+    /// (15.5 `0x10006A914`).
+    private func closeFolderSelectingIt() {
+        guard let folderIdentifier = folderPanel?.folder.identifier else { return }
+        closeFolder { [weak self] in
+            guard let self else { return }
+            self.select(itemAt: self.currentItems.firstIndex { item in
+                if case .folder(let folder) = item { folder.identifier == folderIdentifier } else { false }
+            })
         }
     }
 
@@ -815,7 +850,10 @@ final class SpringboardInterface {
             guard !opensFoldersOnly else { return .none }
             return launchAction(for: application, itemLayer: itemLayer)
         case .folder(let folder):
-            openFolder(folder, from: itemLayer)
+            // Opened from the keyboard, a folder selects its first item once open (15.5 `0x10005A410`).
+            openFolder(folder, from: itemLayer) { [weak self] in
+                self?.select(itemAt: 0)
+            }
             return .none
         }
     }

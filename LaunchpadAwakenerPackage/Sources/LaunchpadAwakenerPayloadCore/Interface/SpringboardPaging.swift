@@ -105,6 +105,39 @@ package enum SpringboardNavigation {
     }
 }
 
+/// What a key does over the pages in front — the main pages, or an open folder's — as macOS 15.5's
+/// `-[ECSBPager navigate:withEvent:]` (`0x10005A534`), `-[ECSBGroupPager navigate:withEvent:]`
+/// (`0x10006A6BC`) and `-[ECSBGroupPager keyDown:]` (`0x10006A608`) read it. In a folder the arrows
+/// follow the main pages' rules, with the main grid's column count.
+package enum SpringboardKeyCommand: Sendable, Equatable {
+    case navigate(SpringboardNavigation.Direction)
+    case turnPage(by: Int)
+    /// Return launches the selected application or opens the selected folder; Command-Down only opens.
+    case performSelectedItem(opensFoldersOnly: Bool)
+    /// Command-Up in a folder with a selection: the folder closes and is selected on the main pages.
+    case closeFolderSelectingIt
+
+    /// Nil for keys that are not navigation.
+    package init?(keyCode: Int64, hasCommand: Bool, isInFolder: Bool, hasSelection: Bool, canTurnBackward: Bool, canTurnForward: Bool) {
+        switch keyCode {
+        case SpringboardKeyCode.returnKey, SpringboardKeyCode.keypadEnter:
+            self = .performSelectedItem(opensFoldersOnly: false)
+        // With no page to turn to, a Command-arrow is a plain arrow.
+        case SpringboardKeyCode.leftArrow:
+            self = hasCommand && canTurnBackward ? .turnPage(by: -1) : .navigate(.left)
+        case SpringboardKeyCode.rightArrow:
+            self = hasCommand && canTurnForward ? .turnPage(by: 1) : .navigate(.right)
+        case SpringboardKeyCode.downArrow:
+            // A folder holds no folders, so there Command-Down is Down.
+            self = hasCommand && !isInFolder ? .performSelectedItem(opensFoldersOnly: true) : .navigate(.down)
+        case SpringboardKeyCode.upArrow:
+            self = hasCommand && isInFolder && hasSelection ? .closeFolderSelectingIt : .navigate(.up)
+        default:
+            return nil
+        }
+    }
+}
+
 /// Where a dragged icon lands, by macOS 15.5's rules.
 package enum SpringboardDragging {
     /// Faster than this the dragged icon makes nothing move yet (`-[ECSBDragCapture leftMouseDragged:in:]`,

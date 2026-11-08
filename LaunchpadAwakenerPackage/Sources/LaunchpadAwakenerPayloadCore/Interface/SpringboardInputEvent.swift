@@ -98,16 +98,16 @@ struct SpringboardInputEvent: Sendable {
 }
 
 /// Virtual key codes the springboard reacts to (`kVK_*` in Carbon's `Events.h`).
-enum SpringboardKeyCode {
-    static let returnKey: Int64 = 36
-    static let tab: Int64 = 48
-    static let delete: Int64 = 51
-    static let escape: Int64 = 53
-    static let keypadEnter: Int64 = 76
+package enum SpringboardKeyCode {
+    package static let returnKey: Int64 = 36
+    package static let tab: Int64 = 48
+    package static let delete: Int64 = 51
+    package static let escape: Int64 = 53
+    package static let keypadEnter: Int64 = 76
     /// Fn-Delete on a laptop keyboard.
-    static let forwardDelete: Int64 = 117
-    static let leftArrow: Int64 = 123
-    static let rightArrow: Int64 = 124
-    static let downArrow: Int64 = 125
-    static let upArrow: Int64 = 126
+    package static let forwardDelete: Int64 = 117
+    package static let leftArrow: Int64 = 123
+    package static let rightArrow: Int64 = 124
+    package static let downArrow: Int64 = 125
+    package static let upArrow: Int64 = 126
 }
