@@ -47,6 +47,49 @@ final class SpringboardLabelLayer: CALayer {
         (textLayer.string as? String) ?? ""
     }
 
+    /// Left-aligned to make room for a blue dot that does not fit beside the centred text.
+    var isLeftAligned = false {
+        didSet {
+            guard isLeftAligned != oldValue else { return }
+            textLayer.alignmentMode = isLeftAligned ? .left : .center
+        }
+    }
+
+    /// The blue dot of an application downloaded from the App Store and not launched since; it hangs off
+    /// the label's left side, so it moves and fades with the title.
+    private var recentlyAddedDotLayer: CALayer?
+
+    /// 15's dot colour (`-[ECFlagLayer initWithStyle:]`, 15.5 `0x1000E7FC8`).
+    static let recentlyAddedDotColor = CGColor(red: 0, green: 122 / 255, blue: 1, alpha: 1)
+    static let recentlyAddedDotSide: CGFloat = 9
+
+    /// Shows or removes the dot. `flagSide` is the side of 15's `ECFlagLayer`, the label's height less 8;
+    /// the dot sits centred in it, the flag's left edge `flagSide − 1` before the label and 5 points up
+    /// (`-[ECFlagLayer layout]`, `0x1000E812C`; `-[ECSBItemLayer layout]`, `0x100020A14`).
+    func setRecentlyAddedDot(isShown: Bool, flagSide: CGFloat) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        guard isShown else {
+            recentlyAddedDotLayer?.removeFromSuperlayer()
+            recentlyAddedDotLayer = nil
+            return
+        }
+        let dotLayer = recentlyAddedDotLayer ?? CALayer()
+        if recentlyAddedDotLayer == nil {
+            dotLayer.backgroundColor = Self.recentlyAddedDotColor
+            dotLayer.cornerRadius = Self.recentlyAddedDotSide / 2
+            addSublayer(dotLayer)
+            recentlyAddedDotLayer = dotLayer
+        }
+        let dotInset = CGFloat(Int(flagSide / 2 - Self.recentlyAddedDotSide / 2))
+        dotLayer.frame = CGRect(x: 1 - flagSide + dotInset, y: 5 + dotInset, width: Self.recentlyAddedDotSide, height: Self.recentlyAddedDotSide)
+    }
+
+    var showsRecentlyAddedDot: Bool {
+        recentlyAddedDotLayer != nil
+    }
+
     func setString(_ string: String, contentsScale scale: CGFloat) {
         textLayer.string = string
         textLayer.contentsScale = scale
@@ -190,6 +233,24 @@ final class SpringboardItemLayer: CALayer {
 
     var isFolder: Bool {
         if case .folder = item { true } else { false }
+    }
+
+    /// An application downloaded from the App Store and not launched since; folders never are.
+    private var isRecentlyAdded: Bool {
+        if case .application(let application) = item { application.isRecentlyAdded } else { false }
+    }
+
+    /// The title's width, its shift from the centred position and its alignment. With a flag
+    /// `flagSide` wide hanging off its left, the title stays centred while both fit, and otherwise shrinks,
+    /// moves right by half the flag and turns left-aligned (15.5 `-[ECSBItemLayer layout]`, `0x100020A14`).
+    static func labelPlacement(preferredWidth: CGFloat, cellWidth: CGFloat, maximumWidth: CGFloat, flagSide: CGFloat?) -> (width: CGFloat, offset: CGFloat, isLeftAligned: Bool) {
+        guard let flagSide else {
+            return (min(preferredWidth, maximumWidth), 0, false)
+        }
+        guard preferredWidth + flagSide + 1 > maximumWidth else {
+            return (preferredWidth, 0, false)
+        }
+        return (cellWidth - flagSide - 13, CGFloat(Int((flagSide + 1) / 2)), true)
     }
 
     var isSelected = false {
@@ -367,13 +428,20 @@ final class SpringboardItemLayer: CALayer {
             width: iconSide,
             height: iconSide
         )
-        let labelWidth = min(SpringboardLabelLayer.preferredSize(of: item.title).width, metrics.labelMaximumWidth)
+        let labelPlacement = Self.labelPlacement(
+            preferredWidth: SpringboardLabelLayer.preferredSize(of: item.title).width,
+            cellWidth: cellWidth,
+            maximumWidth: metrics.labelMaximumWidth,
+            flagSide: isRecentlyAdded ? metrics.labelHeight - 8 : nil
+        )
         restingLabelFrame = CGRect(
-            x: Self.centered(cellWidth / 2 - labelWidth / 2, isEven: Int(labelWidth).isMultiple(of: 2)),
+            x: Self.centered(cellWidth / 2 - labelPlacement.width / 2, isEven: Int(labelPlacement.width).isMultiple(of: 2)) + labelPlacement.offset,
             y: bottomPadding,
-            width: labelWidth,
+            width: labelPlacement.width,
             height: metrics.labelHeight
         )
+        labelLayer.isLeftAligned = labelPlacement.isLeftAligned
+        labelLayer.setRecentlyAddedDot(isShown: isRecentlyAdded, flagSide: metrics.labelHeight - 8)
         if !isPictureAndTitleLayoutSuspended {
             imageLayer.frame = iconFrame
             labelLayer.frame = restingLabelFrame

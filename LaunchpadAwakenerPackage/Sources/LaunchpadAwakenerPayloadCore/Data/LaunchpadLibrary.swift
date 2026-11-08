@@ -199,6 +199,17 @@ package enum LaunchpadEdit: Sendable, Equatable {
 }
 
 extension LaunchpadLibrary {
+    /// Takes the blue dot off these applications for good, and publishes the result if any had one.
+    package func clearRecentlyAdded(forBundleIdentifiers bundleIdentifiers: Set<String>) async {
+        guard let store = currentStore else { return }
+        do {
+            guard try store.clearRecentlyAdded(forBundleIdentifiers: bundleIdentifiers) else { return }
+            try await publishCurrentLayout()
+        } catch {
+            #log(.error, "Could not clear the recently added mark of \(bundleIdentifiers.sorted(), privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+    }
+
     /// Applies `edit` to the stored layout and publishes the result. Returns whether it was stored;
     /// a failed edit leaves the layout as it was.
     @discardableResult

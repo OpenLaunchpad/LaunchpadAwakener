@@ -92,7 +92,13 @@ extension LaunchpadStore {
                 try removeItem(itemIdentifier)
             }
             for discoveredApplication in reconciliation.applicationsToAdd {
-                try appendApplicationToLastPage(discoveredApplication.record, itemsPerPage: itemsPerPage)
+                var record = discoveredApplication.record
+                // macOS 15 marked an application when its App Store download finished; one carrying a
+                // purchase receipt is the closest the directory shows of that.
+                if RecentlyAddedApplications.isFromAppStore(applicationAt: discoveredApplication.url) {
+                    record.itemFlags = LaunchpadDatabaseSchema.ItemFlags.recentlyAdded
+                }
+                try appendApplicationToLastPage(record, itemsPerPage: itemsPerPage)
             }
         }
     }

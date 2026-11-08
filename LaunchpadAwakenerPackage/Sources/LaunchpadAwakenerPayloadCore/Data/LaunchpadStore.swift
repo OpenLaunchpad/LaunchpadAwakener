@@ -124,7 +124,7 @@ package final class LaunchpadStore {
         let itemRows = try database.rows(
             """
             SELECT items.rowid, items.uuid, items.type, items.parent_id,
-                   apps.title, apps.bundleid, apps.bookmark, groups.title, image_cache.image_data
+                   apps.title, apps.bundleid, apps.bookmark, groups.title, image_cache.image_data, items.flags
             FROM items
             LEFT JOIN apps ON apps.item_id = items.rowid
             LEFT JOIN groups ON groups.item_id = items.rowid
@@ -162,6 +162,29 @@ package final class LaunchpadStore {
     }
 
     // MARK: - Writing
+
+    /// Clears the recently added mark of every item of these applications, as launching one did in
+    /// macOS 15 (`-[LPSpringboard markAppAsLaunched:]`, 15.5 `0x1000B0CF8`). Returns whether any was marked.
+    @discardableResult
+    package func clearRecentlyAdded(forBundleIdentifiers bundleIdentifiers: Set<String>) throws -> Bool {
+        let recentlyAdded = LaunchpadDatabaseSchema.ItemFlags.recentlyAdded
+        var hasCleared = false
+        try performTransaction {
+            for bundleIdentifier in bundleIdentifiers.sorted() {
+                let markedRows = try database.rows(
+                    "SELECT items.rowid FROM items JOIN apps ON apps.item_id = items.rowid WHERE apps.bundleid = ? AND (items.flags & ?) != 0",
+                    [.text(bundleIdentifier), .integer(recentlyAdded)]
+                )
+                guard !markedRows.isEmpty else { continue }
+                try database.run(
+                    "UPDATE items SET flags = flags & ? WHERE rowid IN (SELECT item_id FROM apps WHERE bundleid = ?)",
+                    [.integer(~recentlyAdded), .text(bundleIdentifier)]
+                )
+                hasCleared = true
+            }
+        }
+        return hasCleared
+    }
 
     /// Runs `body` as one transaction, so a failure part-way leaves the layout as it was.
     package func performTransaction<Result>(_ body: () throws -> Result) throws -> Result {
@@ -296,7 +319,7 @@ private struct ItemTree {
     private var rowsByParent: [LaunchpadItemIdentifier: [ItemRow]] = [:]
 
     /// `rows` columns: rowid, uuid, type, parent_id, apps.title, apps.bundleid, apps.bookmark,
-    /// groups.title, image_cache.image_data — already sorted by parent and ordering.
+    /// groups.title, image_cache.image_data, items.flags — already sorted by parent and ordering.
     init(rows: [[SQLiteValue]]) {
         for row in rows {
             guard let rowIdentifier = row[0].integerValue, let parentRowIdentifier = row[3].integerValue else { continue }
@@ -309,7 +332,8 @@ private struct ItemTree {
                     title: row[4].textValue ?? bundleIdentifier,
                     bundleIdentifier: bundleIdentifier,
                     bookmarkData: row[6].blobValue,
-                    legacyIconPNGData: row[8].blobValue.flatMap { $0.isEmpty ? nil : $0 }
+                    legacyIconPNGData: row[8].blobValue.flatMap { $0.isEmpty ? nil : $0 },
+                    isRecentlyAdded: (row[9].integerValue ?? 0) & LaunchpadDatabaseSchema.ItemFlags.recentlyAdded != 0
                 )
             }
             rowsByParent[LaunchpadItemIdentifier(rowIdentifier: parentRowIdentifier), default: []].append(

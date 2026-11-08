@@ -86,6 +86,7 @@ final class SpringboardController {
             return
         }
         SpringboardIconProvider.shared.refreshIconStyle()
+        clearRecentlyAddedMarksOfLaunchedApplications()
         let metrics = Self.metrics(forScreenSize: newWindow.displayBounds.size)
         let backgroundStyle = SpringboardPreferences.backgroundStyle
         // 15 captured the wallpaper afresh each time it opened.
@@ -286,8 +287,28 @@ final class SpringboardController {
         }
     }
 
+    /// Drops the blue dot of every marked application launched from elsewhere since it came, before the
+    /// springboard shows it. Only marked applications are looked at, usually none.
+    private func clearRecentlyAddedMarksOfLaunchedApplications() {
+        let launchedBundleIdentifiers = Set(layout.applications.filter { application in
+            guard application.isRecentlyAdded, let bundleURL = application.bundleURL else { return false }
+            return RecentlyAddedApplications.hasBeenLaunched(applicationAt: bundleURL)
+        }.map(\.bundleIdentifier))
+        guard !launchedBundleIdentifiers.isEmpty else { return }
+        #log(.info, "Launched since they came, so no longer marked new: \(launchedBundleIdentifiers.sorted(), privacy: .public)")
+        layout = layout.clearingRecentlyAdded(forBundleIdentifiers: launchedBundleIdentifiers)
+        Task {
+            await LaunchpadServices.library.clearRecentlyAdded(forBundleIdentifiers: launchedBundleIdentifiers)
+        }
+    }
+
     /// Opens the application and closes the springboard, with 15's icon animation playing over the exit.
     private func launch(_ application: LaunchpadApplication, iconFrame: CGRect, iconImage: Any?) {
+        if application.isRecentlyAdded {
+            Task {
+                await LaunchpadServices.library.clearRecentlyAdded(forBundleIdentifiers: [application.bundleIdentifier])
+            }
+        }
         if let bundleURL = application.bundleURL {
             ApplicationLauncher.launchApplication(at: bundleURL)
         } else {

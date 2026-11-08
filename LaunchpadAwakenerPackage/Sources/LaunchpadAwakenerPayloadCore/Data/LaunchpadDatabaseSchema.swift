@@ -18,6 +18,13 @@ package enum LaunchpadDatabaseSchema {
 
     package static let version = 13
 
+    /// `items.flags` bits macOS 15 read.
+    package enum ItemFlags {
+        /// Downloaded from the App Store and not launched since (`-[LPRunnable recentlyAdded]`, 15.5
+        /// `0x10001DCAC`): the name shows a blue dot.
+        package static let recentlyAdded: Int64 = 0x400
+    }
+
     /// Prefix of the invisible pages macOS 15 parked unplaced items on (`HOLDINGPAGE`,
     /// `HOLDINGPAGE_DB`, `HOLDINGPAGE_VERS`). They are never shown.
     package static let holdingPageIdentifierPrefix = "HOLDINGPAGE"

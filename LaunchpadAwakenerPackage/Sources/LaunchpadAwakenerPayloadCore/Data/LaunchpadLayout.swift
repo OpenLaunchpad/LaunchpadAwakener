@@ -27,6 +27,8 @@ package struct LaunchpadApplication: Sendable, Equatable {
     package let legacyIconPNGData: Data?
     /// Where the bundle is now; the store does not keep it, the library fills it in.
     package let bundleURL: URL?
+    /// Downloaded from the App Store and not launched since: the name shows a blue dot.
+    package let isRecentlyAdded: Bool
 
     package init(
         identifier: LaunchpadItemIdentifier,
@@ -34,7 +36,8 @@ package struct LaunchpadApplication: Sendable, Equatable {
         bundleIdentifier: String,
         bookmarkData: Data?,
         legacyIconPNGData: Data?,
-        bundleURL: URL? = nil
+        bundleURL: URL? = nil,
+        isRecentlyAdded: Bool = false
     ) {
         self.identifier = identifier
         self.title = title
@@ -42,6 +45,7 @@ package struct LaunchpadApplication: Sendable, Equatable {
         self.bookmarkData = bookmarkData
         self.legacyIconPNGData = legacyIconPNGData
         self.bundleURL = bundleURL
+        self.isRecentlyAdded = isRecentlyAdded
     }
 
     package func withBundleURL(_ newBundleURL: URL?) -> LaunchpadApplication {
@@ -51,7 +55,20 @@ package struct LaunchpadApplication: Sendable, Equatable {
             bundleIdentifier: bundleIdentifier,
             bookmarkData: bookmarkData,
             legacyIconPNGData: legacyIconPNGData,
-            bundleURL: newBundleURL
+            bundleURL: newBundleURL,
+            isRecentlyAdded: isRecentlyAdded
+        )
+    }
+
+    package func withRecentlyAdded(_ newIsRecentlyAdded: Bool) -> LaunchpadApplication {
+        LaunchpadApplication(
+            identifier: identifier,
+            title: title,
+            bundleIdentifier: bundleIdentifier,
+            bookmarkData: bookmarkData,
+            legacyIconPNGData: legacyIconPNGData,
+            bundleURL: bundleURL,
+            isRecentlyAdded: newIsRecentlyAdded
         )
     }
 
@@ -128,19 +145,30 @@ package struct LaunchpadLayout: Sendable, Equatable {
 
     /// The same layout with every application's bundle located by `bundleURL(for:)`.
     package func locatingBundles(_ bundleURL: (LaunchpadApplication) -> URL?) -> LaunchpadLayout {
-        func locate(_ application: LaunchpadApplication) -> LaunchpadApplication {
+        mappingApplications { application in
             application.withBundleURL(bundleURL(application))
         }
-        return LaunchpadLayout(pages: pages.map { page in
+    }
+
+    /// The same layout with the applications of `bundleIdentifiers` no longer recently added, wherever
+    /// they are.
+    package func clearingRecentlyAdded(forBundleIdentifiers bundleIdentifiers: Set<String>) -> LaunchpadLayout {
+        mappingApplications { application in
+            bundleIdentifiers.contains(application.bundleIdentifier) ? application.withRecentlyAdded(false) : application
+        }
+    }
+
+    private func mappingApplications(_ transform: (LaunchpadApplication) -> LaunchpadApplication) -> LaunchpadLayout {
+        LaunchpadLayout(pages: pages.map { page in
             LaunchpadPage(identifier: page.identifier, items: page.items.map { item in
                 switch item {
                 case .application(let application):
-                    .application(locate(application))
+                    .application(transform(application))
                 case .folder(let folder):
                     .folder(LaunchpadFolder(
                         identifier: folder.identifier,
                         title: folder.title,
-                        pages: folder.pages.map { LaunchpadFolderPage(identifier: $0.identifier, applications: $0.applications.map(locate)) }
+                        pages: folder.pages.map { LaunchpadFolderPage(identifier: $0.identifier, applications: $0.applications.map(transform)) }
                     ))
                 }
             })
