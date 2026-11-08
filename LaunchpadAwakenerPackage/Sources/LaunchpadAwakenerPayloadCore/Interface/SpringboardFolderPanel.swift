@@ -495,6 +495,23 @@ final class SpringboardTitleEditorLayer: CALayer {
         textLayer.contentsScale = scale
     }
 
+    /// The field as the text input helper hosts it, for input methods. While it is set it shows the text,
+    /// the caret and the selection instead of this layer.
+    var hostedTextLayer: CALayer? {
+        didSet {
+            guard hostedTextLayer !== oldValue else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            oldValue?.removeFromSuperlayer()
+            if let hostedTextLayer {
+                hostedTextLayer.frame = bounds
+                addSublayer(hostedTextLayer)
+            }
+            clippingLayer.isHidden = hostedTextLayer != nil
+            CATransaction.commit()
+        }
+    }
+
     /// Shows `newEditing`: its text, and its selection or else its caret, which shows in full at once and
     /// then blinks, as after each key in a text field.
     func show(_ newEditing: SpringboardTextEditing) {

@@ -113,6 +113,12 @@ final class SpringboardController {
             newInterface.animateEntrance(duration: SpringboardPreferences.showAnimationDuration)
         }
         restartIdleTimer()
+        let displayBounds = newWindow.displayBounds
+        // The container is y-up from the display's bottom left; the screen is y-down from the top left.
+        newInterface.screenTopLeft = { rectInContainer in
+            CGPoint(x: displayBounds.minX + rectInContainer.minX, y: displayBounds.minY + displayBounds.height - rectInContainer.maxY)
+        }
+        newInterface.beginRemoteSearchField()
         let backgroundDescription = switch backgroundStyle {
         case .wallpaper:
             wallpaperImage.map { "the wallpaper, \($0.width)×\($0.height) pixels" } ?? "15's gradient"
@@ -227,6 +233,7 @@ final class SpringboardController {
             perform(interface.handleKeyDown(keyCode: keyCode, characters: characters, modifierFlags: inputEvent.modifierFlags))
             return true
         case .keyUp:
+            interface.handleKeyUp()
             return true
         case .modifiersChanged:
             interface.handleModifiersChanged(inputEvent.modifierFlags)

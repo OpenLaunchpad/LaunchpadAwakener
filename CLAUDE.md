@@ -27,18 +27,20 @@ ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakene
 
 ## 结构
 
-四个二进制，Xcode 项目里只放外壳，代码都在本地 Swift 包：
+五个二进制，Xcode 项目里只放外壳，代码都在本地 Swift 包：
 
 | 目录 | 是什么 |
 |---|---|
 | `LaunchpadAwakener/` | SwiftUI App 外壳 |
 | `LaunchpadAwakenerDaemon/` | 特权 daemon 的 `main.swift`，两行 |
 | `LaunchpadAwakenerPayload/` | payload 的 `main.m`，提供两条注入入口 |
+| `LaunchpadAwakenerTextInput/` | 文本输入辅助进程的 `main.swift`：嵌在 App 里的 LaunchAgent，替 Launchpad 托管搜索框与改名框，好让输入法能用 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerShared` | 服务名、版本、路径。**不依赖任何东西** |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerHookKit` | 带签名校验的 Objective-C 方法替换 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppCore` | daemon 生命周期、进程监视、注入编排 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerDaemonCore` | 组装特权 XPC 服务端 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore` | 跑在目标进程里的代码，hook 声明在这里 |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore` | 文本输入辅助进程：XPC 服务、托管的 `NSTextField`。只有它链接 AppKit 的私有部分 |
 
 模块按「谁链接它」划分。App 不能链接 daemon 的特权依赖，payload 要尽量小 —— 它会被映射进一个并没有请求它的进程。
 
@@ -87,6 +89,7 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 - **改 App** —— 重新运行即可。
 - **改 daemon** —— 重新编译后运行 App，它会检测到版本不一致并自动注销重装。前提是**递增了 `InjectionServiceIdentity.daemonVersion`**；不递增这套机制不会触发，内存里还是旧 daemon。
 - **改 payload** —— payload 是加载进目标进程的镜像，卸不掉。必须让目标进程重启（`killall <目标>`）才能换成新版本。
+- **改文本输入辅助进程** —— 它由 launchd 按需拉起后一直常驻，换了 App 也还是旧进程。部署后 `pkill -f LaunchpadAwakenerTextInput` 让它退出，payload 下次连它时 launchd 会起新版本。
 
 ## 加 hook
 
@@ -109,6 +112,8 @@ remap 路径不会跑 payload 的构造函数，所以 `main.m` 里有第二个�
 
 - 构建设置 `INJECTION_SERVICE_NAME` —— 决定 daemon 产物名和 launchd plist
 - `InjectionServiceIdentity.machServiceName` —— 决定 Swift 侧连哪个服务
+
+文本输入辅助进程同理：构建设置 `TEXT_INPUT_SERVICE_NAME`（决定它的 bundle id、LaunchAgent plist 与 Mach 服务）要与 `TextInputServiceIdentity.machServiceName` 一致。
 
 Debug 和 Release 用不同的服务名，这样开发中的构建和已安装的正式版不会互相抢 Mach 服务注册。
 

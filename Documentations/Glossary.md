@@ -54,6 +54,12 @@
 
 - **主要出现在**：`LaunchpadAwakenerPayloadCore/Interface/`
 
+### Text input helper（文本输入辅助进程）
+
+嵌在 App 里的 LaunchAgent `LaunchpadAwakenerTextInput`，替 Launchpad 托管搜索框或改名框（一次一个），好让输入法能用；相当于 15 的 Dock 包里的 `com.apple.dock.ecti` 服务。payload 在 Dock 里用 `CALayerHost` 显示它的文本框，把按键与点按转发给它；它不可用时 payload 退回本地编辑。
+
+- **主要出现在**：`LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore/`、`LaunchpadAwakenerPayloadCore/Interface/SpringboardRemoteTextField.swift`、[实现说明](Internal/LaunchpadReplica.md)「输入法靠一个托管文本框的辅助进程」
+
 ### Unsaved folder（未存的文件夹）
 
 拖动时界面上已经出现、库里还没有的文件夹：停在 App 上 1 秒弹开的那个，或快速松手后库写好之前的那个。它的标识符是负数（`LaunchpadItemIdentifier.unsavedFolder`），库发布的新布局到达时按第一个 App 换成真正的文件夹；停住弹开的那个要在面板里松手才写库，拖出面板就解散，库里什么也不留。

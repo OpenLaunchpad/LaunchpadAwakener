@@ -61,9 +61,27 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **改名只从标题文字上开始；会在眼前换的字一律直接换上。** 15 只认落在标题图层上的按下（这个图层只比文字宽 4 点），松手在哪都进入改名（`-[ECSBGroup leftMouseDown:in:]`、`leftMouseUp:in:`）。标题左右各宽 200 点的那一块是编辑框，平时隐藏，改名时框内的按下全被文本框收下，所以框内点击不结束改名（`isInTitleEditor`）。最初照逆向笔记把这一块当成了点击区，点标题那一行的空白处也会开始改名；现在那里照「面板外」处理，一按就关文件夹，用户在 15.5 上确认 15 也会关。另外，Core Animation 默认给文字图层重画出的新内容做 0.25 秒的交叉淡化：标题居中，每打一个字整行左移半个字宽，新旧两行于是叠在一起闪一下。改名的编辑框、标题标签与搜索框的文字图层因此都关掉了 `contents` 的隐式动画（`disableTextCrossfade()`）。单元测试里要先把图层交给离屏的 `CARenderer` 提交一次，它才会像屏幕上的图层那样做隐式动画，否则修没修都看不出差别。
 
-**改名框照 15 的文本框编辑，选区自己维护。** 15 的改名框是 Dock 的 `com.apple.dock.ecti` 服务里一个真正的 `NSTextField`，经 `CALayerHost` 贴进 Dock 的图层。服务一建好它就调 `selectText:`，所以进入改名时整个名字是选中的，打字直接替换；方向键、Shift 扩选、点击放光标、拖选、双击选词都是它字段编辑器的标准行为；Return、Enter 与 Esc 都结束编辑并按当前文字提交，Esc 并不撤销。复刻里没有 AppKit，改由 `SpringboardTextEditing` 维护文字与选区：按用户看到的整字计数，中文、emoji、带附加符号的字母都不会被拆开；按词移动用 Foundation 的分词，中文也按词。`SpringboardTextEditingCommand` 照标准键位把按键读成命令，编辑框按 Core Text 量出的字间位置画选区和光标。文字居中，放不下时横向滚动，只滚到光标看得见为止，不再在开头显示省略号。选区色 `#3F638B` 与光标、选区的高度是在 15.5 虚拟机的截图上量的，是深色外观下系统默认的选中文字色，不随系统强调色变化。复制粘贴走 HIServices 的 Pasteboard Manager（Dock 本来就加载了它，payload 用不了 AppKit 的 `NSPasteboard`），撤销是自己的快照栈，一段连续输入算一步（`SpringboardFieldEditor`）。输入法没有做，见「已知降级」。
+**改名框照 15 的文本框编辑，选区自己维护。** 15 的改名框是 Dock 的 `com.apple.dock.ecti` 服务里一个真正的 `NSTextField`，经 `CALayerHost` 贴进 Dock 的图层。服务一建好它就调 `selectText:`，所以进入改名时整个名字是选中的，打字直接替换；方向键、Shift 扩选、点击放光标、拖选、双击选词都是它字段编辑器的标准行为；Return、Enter 与 Esc 都结束编辑并按当前文字提交，Esc 并不撤销。复刻里没有 AppKit，改由 `SpringboardTextEditing` 维护文字与选区：按用户看到的整字计数，中文、emoji、带附加符号的字母都不会被拆开；按词移动用 Foundation 的分词，中文也按词。`SpringboardTextEditingCommand` 照标准键位把按键读成命令，编辑框按 Core Text 量出的字间位置画选区和光标。文字居中，放不下时横向滚动，只滚到光标看得见为止，不再在开头显示省略号。选区色 `#3F638B` 与光标、选区的高度是在 15.5 虚拟机的截图上量的，是深色外观下系统默认的选中文字色，不随系统强调色变化。复制粘贴走 HIServices 的 Pasteboard Manager（Dock 本来就加载了它，payload 用不了 AppKit 的 `NSPasteboard`），撤销是自己的快照栈，一段连续输入算一步（`SpringboardFieldEditor`）。这套本地编辑在下文的文本输入辅助进程不可用时才用；有它时，两个框都由它托管。
 
 **搜索框与改名框共用一套编辑，按键照 15 分流。** 搜索框也由 `SpringboardFieldEditor` 维护文字、选区与撤销，光标画在实际位置，选中的部分用改名框同样的颜色，放不下时横向滚动，点击放光标、拖选、双击选词。哪些键归搜索框照 15 的 `-[ECSBLayer keyDown:]`：Tab、Return、Enter、Esc、↑↓ 从不给它；← 只在它有焦点时给它，→ 还要有文字；Command-方向键翻结果页；其余键先激活搜索框再交给它，所以没点进去时直接打字、删除、粘贴也行。
+
+**输入法靠一个托管文本框的辅助进程，照 15 的 ecti 服务做**（提案 [用常驻辅助进程给搜索框与改名框接上输入法](../Evolutions/draft-input-method-helper.md)）。Dock 不加载 AppKit，输入法只认真正的文本框和激活状态的进程，所以 App 里多带一个 LaunchAgent `LaunchpadAwakenerTextInput`：
+
+- **启动**：它放在 `Contents/Library/LoginItems/`，App 启动时用 `SMAppService.agent` 注册，不用用户批准。launchd 在 payload 连它的 Mach 服务时才拉起它。它只接受 Dock 的连接（按进程路径核对）。
+- **托管**：它在 Dock 图块的 mini view 窗口里放一个 `NSTextField`，那扇窗口不上屏，却能成为 key 窗口。payload 用 `CALayerHost` 显示这扇窗口的图层托管上下文。
+- **转发**：payload 把这些事件复制一份，标上辅助进程的窗口编号与窗口内位置，用 `CGEventPostToPid` 发过去：
+  - 搜索框该收的键；正在组字时是所有键；
+  - 改名时的所有键；
+  - 框里的点按与拖动。
+- **回报**：辅助进程回报不含组字部分的文字、是否在组字、改名时是否按了 Return、Enter 或 Esc。输入法不让文本框报告组字，所以它用一个改写了 `setMarkedText`、`unmarkText` 的字段编辑器来报。
+
+与 15 不同的地方：
+
+- 27.2 的 Dock 不再告诉 AppKit「mini view 已显示」，辅助进程要自己调 `_setMiniViewShown:`，否则窗口成不了 key，按键进不去。
+- 窗口层级要设成 27，候选窗才出现在 Launchpad 上方。
+- 辅助进程只托管一个框，搜索框与改名框轮流用：开始改名时搜索框交出去，改完再接回来。每次换框都先结束上一段编辑，字段编辑器才会按新框的对齐方式重建，否则改名框会沿用搜索框的靠左。
+- 组字时本地的占位文字「搜索」让开，不与组字中的文字叠在一起。
+- 连不上辅助进程、它中途退出时，退回上文的本地编辑；下次打开时 launchd 会重新拉起它。
 
 **背景默认是 15 的模糊壁纸，Dock 自己的液态玻璃是选项。** 每次打开都截一张 WindowManager 的壁纸窗口（27 的壁纸窗口归它，每个空间一扇叫 `Wallpaper` 的窗口），用 15 同样的 `SLSHWCaptureWindowList(…, 0x11944)`；截好的图放进栅格化的容器，套 15 的三个滤镜（模糊 30、饱和度 1.8、颜色矩阵压暗），只算一次，App 的窗口被它挡住，与 15 一样。截不到时是 15 自带的径向渐变。中途一度改成玻璃（用户想要更贴合新系统的效果），看过后又改回来，因为模糊效果不如原版；玻璃留作 `springboard-background` 设为 `glass` 时的选项。
 
@@ -101,6 +119,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── DockEnvironment.swift           # Dock 的方向、厚度、刘海、图标样式
 │   ├── DockLayerFactory.swift          # ECGridLayer、ECTextLayer、ECShadowTextLayer、材质；CA 私有滤镜
 │   ├── IconServicesBridge.swift        # IconServices 取图
+│   ├── TextInputHelperClient.swift     # 连文本输入辅助进程；给它发键鼠事件
 │   └── SkyLightBridge.swift            # 连接、窗口层级、键盘焦点
 ├── Data/                               # 布局库，可脱离 Dock 测试
 │   ├── LaunchpadStore*.swift           # 自己的库：读、追加、编辑、整理
@@ -124,6 +143,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── SpringboardPageGrid.swift       # 每页一个 ECGridLayer 及其数据源
 │   ├── SpringboardItemLayer.swift      # 图标、文件夹图标与标题（ECSBItemLayer、ECSBGroupItemLayer、ECSBLabelLayer）
 │   ├── SpringboardControlLayers.swift  # 页码、搜索框、无结果
+│   ├── SpringboardRemoteTextField.swift # 辅助进程托管的搜索框与改名框：CALayerHost 与事件转发
 │   ├── SpringboardMetrics.swift        # 15.5 的主界面几何（纯计算）
 │   ├── SpringboardFolderMetrics.swift  # 15.5 的文件夹几何（纯计算）
 │   ├── SpringboardSearch.swift         # 15.5 的搜索规则（纯计算）
@@ -144,10 +164,10 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 ## 与提案的差异
 
 - App 的变更只靠 FSEvents 监听应用目录，没有接 LaunchServices 的私有通知（签名未逆向确认）。
-- 搜索框不接输入法：直接把 Dock 收到的按键当文字，所以打不出中文；标题匹配不上时仍按 App 文件名匹配。
+- 搜索框的输入法靠文本输入辅助进程（另一份提案）；辅助进程不可用时直接把 Dock 收到的按键当文字，那时打不出中文。标题匹配不上时仍按 App 文件名匹配。
 - 触控板翻页用滚动事件自带的阶段判断开始与结束。三指轻扫照 15 读导航轻扫事件（手势事件，字段 110 为 16），每个方向有效的事件翻一页，不看阶段（`-[ECPagerLayer gesture:]`）；只有触控板设成「用三指轻扫」在页面间切换时系统才会发出这种事件，Dock 是否收得到还要用户在真机上确认（开发构建会把每个导航轻扫写进日志）。
 - 15.5 的 `LaunchPadLayout.plist` 没有作为资源随 payload 发布，改为 Swift 常量（原因见上）。
-- 文件夹改名同样不接输入法；光标、选区、复制粘贴、撤销与 Esc 都照 15 的文本框（Esc 按当前文字提交）。
+- 文件夹改名同样经辅助进程接输入法；光标、选区、复制粘贴、撤销与 Esc 都照 15 的文本框（Esc 按当前文字提交）。
 - 拖到 Dock 上不支持（第 6 批的后续项，见提案）；拖动时文件夹不额外加一行。
 - 捏合没有接入 27 的 Dock 手势系统（那里已经没有它），而是读原始 DockSwipe 事件，并且要用户先关掉 Spotlight 的捏合。
 - 背景默认照 15 截壁纸、加三个滤镜；另有 `springboard-background` 设为 `glass` 时的 Dock 液态玻璃，那时 App 的窗口会被模糊进来。
@@ -159,6 +179,12 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - MacBook 上的非交互验证：部署后与 Dock 重启后各注入一次、hook 装上、23 个 Dock 方法签名全部吻合；导入 3 页、2 个文件夹、149 个 App 与旧库一致；开发构建的离屏自检核对 Dock 的 `ECGridLayer` 建出的图标数量与位置、文件夹图标的方圆与 `ECImageGridLayer` 缩略图，以及 Dock 的玻璃建出的图层：一个由窗口服务器采样、带 `glassBackground` 滤镜、组名 `launchpad-background` 的 `CABackdropLayer`，加 `CASDFLayer` 与 `CAPortalLayer`，向屏幕四边外扩 64 点，Dock 未崩溃。
 - 经用户同意的交互验证（2026-11-06，MacBook 上）：经 ssh 截图、录屏，用一个发 `CGEvent` 的小工具模拟点击与拖动，核对了玻璃背景、文件夹打开动画、快速松手建文件夹并自动弹开、从文件夹拖出后解散；录屏逐帧看过，测试用的文件夹已拆掉。
 - 经用户同意的交互验证（2026-11-08，MacBook 上）：拖动搜索结果。搜「cal」后拖起文件夹里的计算器，录屏逐帧核对：结果淡出、搜索清空、回到搜索前的第 1 页再淡入，页面回来时不立刻让位；按 Esc 计算器滑回所在的文件夹，页面与存储的一致；拖到页末松手，计算器落在页末，只剩一个 App 的文件夹解散。测试前备份了布局库，测完关掉 App、重启 Dock 后放回备份，截图核对已还原。
+- 经用户同意的交互验证（2026-11-08，MacBook 上）：输入法。
+  - App 注册 LaunchAgent 不需要批准。打开界面时 Dock 一连接，launchd 就拉起辅助进程，搜索框由它托管。
+  - 搜索框：英文直接打字、删除照常。切到拼音后，组字与候选窗出现在搜索框下方；空格上屏「日历」后搜到日历。
+  - 改名框：进入时整段选中、居中；拼音「测试」上屏后按 Return 提交。
+  - 结束辅助进程后改由本地编辑；再次打开时又由它托管。
+  - 测试改过的文件夹名用备份的布局库还原，输入法切回了 ABC。
 - 与 macOS 15.5 对照（2026-11-06）：用户在 Ultra 上用 VirtualBuddy 开了一台 15.5（24F74）虚拟机，经 ssh 录下真正的文件夹开合，与 MacBook 上的复刻逐帧对照了图片飞出、标题、页面平移与面板的透明度。虚拟机录屏会掉帧（连着几帧完全相同），只能对照画面构成，量不了时间曲线。用法见项目 `CLAUDE.md`。
 - 交互验证（2026-11-07，MacBook 上，同样的截图与模拟点击）：翻到第 2 页后 Esc 关闭，再打开仍在第 2 页；开着文件夹时用「打开 Apps」关闭，再打开时文件夹仍开着，与关闭前的截图一致；打开时点 Dock 上的 Apps 图标，界面关闭且不再弹回（日志先是 `Hidden (clicked the Dock)`，再是 `Stays hidden`），关闭时再点则打开。测试后已翻回第 1 页。
 - 交互验证（2026-11-08，MacBook 上，同样的录屏与模拟点击、按键）：改前改后各录一段 60 帧录屏逐帧对照改名。改前每打一个字，旧名字在原处淡出、新名字左移半个字宽淡入，两行叠在一起，点标题右边约 100 点处也会进入改名；改后打字一帧之内换上，同一处点击关上文件夹，提交改名时标题直接换成新名字。测试用的文件夹已改回原名。
@@ -172,7 +198,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 ## 已知降级
 
 - 透明与着色图标样式下，Dock 在图标背后画的玻璃底没有复刻。
-- 搜索与改名打不出中文（没有输入法）。照 15 的做法要一个常驻的辅助进程托管真 `NSTextField`，经 `CALayerHost` 贴进 Dock，属于架构改动，另起提案。
+- 改名时正在组字就点到别处，组字中的那段会丢：改名按收到的最后一段文字提交，辅助进程收尾时才把组字上屏。
+- 文本输入辅助进程不可用时（在「登录项」里关掉了它，或它反复退出），搜索与改名没有输入法，退回本地编辑。
 - 改名的选区色固定为 15 深色外观下的蓝色，不随系统强调色变化。
 - 删除确认的气泡是照 15 的尺寸与文案画的，深浅色外观没有与 15 对照过（15.5 虚拟机里没有 App Store 的 App），按钮按下时没有高亮。网页 App 与快捷指令在 15 里用「移除」的文案，复刻一律写「删除」。
 - 玻璃背景：打开期间切换深浅色或辅助功能里的透明度、对比度，要到下次打开才跟上（界面每次打开都重建，没有注册 Dock 的外观观察者）。

@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreText
 import Foundation
 import ObjectiveC
 import OSToolbox
@@ -56,6 +57,19 @@ final class SpringboardInterface {
     }
     private(set) var isShowingSearchResults = false
     private var searchTask: Task<Void, Never>?
+    /// The search field as the text input helper hosts it, for input methods. While it is hosted, the keys
+    /// the field takes and the clicks in it go there, and its text comes back here; otherwise, or when the
+    /// helper is not there, the field is edited here.
+    private(set) var remoteSearchField: SpringboardRemoteTextField?
+    /// The open folder's name as the helper hosts it while it is renamed. The helper hosts one field at a
+    /// time; renaming never overlaps typing a search.
+    private var remoteRenameField: SpringboardRemoteTextField?
+    /// Where a rectangle of the container lies on screen: its top-left corner, from the top left of the
+    /// main display, which the helper places its field at for input methods' candidate windows. Set by the
+    /// controller, which knows the display; without it no field is hosted.
+    var screenTopLeft: ((CGRect) -> CGPoint)?
+    /// Set once the springboard starts to go: no field is hosted again.
+    private var isGoing = false
 
     private(set) var folderPanel: SpringboardFolderPanel?
     /// True while a folder opens or closes; input and layout changes wait.
@@ -268,6 +282,7 @@ final class SpringboardInterface {
     /// Ends whatever is in progress as the springboard starts to go: a drag is cancelled, a new name
     /// is kept, a pending search is dropped.
     func prepareForHiding() {
+        isGoing = true
         if let dragSession {
             if dragSession.isLeavingSearch {
                 // Going now: a search result still on its way out of the search fades out with everything
@@ -281,6 +296,8 @@ final class SpringboardInterface {
             }
         }
         commitRenaming()
+        // Composing text is committed, and the helper lets its field go.
+        endRemoteSearchField()
         searchTask?.cancel()
         cancelLongPress()
     }
@@ -597,12 +614,14 @@ final class SpringboardInterface {
         folderPanel.titleEditorLayer.isHidden = false
         folderPanel.titleEditorLayer.show(editor.editing)
         CATransaction.commit()
+        beginRemoteRenameField()
     }
 
     /// Ends renaming and stores the new name; an empty name keeps the old one, as in 15.
     func commitRenaming() {
         guard let folderPanel, let renaming else { return }
         self.renaming = nil
+        endRemoteRenameField()
         let newTitle = renaming.text.trimmingCharacters(in: .whitespaces)
         endRenaming(in: folderPanel)
         guard !newTitle.isEmpty, newTitle != folderPanel.folder.title else { return }
@@ -637,6 +656,11 @@ final class SpringboardInterface {
     /// A press in the rename field, at `editorPoint` in the editor's coordinates: one click puts the caret
     /// there, or with Shift moves the selection's end there; two select a word, three the whole name.
     private func pressInRenameField(at editorPoint: CGPoint, clickCount: Int64, extendsSelection: Bool) {
+        // The hosted field places its caret and selects with its own field editor.
+        if forwardToRemoteRenameField(isMouseEvent: true) {
+            pointerTracking = .titleEditor(doubleClickedWord: nil)
+            return
+        }
         guard let folderPanel, var editor = renaming else { return }
         let editorLayer = folderPanel.titleEditorLayer
         let doubleClickedWord = Self.press(
@@ -749,7 +773,133 @@ final class SpringboardInterface {
 
     func clearSearch() {
         searchEditor = SpringboardFieldEditor(editing: SpringboardTextEditing(selectingAllOf: ""))
+        remoteSearchField?.setString("")
         searchTextDidChange()
+    }
+
+    // MARK: - The hosted search field
+
+    /// The search field's text area in the container, where the hosted field shows.
+    var searchFieldTextAreaFrame: CGRect {
+        searchFieldLayer.convert(searchFieldLayer.hostedTextAreaFrame, to: containerLayer)
+    }
+
+    /// Shows the hosted field in the search field, or goes back to drawing the text here.
+    func hostSearchField(in hostLayer: CALayer?) {
+        searchFieldLayer.hostedTextLayer = hostLayer
+        searchFieldLayer.show(searchEditor.editing)
+    }
+
+    /// Has the text input helper host the search field, so that input methods work in it, as 15's Dock had
+    /// its ecti service host it. Until the helper answers, and if it never does, the field is edited here.
+    func beginRemoteSearchField() {
+        guard !isGoing, remoteSearchField == nil, let screenTopLeft else { return }
+        let textArea = searchFieldTextAreaFrame
+        let field = SpringboardRemoteTextField(configuration: SpringboardRemoteTextField.Configuration(
+            isSearchField: true,
+            string: searchText,
+            selectsAll: false,
+            size: textArea.size,
+            fontSize: CTFontGetSize(SpringboardTypography.searchFont),
+            screenTopLeft: screenTopLeft(textArea)
+        ))
+        field.hostLayerDidChange = { [weak self] hostLayer in
+            self?.hostSearchField(in: hostLayer)
+        }
+        field.stringDidChange = { [weak self] (string: String, _: Bool) in
+            self?.remoteSearchFieldDidChange(to: string)
+        }
+        field.currentString = { [weak self] in
+            self?.searchText ?? ""
+        }
+        remoteSearchField = field
+        field.begin()
+    }
+
+    private func endRemoteSearchField() {
+        remoteSearchField?.end()
+        remoteSearchField = nil
+        searchFieldLayer.isComposingInHostedField = false
+    }
+
+    /// The hosted field's text changed: search it, as typing here does.
+    func remoteSearchFieldDidChange(to string: String) {
+        let isComposing = remoteSearchField?.isComposing == true
+        searchFieldLayer.isComposingInHostedField = isComposing
+        if isComposing {
+            activateSearchField()
+        }
+        guard string != searchText else { return }
+        var editing = SpringboardTextEditing(selectingAllOf: string)
+        editing.placeCaret(at: string.count, extendingSelection: false)
+        searchEditor = SpringboardFieldEditor(editing: editing)
+        activateSearchField()
+        searchTextDidChange()
+    }
+
+    /// The hosted search field takes the event being handled; false when it is not hosted.
+    private func forwardToRemoteSearchField(isMouseEvent: Bool = false) -> Bool {
+        Self.forward(to: remoteSearchField, isMouseEvent: isMouseEvent)
+    }
+
+    /// The hosted rename field takes the event being handled; false when it is not hosted.
+    private func forwardToRemoteRenameField(isMouseEvent: Bool = false) -> Bool {
+        Self.forward(to: remoteRenameField, isMouseEvent: isMouseEvent)
+    }
+
+    private static func forward(to field: SpringboardRemoteTextField?, isMouseEvent: Bool) -> Bool {
+        guard let field, field.isHosted else { return false }
+        return isMouseEvent ? field.forwardCurrentMouseEvent() : field.forwardCurrentKeyEvent()
+    }
+
+    // MARK: - The hosted rename field
+
+    /// Has the helper host the folder's name while it is renamed, the search field giving the helper up
+    /// meanwhile; until it answers, and if it never does, the name is edited here.
+    private func beginRemoteRenameField() {
+        guard !isGoing, let screenTopLeft, let folderPanel, let renaming else { return }
+        endRemoteSearchField()
+        let editorLayer = folderPanel.titleEditorLayer
+        let editorFrame = editorLayer.convert(editorLayer.bounds, to: containerLayer)
+        let field = SpringboardRemoteTextField(configuration: SpringboardRemoteTextField.Configuration(
+            isSearchField: false,
+            string: renaming.text,
+            selectsAll: true,
+            size: editorFrame.size,
+            fontSize: CTFontGetSize(SpringboardTypography.folderTitleFont),
+            screenTopLeft: screenTopLeft(editorFrame)
+        ))
+        field.hostLayerDidChange = { [weak self] hostLayer in
+            self?.folderPanel?.titleEditorLayer.hostedTextLayer = hostLayer
+        }
+        field.stringDidChange = { [weak self] (string: String, isEditingComplete: Bool) in
+            self?.remoteRenameFieldDidChange(to: string, isEditingComplete: isEditingComplete)
+        }
+        field.currentString = { [weak self] in
+            self?.renaming?.text ?? ""
+        }
+        remoteRenameField = field
+        field.begin()
+    }
+
+    /// Lets the helper's rename field go, and has it host the search field again.
+    private func endRemoteRenameField() {
+        guard let remoteRenameField else { return }
+        remoteRenameField.end()
+        self.remoteRenameField = nil
+        beginRemoteSearchField()
+    }
+
+    /// The hosted name changed; Return, Enter or Escape there ends the renaming, keeping the text, as
+    /// 15's field did.
+    private func remoteRenameFieldDidChange(to string: String, isEditingComplete: Bool) {
+        guard renaming != nil else { return }
+        var editing = SpringboardTextEditing(selectingAllOf: string)
+        editing.placeCaret(at: string.count, extendingSelection: false)
+        renaming = SpringboardFieldEditor(editing: editing)
+        if isEditingComplete {
+            commitRenaming()
+        }
     }
 
     /// The editing command a key gives the search field, or nil when the key is not the field's. As 15's
@@ -787,6 +937,11 @@ final class SpringboardInterface {
     /// A press in the search field, at `fieldPoint` in the field's coordinates.
     private func pressInSearchField(at fieldPoint: CGPoint, clickCount: Int64, extendsSelection: Bool) {
         activateSearchField()
+        // The hosted field places its caret and selects with its own field editor.
+        if forwardToRemoteSearchField(isMouseEvent: true) {
+            pointerTracking = .searchField(doubleClickedWord: nil)
+            return
+        }
         let doubleClickedWord = Self.press(
             in: &searchEditor,
             clickCount: clickCount,
@@ -829,7 +984,15 @@ final class SpringboardInterface {
         }
         guard !isAnimatingFolder else { return .none }
         if renaming != nil {
-            handleRenamingKeyDown(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags)
+            // 15 forwarded every key to the rename field (`-[Springboard keyDown:]`, 15.5 `0x100092250`).
+            if !forwardToRemoteRenameField() {
+                handleRenamingKeyDown(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags)
+            }
+            return .none
+        }
+        // While an input method composes text in the hosted search field, every key is the input
+        // method's, Return and Escape included, as 15's field took them all (`-[ECSBLayer keyDown:]`).
+        if folderPanel == nil, remoteSearchField?.isComposing == true, forwardToRemoteSearchField() {
             return .none
         }
         // 15's order for Escape: cancel a drag, end jiggle mode, close a folder, clear the search, then
@@ -856,7 +1019,11 @@ final class SpringboardInterface {
         guard dragSession == nil else { return .none }
 
         if folderPanel == nil, let searchCommand = searchFieldCommand(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags) {
-            applySearchFieldCommand(searchCommand)
+            if forwardToRemoteSearchField() {
+                activateSearchField()
+            } else {
+                applySearchFieldCommand(searchCommand)
+            }
             return .none
         }
         let pages = frontPages
@@ -881,7 +1048,18 @@ final class SpringboardInterface {
 
     /// Holding Option jiggles the icons in front, and letting it go stops them
     /// (`-[ECSBSpringboard flagsChanged:]`, 15.5 `0x1000F37AC`).
+    /// A key let go: its key-down's way. A key that went to the hosted search field goes up there too.
+    func handleKeyUp() {
+        _ = forwardToRemoteRenameField() || forwardToRemoteSearchField()
+    }
+
     func handleModifiersChanged(_ modifierFlags: CGEventFlags) {
+        // Input methods switch modes on modifiers alone, Shift for one.
+        if renaming != nil {
+            _ = forwardToRemoteRenameField()
+        } else if folderPanel == nil, searchFieldLayer.hasFocus || remoteSearchField?.isComposing == true {
+            _ = forwardToRemoteSearchField()
+        }
         guard renaming == nil, deletionPanel == nil else { return }
         let pages = frontPages
         pages.isJiggling = optionKeyJiggle.isJiggling(afterOptionIsDown: modifierFlags.contains(.maskAlternate), isJiggling: pages.isJiggling)
@@ -1089,6 +1267,9 @@ final class SpringboardInterface {
             searchFieldLayer.isClearButtonPressed = searchFieldLayer.isOnClearButton(fieldPoint)
             return .none
         case let .titleEditor(doubleClickedWord):
+            if forwardToRemoteRenameField(isMouseEvent: true) {
+                return .none
+            }
             if let folderPanel {
                 dragInRenameField(to: folderPanel.pointInTitleEditor(containerPoint), doubleClickedWord: doubleClickedWord)
             }
@@ -1098,6 +1279,9 @@ final class SpringboardInterface {
             itemLayer.isCloseBoxPressed = itemLayer.isOnCloseBox(itemLayer.convert(containerPoint, from: containerLayer))
             return .none
         case let .searchField(doubleClickedWord):
+            if forwardToRemoteSearchField(isMouseEvent: true) {
+                return .none
+            }
             Self.drag(
                 in: &searchEditor,
                 doubleClickedWord: doubleClickedWord,
@@ -1196,7 +1380,13 @@ final class SpringboardInterface {
                 presentDeletionPanel(for: itemLayer, context: context)
             }
             return .none
-        case .none, .searchField, .titleEditor:
+        case .searchField:
+            _ = forwardToRemoteSearchField(isMouseEvent: true)
+            return .none
+        case .titleEditor:
+            _ = forwardToRemoteRenameField(isMouseEvent: true)
+            return .none
+        case .none:
             return .none
         }
     }

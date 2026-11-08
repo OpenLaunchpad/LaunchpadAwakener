@@ -46,6 +46,9 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         textField.cell?.wraps = false
         textField.delegate = self
         containerView.addSubview(textField)
+        // Launchpad's fields are white on a dark backdrop; the dark look gives the caret and the selection
+        // 15's colours.
+        containerView.appearance = NSAppearance(named: .darkAqua)
         fieldEditor.isFieldEditor = true
         fieldEditor.markedTextDidChange = { [weak self] in
             self?.reportState(isEditingComplete: false)
@@ -126,6 +129,9 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     // MARK: - Requests
 
     private func begin(with message: xpc_object_t) {
+        // A field editor keeps what it was set up with — the search field's alignment, say — so the new
+        // field starts its editing afresh.
+        containerView.window?.makeFirstResponder(nil)
         isSearchField = xpc_dictionary_get_bool(message, MessageKey.isSearchField)
         let string = xpc_dictionary_get_string(message, MessageKey.string).map { String(cString: $0) } ?? ""
         let width = xpc_dictionary_get_double(message, MessageKey.width)
@@ -152,6 +158,7 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         window.setFrame(NSRect(x: screenLeft, y: zeroScreenHeight - screenTop - height, width: width, height: height), display: false)
         window.makeKey()
         window.makeFirstResponder(textField)
+        fieldEditor.alignment = textField.alignment
         if xpc_dictionary_get_bool(message, MessageKey.selectsAll) {
             textField.selectText(nil)
         } else {

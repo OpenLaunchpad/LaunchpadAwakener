@@ -134,6 +134,45 @@ final class SpringboardSearchFieldLayer: CALayer {
         editing.text
     }
 
+    /// The text area's size for a field `fieldSize` big: what the text input helper's field fills.
+    static func hostedTextAreaSize(forFieldSize fieldSize: CGSize) -> CGSize {
+        CGSize(width: fieldSize.width - textOriginX - 25 + 2, height: fieldSize.height)
+    }
+
+    /// The text area in this layer's coordinates, where the hosted field goes.
+    var hostedTextAreaFrame: CGRect {
+        CGRect(origin: CGPoint(x: Self.textOriginX - 1, y: 0), size: Self.hostedTextAreaSize(forFieldSize: bounds.size))
+    }
+
+    /// The field as the text input helper hosts it, for input methods. While it is set it shows the text,
+    /// the caret and the selection; this layer keeps the capsule, the loupe, the placeholder and the clear
+    /// button.
+    var hostedTextLayer: CALayer? {
+        didSet {
+            guard hostedTextLayer !== oldValue else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            oldValue?.removeFromSuperlayer()
+            if let hostedTextLayer {
+                hostedTextLayer.frame = hostedTextAreaFrame
+                insertSublayer(hostedTextLayer, below: clearButtonLayer)
+            }
+            clippingLayer.isHidden = hostedTextLayer != nil
+            CATransaction.commit()
+        }
+    }
+
+    /// An input method is composing text in the hosted field: the placeholder keeps out of its way.
+    var isComposingInHostedField = false {
+        didSet {
+            guard isComposingInHostedField != oldValue else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            placeholderLayer.isHidden = !editing.text.isEmpty || isComposingInHostedField
+            CATransaction.commit()
+        }
+    }
+
     /// The first layout places everything; only later ones animate between the two arrangements.
     private var hasLaidOut = false
 
@@ -199,7 +238,7 @@ final class SpringboardSearchFieldLayer: CALayer {
             textLine = SpringboardTextLine(text: newEditing.text, font: SpringboardTypography.searchFont)
         }
         editing = newEditing
-        placeholderLayer.isHidden = !newEditing.text.isEmpty
+        placeholderLayer.isHidden = !newEditing.text.isEmpty || isComposingInHostedField
         clearButtonLayer.isHidden = newEditing.text.isEmpty
         updateCaretAndSelectionVisibility()
         restartBlinking()
@@ -250,6 +289,7 @@ final class SpringboardSearchFieldLayer: CALayer {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         backgroundLayer.frame = bounds
+        hostedTextLayer?.frame = hostedTextAreaFrame
         let textHeight = SpringboardTypography.lineHeight(of: SpringboardTypography.searchFont)
         let loupeY = (height / 2 - 5).rounded() - 1
         clearButtonLayer.frame = CGRect(

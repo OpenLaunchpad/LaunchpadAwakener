@@ -7,7 +7,7 @@
 - **所属愿景**: 无
 - **关联提案**: [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md)（第 6 批第 6 步剩下的输入法）
 - **实现分支 / PR**: `feature/input-method-helper`（worktree `.worktrees/LaunchpadAwakener-InputMethod`）
-- **配套文档**: 待定
+- **配套文档**: [实现说明](../Internal/LaunchpadReplica.md)「输入法靠一个托管文本框的辅助进程」
 
 ## 摘要
 
@@ -133,11 +133,11 @@ App 与辅助进程都不需要新的权限或 entitlement：发事件的是 Doc
    - 转发的按键能打字，点按能放光标；
    - 拼音组字与候选窗的位置正确。
    结论记进本提案，原型代码推到 `experiment/input-method-probe`。证明不可行就停在这一步，提案改记结论。
-2. **工程**：新增辅助进程 target、包里的 `LaunchpadAwakenerTextInputCore` 模块、生成 LaunchAgent plist 的脚本，App 负责注册这个 agent。
-3. **辅助进程**：XPC 监听、会话、文本框与回报。
-4. **payload**：连接、`CALayerHost`、事件转发，先接进搜索框。
-5. **改名框**接进来，Return、Enter 与 Esc 都照 15 按当前文字提交。
-6. **退回与清理**：连接失败或中途断开时退回本地编辑；收起时提交组字，并关掉 remote view 激活。
+2. ✅ **工程**：新增辅助进程 target、包里的 `LaunchpadAwakenerTextInputCore` 模块、生成 LaunchAgent plist 的脚本，App 负责注册这个 agent。
+3. ✅ **辅助进程**：XPC 监听、会话、文本框与回报。
+4. ✅ **payload**：连接、`CALayerHost`、事件转发，先接进搜索框。
+5. ✅ **改名框**接进来，Return、Enter 与 Esc 都照 15 按当前文字提交。
+6. ✅ **退回与清理**：连接失败或中途断开时退回本地编辑；收起时提交组字，并关掉 remote view 激活。
 
 每一步都在 MacBook 上验证（用户同意交互验证）。
 
@@ -155,3 +155,8 @@ App 与辅助进程都不需要新的权限或 entitlement：发事件的是 Doc
 | 2026-11-08 | 开始实现，在 `feature/input-method-helper` 上。新增进程属于完整档，按完整模板写 | — |
 | 2026-11-08 | 辅助进程做成 LaunchAgent，不做 XPC 服务，也不交给 App 本身托管 | 理由见「替代方案考量」 |
 | 2026-11-08 | 第一步原型证明可行，按方案继续；原型代码推到 `experiment/input-method-probe` | 显示、打字、拼音组字与候选窗都在 MacBook 上看到了。比 15 多两处调用：辅助进程自己声明 mini view 已显示，并把窗口层级设成 27 |
+| 2026-11-08 | 第 2–6 步做完，都在 MacBook 上交互验证过（见实现说明「验证」） | App 注册 LaunchAgent 不用用户批准；搜索框、改名框都能用拼音，结束辅助进程后退回本地编辑，再打开时 launchd 重新拉起它 |
+| 2026-11-08 | 辅助进程只托管一个框，搜索框与改名框轮流用；每次换框先结束上一段编辑 | 一个进程只有一扇 mini view 窗口；两个框不会同时编辑。不先结束编辑，字段编辑器会沿用上一个框的对齐方式，改名框就靠左了 |
+| 2026-11-08 | 组字状态由改写了 `setMarkedText`、`unmarkText` 的字段编辑器报告，回报的文字不含组字部分 | 输入法组字时文本框不发变更通知；搜索照 15 只按已上屏的文字找，组字时本地的占位文字让开 |
+| 2026-11-08 | 辅助进程只接受 Dock 的连接（按进程路径核对） | 框里打的字会经它回报，别的进程不该连得上 |
+| 2026-11-08 | 实现完成，待用户看过后收尾。留作后续项：改名时正在组字就点到别处，组字中的那段会丢 | 改名按收到的最后一段文字提交，辅助进程收尾时才把组字上屏；修它要让提交等辅助进程的最后一次回报。文档：实现说明加了做法、验证与已知降级，项目 CLAUDE.md 加了第五个二进制、服务名与重启方法，术语表登记了「文本输入辅助进程」；没有调用方契约，不需要使用指南 |
