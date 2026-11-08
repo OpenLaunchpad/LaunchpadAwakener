@@ -81,6 +81,8 @@ enum SpringboardKeyCode {
     static let delete: Int64 = 51
     static let escape: Int64 = 53
     static let keypadEnter: Int64 = 76
+    /// Fn-Delete on a laptop keyboard.
+    static let forwardDelete: Int64 = 117
     static let leftArrow: Int64 = 123
     static let rightArrow: Int64 = 124
     static let downArrow: Int64 = 125

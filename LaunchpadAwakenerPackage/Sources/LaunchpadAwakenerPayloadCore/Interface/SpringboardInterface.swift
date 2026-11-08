@@ -52,7 +52,8 @@ final class SpringboardInterface {
     private(set) var isAnimatingFolder = false
     /// True from the moment a folder starts to close until its panel is gone.
     private var isClosingFolder = false
-    private var renamingTitle: String?
+    /// The open folder's name while it is being renamed, with the selection.
+    private var renaming: SpringboardTextEditing?
     /// The latest stored layout, waiting until nothing it would disturb is moving.
     private(set) var pendingLayout: LaunchpadLayout?
     /// The main page as a drag that ended in a folder left it — its icons with a gap where the dragged one
@@ -68,6 +69,9 @@ final class SpringboardInterface {
         case clearButton
         case searchField
         case folderTitle
+        /// A press in the rename field, which drags out a selection: by character, or by word from
+        /// `doubleClickedWord` after a double-click.
+        case titleEditor(doubleClickedWord: Range<Int>?)
     }
 
     private var pointerTracking: PointerTracking = .none
@@ -538,36 +542,31 @@ final class SpringboardInterface {
 
     // MARK: - Renaming
 
+    /// Starts renaming with the whole name selected, as 15's field did.
     private func startRenaming() {
-        guard let folderPanel, renamingTitle == nil else { return }
-        renamingTitle = folderPanel.folder.title
+        guard let folderPanel, renaming == nil else { return }
+        let editing = SpringboardTextEditing(selectingAllOf: folderPanel.folder.title)
+        renaming = editing
         // 15 took the focus from the search field while a title was edited.
         setSearchFieldFocus(false)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         folderPanel.titleLayer.isHidden = true
         folderPanel.titleEditorLayer.isHidden = false
-        folderPanel.titleEditorLayer.setText(folderPanel.folder.title)
-        folderPanel.titleEditorLayer.startBlinking()
+        folderPanel.titleEditorLayer.show(editing)
         CATransaction.commit()
     }
 
     /// Ends renaming and stores the new name; an empty name keeps the old one, as in 15.
     func commitRenaming() {
-        guard let folderPanel, let renamingTitle else { return }
-        self.renamingTitle = nil
-        let newTitle = renamingTitle.trimmingCharacters(in: .whitespaces)
+        guard let folderPanel, let renaming else { return }
+        self.renaming = nil
+        let newTitle = renaming.text.trimmingCharacters(in: .whitespaces)
         endRenaming(in: folderPanel)
         guard !newTitle.isEmpty, newTitle != folderPanel.folder.title else { return }
         folderPanel.setTitle(newTitle)
         folderItemLayer(of: folderPanel.folder)?.labelLayer.setString(newTitle, contentsScale: scale)
         applyEdit(.renameFolder(folderPanel.folder.identifier, title: newTitle))
-    }
-
-    private func cancelRenaming() {
-        guard let folderPanel, renamingTitle != nil else { return }
-        renamingTitle = nil
-        endRenaming(in: folderPanel)
     }
 
     private func endRenaming(in folderPanel: SpringboardFolderPanel) {
@@ -579,30 +578,63 @@ final class SpringboardInterface {
     }
 
     private func handleRenamingKeyDown(keyCode: Int64, characters: String, modifierFlags: CGEventFlags) {
-        guard let folderPanel, var title = renamingTitle else { return }
-        switch keyCode {
-        case SpringboardKeyCode.returnKey, SpringboardKeyCode.keypadEnter:
+        guard var editing = renaming, let command = SpringboardTextEditingCommand(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags) else { return }
+        switch command {
+        case .endEditing:
             commitRenaming()
             return
-        case SpringboardKeyCode.escape:
-            cancelRenaming()
-            return
-        case SpringboardKeyCode.delete:
-            guard !title.isEmpty else { return }
-            title.removeLast()
-        default:
-            guard Self.isTypedText(characters, modifierFlags: modifierFlags) else { return }
-            title += characters
+        case let .insert(typedText):
+            editing.insert(typedText)
+        case let .move(movement, extendingSelection):
+            editing.move(movement, extendingSelection: extendingSelection)
+        case let .delete(deletion):
+            editing.delete(deletion)
+        case .selectAll:
+            editing.selectAll()
         }
-        renamingTitle = title
-        folderPanel.titleEditorLayer.setText(title)
+        showRenaming(editing)
     }
 
-    private static func isTypedText(_ characters: String, modifierFlags: CGEventFlags) -> Bool {
-        !modifierFlags.contains(.maskCommand)
-            && !modifierFlags.contains(.maskControl)
-            && !characters.isEmpty
-            && !characters.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) || (0xF700...0xF8FF).contains($0.value) }
+    private func showRenaming(_ editing: SpringboardTextEditing) {
+        renaming = editing
+        folderPanel?.titleEditorLayer.show(editing)
+    }
+
+    /// A press in the rename field, at `editorPoint` in the editor's coordinates: one click puts the caret
+    /// there, or with Shift moves the selection's end there; two select a word, three the whole name.
+    private func pressInRenameField(at editorPoint: CGPoint, clickCount: Int64, extendsSelection: Bool) {
+        guard let folderPanel, var editing = renaming else { return }
+        let editorLayer = folderPanel.titleEditorLayer
+        switch clickCount {
+        case ...1:
+            editing.placeCaret(at: editorLayer.caretOffset(at: editorPoint), extendingSelection: extendsSelection)
+            pointerTracking = .titleEditor(doubleClickedWord: nil)
+        case 2:
+            let wordRange = editing.wordRange(atCharacterOffset: editorLayer.characterOffset(at: editorPoint))
+            editing.select(wordRange)
+            pointerTracking = .titleEditor(doubleClickedWord: wordRange)
+        default:
+            editing.selectAll()
+            pointerTracking = .none
+        }
+        showRenaming(editing)
+    }
+
+    /// A drag from a press in the rename field moves the selection's end with it, by character, or by
+    /// word after a double-click, always keeping the word double-clicked.
+    private func dragInRenameField(to editorPoint: CGPoint, doubleClickedWord: Range<Int>?) {
+        guard let folderPanel, var editing = renaming else { return }
+        let editorLayer = folderPanel.titleEditorLayer
+        if let doubleClickedWord {
+            let draggedWord = editing.wordRange(atCharacterOffset: editorLayer.characterOffset(at: editorPoint))
+            editing.select(
+                min(doubleClickedWord.lowerBound, draggedWord.lowerBound)..<max(doubleClickedWord.upperBound, draggedWord.upperBound),
+                caretAtStart: draggedWord.lowerBound < doubleClickedWord.lowerBound
+            )
+        } else {
+            editing.placeCaret(at: editorLayer.caretOffset(at: editorPoint), extendingSelection: true)
+        }
+        showRenaming(editing)
     }
 
     // MARK: - Search
@@ -687,7 +719,7 @@ final class SpringboardInterface {
 
     func handleKeyDown(keyCode: Int64, characters: String, modifierFlags: CGEventFlags) -> Action {
         guard !isAnimatingFolder else { return .none }
-        if renamingTitle != nil {
+        if renaming != nil {
             handleRenamingKeyDown(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags)
             return .none
         }
@@ -740,7 +772,7 @@ final class SpringboardInterface {
             // 15 moved the focus into the field and out again.
             setSearchFieldFocus(!searchFieldLayer.hasFocus)
         default:
-            guard Self.isTypedText(characters, modifierFlags: modifierFlags) else { return .none }
+            guard SpringboardTextEditingCommand.isTypedText(characters, modifierFlags: modifierFlags) else { return .none }
             activateSearchField()
             searchText += characters
             searchTextDidChange()
@@ -751,7 +783,7 @@ final class SpringboardInterface {
     /// Holding Option jiggles the icons in front, and letting it go stops them
     /// (`-[ECSBSpringboard flagsChanged:]`, 15.5 `0x1000F37AC`).
     func handleModifiersChanged(_ modifierFlags: CGEventFlags) {
-        guard renamingTitle == nil else { return }
+        guard renaming == nil else { return }
         let pages = frontPages
         pages.isJiggling = optionKeyJiggle.isJiggling(afterOptionIsDown: modifierFlags.contains(.maskAlternate), isJiggling: pages.isJiggling)
     }
@@ -794,7 +826,8 @@ final class SpringboardInterface {
 
     // MARK: - Pointer
 
-    func handleMouseDown(at containerPoint: CGPoint, timestamp: UInt64, modifierFlags: CGEventFlags = []) -> Action {
+    /// - Parameter clickCount: 2 for the second press of a double-click, and so on.
+    func handleMouseDown(at containerPoint: CGPoint, timestamp: UInt64, modifierFlags: CGEventFlags = [], clickCount: Int64 = 1) -> Action {
         // A press while a drop is still settling waits, as one during a folder's animation does.
         guard !isAnimatingFolder, dragSession == nil else { return .none }
         cancelLongPress()
@@ -802,10 +835,14 @@ final class SpringboardInterface {
         folderPanel?.pages.cancelPendingWheelSettle()
 
         if let folderPanel {
-            if renamingTitle != nil {
+            if renaming != nil {
                 // 15's text field took every press inside its box; any other press ends the renaming.
                 guard !folderPanel.isInTitleEditor(containerPoint) else {
-                    pointerTracking = .none
+                    pressInRenameField(
+                        at: folderPanel.pointInTitleEditor(containerPoint),
+                        clickCount: clickCount,
+                        extendsSelection: modifierFlags.contains(.maskShift)
+                    )
                     return .none
                 }
                 commitRenaming()
@@ -908,6 +945,11 @@ final class SpringboardInterface {
             let fieldPoint = containerLayer.convert(containerPoint, to: searchFieldLayer)
             searchFieldLayer.isClearButtonPressed = searchFieldLayer.isOnClearButton(fieldPoint)
             return .none
+        case let .titleEditor(doubleClickedWord):
+            if let folderPanel {
+                dragInRenameField(to: folderPanel.pointInTitleEditor(containerPoint), doubleClickedWord: doubleClickedWord)
+            }
+            return .none
         case .none, .pagerIndicator, .searchField, .folderTitle:
             return .none
         }
@@ -989,7 +1031,7 @@ final class SpringboardInterface {
                 startRenaming()
             }
             return .none
-        case .none, .searchField:
+        case .none, .searchField, .titleEditor:
             return .none
         }
     }

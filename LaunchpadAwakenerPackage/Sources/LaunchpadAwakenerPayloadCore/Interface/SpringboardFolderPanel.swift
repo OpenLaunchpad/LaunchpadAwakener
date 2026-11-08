@@ -149,6 +149,12 @@ final class SpringboardFolderPanel {
         titleEditingFrame.contains(pointInFolder(point))
     }
 
+    /// `point` in the editor's own coordinates.
+    func pointInTitleEditor(_ point: CGPoint) -> CGPoint {
+        let folderPoint = pointInFolder(point)
+        return CGPoint(x: folderPoint.x - titleEditorLayer.frame.minX, y: folderPoint.y - titleEditorLayer.frame.minY)
+    }
+
     // MARK: - Opening and closing
 
     /// How many of the first page's icons a folder icon shows as thumbnails.
@@ -423,28 +429,50 @@ final class SpringboardFolderPanel {
     }
 }
 
-/// Renaming a folder: the title's text, editable, with a blinking caret after it.
+/// Renaming a folder: the title's text, edited as in a text field, with a caret or a selection.
 ///
 /// 15 hosted a real text field from another process here, as in the search field; this edits the
-/// Dock's key events directly, so there is no input method either. What is typed shows at once, as in
-/// that text field.
+/// Dock's key events directly with ``SpringboardTextEditing``, so there is no input method, copying or
+/// undo. The text is centred while it fits and scrolls to keep the caret in view once it does not, as a
+/// text field's does, and what is typed shows at once. The selection, the caret and their height follow
+/// 15.5's field as a screenshot of it measures: an opaque blue selection, a 2-point white caret, both as
+/// tall as the font.
 final class SpringboardTitleEditorLayer: CALayer {
+    /// The selection's colour in 15.5's rename field: the selected-text colour of its dark text fields.
+    static let selectionColor = CGColor(srgbRed: 63 / 255, green: 99 / 255, blue: 139 / 255, alpha: 1)
+    static let caretWidth: CGFloat = 2
+
+    /// The area the text shows in, which clips it once it scrolls.
+    private let clippingLayer = CALayer()
+    private let selectionLayer = CALayer()
     let textLayer = DockLayerFactory.makeTextLayer(withShadow: true)
     private let caretLayer = CALayer()
-    private(set) var text = ""
+    private(set) var editing = SpringboardTextEditing(selectingAllOf: "")
+    private var textLine = SpringboardTextLine(text: "", font: SpringboardTypography.folderTitleFont)
+    /// How far the text has scrolled to the left, once it is wider than its area.
+    private var scrollOffset: CGFloat = 0
+    /// Where the line starts in the clipping layer, as last laid out.
+    private var lineStartX: CGFloat = 0
 
     override init() {
         super.init()
+        clippingLayer.masksToBounds = true
+        selectionLayer.backgroundColor = Self.selectionColor
+        selectionLayer.isHidden = true
         textLayer.font = SpringboardTypography.folderTitleFont
         textLayer.fontSize = CTFontGetSize(SpringboardTypography.folderTitleFont)
         textLayer.foregroundColor = CGColor(gray: 1, alpha: 1)
-        textLayer.alignmentMode = .center
-        textLayer.truncationMode = .start
+        // Placed by hand, so that the caret and the selection fall exactly between its characters.
+        textLayer.alignmentMode = .left
+        textLayer.truncationMode = .none
+        textLayer.isWrapped = false
         DockLayerFactory.setTextShadow(of: textLayer, color: CGColor(gray: 0, alpha: 0.2), offset: CGSize(width: 0, height: -1), blur: 2)
         textLayer.disableTextCrossfade()
         caretLayer.backgroundColor = CGColor(gray: 1, alpha: 1)
-        addSublayer(textLayer)
-        addSublayer(caretLayer)
+        clippingLayer.addSublayer(selectionLayer)
+        clippingLayer.addSublayer(textLayer)
+        clippingLayer.addSublayer(caretLayer)
+        addSublayer(clippingLayer)
     }
 
     override init(layer: Any) {
@@ -460,13 +488,26 @@ final class SpringboardTitleEditorLayer: CALayer {
         textLayer.contentsScale = scale
     }
 
-    func setText(_ newText: String) {
-        text = newText
-        textLayer.string = newText
+    /// Shows `newEditing`: its text, and its selection or else its caret, which shows in full at once and
+    /// then blinks, as after each key in a text field.
+    func show(_ newEditing: SpringboardTextEditing) {
+        if newEditing.text != editing.text || textLayer.string == nil {
+            textLayer.string = newEditing.text
+            textLine = SpringboardTextLine(text: newEditing.text, font: SpringboardTypography.folderTitleFont)
+        }
+        editing = newEditing
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        selectionLayer.isHidden = !newEditing.hasSelection
+        caretLayer.isHidden = newEditing.hasSelection
+        CATransaction.commit()
+        restartBlinking()
         setNeedsLayout()
     }
 
-    func startBlinking() {
+    private func restartBlinking() {
+        caretLayer.removeAnimation(forKey: "blink")
+        guard !editing.hasSelection else { return }
         let blinkAnimation = CABasicAnimation(keyPath: "opacity")
         blinkAnimation.fromValue = 1
         blinkAnimation.toValue = 0
@@ -476,15 +517,52 @@ final class SpringboardTitleEditorLayer: CALayer {
         caretLayer.add(blinkAnimation, forKey: "blink")
     }
 
+    /// Where a line `lineWidth` wide starts in an area `areaWidth` wide, and how far it has scrolled. While
+    /// it fits it is centred, trailing spaces hanging past the middle, as in a centred text field; once it
+    /// does not, it scrolls from `scrollOffset` by as little as keeps the caret, `caretX` from the start of
+    /// the line, in view.
+    static func linePlacement(lineWidth: CGFloat, trailingWhitespaceWidth: CGFloat, caretX: CGFloat, areaWidth: CGFloat, scrollOffset: CGFloat) -> (lineStartX: CGFloat, scrollOffset: CGFloat) {
+        guard lineWidth + caretWidth > areaWidth else {
+            return (((areaWidth - (lineWidth - trailingWhitespaceWidth)) / 2).rounded(), 0)
+        }
+        let caretInViewOffset = min(max(scrollOffset, caretX + caretWidth - areaWidth), caretX)
+        let newScrollOffset = min(max(caretInViewOffset, 0), lineWidth + caretWidth - areaWidth)
+        return (-newScrollOffset.rounded(), newScrollOffset)
+    }
+
+    /// Where a click at `point`, a point in this layer, puts the caret.
+    func caretOffset(at point: CGPoint) -> Int {
+        layoutIfNeeded()
+        return textLine.caretOffset(nearestTo: point.x - clippingLayer.frame.minX - lineStartX)
+    }
+
+    /// The character under `point`, a point in this layer, whose word a double-click selects.
+    func characterOffset(at point: CGPoint) -> Int {
+        layoutIfNeeded()
+        return textLine.characterOffset(at: point.x - clippingLayer.frame.minX - lineStartX)
+    }
+
     override func layoutSublayers() {
         super.layoutSublayers()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         let inset = SpringboardLabelLayer.textInset
-        textLayer.frame = bounds.insetBy(dx: inset + 4, dy: inset)
-        let textWidth = min(SpringboardTypography.width(of: text, in: SpringboardTypography.folderTitleFont), textLayer.frame.width)
-        let lineHeight = SpringboardTypography.lineHeight(of: SpringboardTypography.folderTitleFont)
-        caretLayer.frame = CGRect(x: bounds.midX + textWidth / 2 + 1, y: bounds.midY - lineHeight / 2 + 2, width: 2, height: lineHeight - 4)
+        clippingLayer.frame = bounds.insetBy(dx: inset + 4, dy: inset)
+        let caretX = textLine.caretXOffsets[editing.caretOffset]
+        (lineStartX, scrollOffset) = Self.linePlacement(
+            lineWidth: textLine.width,
+            trailingWhitespaceWidth: textLine.trailingWhitespaceWidth,
+            caretX: caretX,
+            areaWidth: clippingLayer.bounds.width,
+            scrollOffset: scrollOffset
+        )
+        // Core Text sets the line from the top of the text layer.
+        let lineBottom = clippingLayer.bounds.maxY - textLine.height
+        textLayer.frame = CGRect(x: lineStartX, y: 0, width: ceil(textLine.width) + Self.caretWidth, height: clippingLayer.bounds.height)
+        caretLayer.frame = CGRect(x: lineStartX + caretX - Self.caretWidth / 2, y: lineBottom, width: Self.caretWidth, height: textLine.height)
+        let selectionStartX = textLine.caretXOffsets[editing.selectedRange.lowerBound]
+        let selectionEndX = textLine.caretXOffsets[editing.selectedRange.upperBound]
+        selectionLayer.frame = CGRect(x: lineStartX + selectionStartX, y: lineBottom, width: selectionEndX - selectionStartX, height: textLine.height)
         CATransaction.commit()
     }
 }

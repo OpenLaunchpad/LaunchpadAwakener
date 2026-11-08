@@ -128,7 +128,7 @@ struct SpringboardInterfaceTests {
             case .folderNameEditor:
                 let editorLayer = SpringboardTitleEditorLayer()
                 editorLayer.configure(scale: 2)
-                return (editorLayer, editorLayer.textLayer, editorLayer.setText)
+                return (editorLayer, editorLayer.textLayer, { editorLayer.show(SpringboardTextEditing(selectingAllOf: $0)) })
             case .folderTitle:
                 let labelLayer = SpringboardLabelLayer(font: SpringboardTypography.folderTitleFont)
                 return (labelLayer, labelLayer.textLayer, { labelLayer.setString($0, contentsScale: 2) })
