@@ -32,6 +32,8 @@
 
 **布局库各用各的，首次从注入版的库导入。** 库在 `~/Library/Application Support/LaunchpadAwakener/Standalone/Launchpad.db`；第一次启动时注入版的库存在就从它导入，否则从 15 的旧库。注入版的库沿用 15 的表，所以用的是同一个导入器，页、文件夹、顺序与新装标记都带过来（单元测试 `injectedLibraryImports`）。15 的 `springboard-*` 偏好照样从 `com.apple.dock` 读。独立版自己在 `/Applications` 里，按启动器的规矩从两边的布局里拿掉（见注入版实现说明「App 只在确实卸载时才从布局里删除」）。
 
+**输入法经窗口的内容视图接，字照共用的画法画。** 注入版的输入法靠辅助进程里的真 `NSTextField`；独立版是普通 App，窗口本身就拿得到键盘，于是内容视图遵循 `NSTextInputClient`、做第一响应者，AppKit 自动给它一个 `NSTextInputContext`。没有照搬辅助进程的做法（把真文本框放进同进程的另一扇窗口、经 `CALayerHost` 贴进界面）：一个进程同时只有一扇 key 窗口，那扇窗口还得用 AppKit 私有的 `_contextForLayerHosting` 才贴得进来。宿主多了一项 `inputMethod`，界面层在原来转交托管文本框的几个地方，把按键先交给它：改名时与组字时是每个键，搜索框里只是会打字的键（方向键、删除、回车这些照旧走界面层自己的 15 规则）；Shift 这类修饰键也给它，输入法靠它切换中英文。输入法回调界面层（`SpringboardInputMethodClient`）：打出的字照打字插入，组字中的文字记在编辑模型里（`SpringboardTextEditing.markedText`），显示时代替选区、加下划线，不算进文字，所以搜索不会搜半个拼音，撤销也跳过它。按下鼠标、改名结束、界面收起时，组字中的文字照文本框的规矩当作打出的字收下。候选窗的位置取光标图层在容器里的位置：容器从主显示器左下角起排，正好就是 Cocoa 的屏幕坐标。
+
 **看门狗经窗口服务器撤窗口。** 一扇在一切之上、不再响应的全屏窗口会让整台机器没法用。后台线程每秒向主线程打一次招呼，超过 3 秒没回应就调 SkyLight 的 `SLSOrderWindow` 把窗口移出屏幕——这一步不经 AppKit，主线程卡住时也做得到——每次显示最多做一次，并记一条 fault 日志。开发构建 20 秒无输入自动收起、Esc、退回开关这些保险与注入版共用。
 
 **`--self-check` 让测试机上不看屏幕也能核对。** 开发构建带这个参数启动时不显示界面、不注册登录项，只把宿主找到的 Dock 几何、壁纸来源、图标样式、布局库与窗口写进日志，加上共用的离屏自检，15 秒后退出。
@@ -52,6 +54,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerStandaloneCore/
 ├── StandaloneEnvironment.swift            # Dock 的偏好与几何、布局库的位置与首次导入
 ├── StandaloneWallpaper.swift              # 壁纸：已允许录屏才截，否则读文件；动态壁纸取当前那一张
 ├── StandaloneIconStyle.swift              # 由 SkyLight 的图标外观配置建 ISImageDescriptor
+├── StandaloneInputMethod.swift            # 系统输入法：遵循 NSTextInputClient 的内容视图
 ├── StandaloneWatchdog.swift               # 主线程卡住时经窗口服务器撤窗口
 └── StandaloneSettingsView.swift           # 设置窗口：登录时打开
 
@@ -69,6 +72,7 @@ LaunchpadAwakenerStandalone/LaunchpadApp.swift  # App 外壳：delegate 与设�
 - 单元测试 `Tests/LaunchpadAwakenerSpringboardCoreTests/SpringboardReplicaLayerTests.swift`：页面网格在 1739×1080 屏上的排法与 27.2 Dock 的自检日志一致（第一格 `{{0, 686}, {193, 171}}`、第 27 格 `{{965, 173}, {193, 171}}`），第一项在最上面，裁剪只在唯一的子图层上；缩略图的位置与 15.5 的公式一致、数量不封顶、滚到空位的行数（8、9、11、12 个 App）、失效后重新取数量；阴影的缩放、标题的阴影设置、选中材质。
 - 2026-11-08 在 MacBook（27.2）上部署注入版的开发构建，离屏自检报告页面网格（27 项）、缩略图（12 项，滚到 `{0, -40}`）、选中材质（sRGB 0.9098、`plusD`）与标题像素（2 倍屏 14080 个像素）全部与 Dock 的类一致。
 - 单元测试 `Tests/LaunchpadAwakenerStandaloneCoreTests/StandaloneHostTests.swift`：动态壁纸按明暗与按时刻取图、时刻换算、图标样式表（与 27.2 Dock 的表逐项对照）、着色色名与强调色的映射、默认 Dock 留 79 点、库的位置；`LaunchpadLibraryTests` 里启动器从布局里拿掉、名字带 Uninstall 的已放置 App 留下；`LegacyLaunchpadImporterTests` 里从注入版写的库导入。
+- 单元测试 `Tests/LaunchpadAwakenerSpringboardCoreTests/SpringboardInputMethodTests.swift`：组字中的文字代替选区显示、不算进文字，上屏、打字代替组字、空组字结束组字，撤销跳过组字，中文与 emoji 的 UTF-16 换算（含切到 emoji 中间时补齐整字、光标位置保持为空），经界面层组字、上屏、按下鼠标收下组字，候选窗的光标位置落在搜索框里。
 - 2026-11-08 在 MacBook（27.2）上用 `--self-check` 启动独立版：从注入版的库导入 4 页、6 个文件夹、149 个 App（与注入版一致），Dock 在下方、留 79 点，壁纸取自文件（5517×3327，没有录屏权限、也没有弹窗），图标样式 1（与 Dock 的相同），窗口铺满 1739×1080、层级 27、所有空间可见；共用的离屏自检里等价网格的格子与 Dock 版逐项相同，207 个图标零失败，15 秒后自行退出，什么也没上屏。
 
 ## 已知降级
@@ -77,6 +81,7 @@ LaunchpadAwakenerStandalone/LaunchpadApp.swift  # App 外壳：delegate 与设�
 - Dock 的格子因为放不下而被缩小时，独立版只读得到设定的图标大小，按没缩小留位置。
 - 强调色设成「硬件」（彩色 iMac）时按系统蓝着色：硬件色存在系统外观主题文件里，键名没查。
 - 26 虚拟机上还没验证；Cmd-Tab 切到它时不会打开界面这一点是推测，要在真机上看。
+- 输入法只有单元测试：真机上打开界面属于交互操作，还没有试过拼音、日文这些输入法。组字时下划线只有一种，不分输入法给的「当前段」；`characterIndex(for:)` 不回答点在哪个字上，点选候选以外的鼠标操作照文本框的规矩先收下组字。
 
 ## 延伸阅读
 

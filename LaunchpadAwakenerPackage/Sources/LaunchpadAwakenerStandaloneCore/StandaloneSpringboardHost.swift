@@ -52,8 +52,13 @@ final class StandaloneSpringboardHost: SpringboardHost {
         nil
     }
 
+    /// The fields are edited in place; the input methods reach them through the window's content view.
     func makeHostedTextField(configuration: SpringboardHostedTextFieldConfiguration) -> (any SpringboardHostedTextField)? {
         nil
+    }
+
+    var inputMethod: (any SpringboardInputMethod)? {
+        StandaloneInputMethod.shared
     }
 
     /// The Dock is covered, so nothing on screen belongs to it.

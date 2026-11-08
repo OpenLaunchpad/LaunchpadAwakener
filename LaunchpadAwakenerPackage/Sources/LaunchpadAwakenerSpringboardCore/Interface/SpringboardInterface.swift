@@ -298,6 +298,7 @@ final class SpringboardInterface {
         commitRenaming()
         // Composing text is committed, and the helper lets its field go.
         endRemoteSearchField()
+        commitInputMethodComposition()
         searchTask?.cancel()
         cancelLongPress()
     }
@@ -619,7 +620,12 @@ final class SpringboardInterface {
 
     /// Ends renaming and stores the new name; an empty name keeps the old one, as in 15.
     func commitRenaming() {
-        guard let folderPanel, let renaming else { return }
+        guard let folderPanel, var renaming else { return }
+        // A name still being composed when the renaming ends is taken as typed, as a text field takes it.
+        if renaming.editing.hasMarkedText {
+            renaming.commitMarkedText()
+            SpringboardHostSystem.host.inputMethod?.discardComposition()
+        }
         self.renaming = nil
         let folder = folderPanel.folder
         let newTitle = renaming.text.trimmingCharacters(in: .whitespaces)
@@ -1018,9 +1024,11 @@ final class SpringboardInterface {
             return .none
         }
         guard !isAnimatingFolder else { return .none }
-        if renaming != nil {
+        if let renaming {
             // 15 forwarded every key to the rename field (`-[Springboard keyDown:]`, 15.5 `0x100092250`).
-            if !forwardToRemoteRenameField() {
+            let renamingCommand = SpringboardTextEditingCommand(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags)
+            if !forwardToRemoteRenameField(),
+               !offerKeyToInputMethod(isComposing: renaming.editing.hasMarkedText, command: renamingCommand) {
                 handleRenamingKeyDown(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags)
             }
             return .none
@@ -1028,6 +1036,10 @@ final class SpringboardInterface {
         // While an input method composes text in the hosted search field, every key is the input
         // method's, Return and Escape included, as 15's field took them all (`-[ECSBLayer keyDown:]`).
         if folderPanel == nil, remoteSearchField?.isComposing == true, forwardToRemoteSearchField() {
+            return .none
+        }
+        // The same while the host's own input methods compose in the search field.
+        if folderPanel == nil, searchEditor.editing.hasMarkedText, offerKeyToInputMethod(isComposing: true, command: nil) {
             return .none
         }
         // 15's order for Escape: cancel a drag, end jiggle mode, close a folder, clear the search, then
@@ -1056,6 +1068,8 @@ final class SpringboardInterface {
         if folderPanel == nil, let searchCommand = searchFieldCommand(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags) {
             if forwardToRemoteSearchField() {
                 activateSearchField()
+            } else if offerKeyToInputMethod(isComposing: false, command: searchCommand) {
+                // Typed or composed through the input method, which called back into the field.
             } else {
                 applySearchFieldCommand(searchCommand)
             }
@@ -1091,9 +1105,9 @@ final class SpringboardInterface {
     func handleModifiersChanged(_ modifierFlags: CGEventFlags) {
         // Input methods switch modes on modifiers alone, Shift for one.
         if renaming != nil {
-            _ = forwardToRemoteRenameField()
-        } else if folderPanel == nil, searchFieldLayer.hasFocus || remoteSearchField?.isComposing == true {
-            _ = forwardToRemoteSearchField()
+            _ = forwardToRemoteRenameField() || offerKeyToInputMethod(isComposing: true, command: nil)
+        } else if folderPanel == nil, searchFieldLayer.hasFocus || remoteSearchField?.isComposing == true || searchEditor.editing.hasMarkedText {
+            _ = forwardToRemoteSearchField() || offerKeyToInputMethod(isComposing: true, command: nil)
         }
         guard renaming == nil, deletionPanel == nil else { return }
         let pages = frontPages
@@ -1176,6 +1190,8 @@ final class SpringboardInterface {
         }
         // A press while a drop is still settling waits, as one during a folder's animation does.
         guard !isAnimatingFolder, dragSession == nil else { return .none }
+        // A press anywhere takes what is being composed as typed, as a click does in a text field.
+        commitInputMethodComposition()
         cancelLongPress()
         mainPages.cancelPendingWheelSettle()
         folderPanel?.pages.cancelPendingWheelSettle()
@@ -1465,5 +1481,100 @@ final class SpringboardInterface {
     /// The geometry, for the log.
     var geometryDescription: String {
         "page \(Int(metrics.pageSize.width))×\(Int(metrics.pageSize.height)), cell \(Int(metrics.cellSize.width))×\(Int(metrics.cellSize.height)), icon \(Int(metrics.iconSide)), \(pageCount) page(s), Dock \(metrics.input.dockOrientation.rawValue) \(Int(metrics.input.dockThickness)), notch \(Int(metrics.input.notchHeight))"
+    }
+}
+
+// MARK: - Input methods
+
+/// The host's own input methods, where it has them (the standalone app): they type into the field
+/// edited here, and what they compose shows underlined in place of the selection until they commit it.
+extension SpringboardInterface: SpringboardInputMethodClient {
+    /// Offers the key being handled to the host's input methods — every key while they compose, and
+    /// otherwise only a key that types — and returns whether they took it.
+    fileprivate func offerKeyToInputMethod(isComposing: Bool, command: SpringboardTextEditingCommand?) -> Bool {
+        guard let inputMethod = SpringboardHostSystem.host.inputMethod else { return false }
+        if !isComposing {
+            guard case .insert = command else { return false }
+        }
+        return inputMethod.handleCurrentEvent()
+    }
+
+    /// Takes what either field is composing as typed. The input methods are told unless they asked for it.
+    fileprivate func commitInputMethodComposition(tellingInputMethod: Bool = true) {
+        var didCommit = false
+        if var editor = renaming, editor.editing.hasMarkedText {
+            editor.commitMarkedText()
+            showRenaming(editor)
+            didCommit = true
+        }
+        if searchEditor.editing.hasMarkedText {
+            let textBefore = searchText
+            searchEditor.commitMarkedText()
+            if searchText != textBefore {
+                searchTextDidChange()
+            } else {
+                searchFieldLayer.show(searchEditor.editing)
+            }
+            didCommit = true
+        }
+        if didCommit, tellingInputMethod {
+            SpringboardHostSystem.host.inputMethod?.discardComposition()
+        }
+    }
+
+    /// The field taking text: the name while a folder is renamed, the search field while none is open.
+    private var inputMethodEditing: SpringboardTextEditing? {
+        if let renaming {
+            return renaming.editing
+        }
+        return folderPanel == nil ? searchEditor.editing : nil
+    }
+
+    var inputMethodText: String? {
+        inputMethodEditing?.displayText
+    }
+
+    var inputMethodSelectedRange: NSRange {
+        guard let editing = inputMethodEditing else { return NSRange(location: NSNotFound, length: 0) }
+        return editing.displayUTF16Range(ofCharacters: editing.displaySelectedRange)
+    }
+
+    var inputMethodMarkedRange: NSRange? {
+        guard let editing = inputMethodEditing, let markedRange = editing.displayMarkedRange else { return nil }
+        return editing.displayUTF16Range(ofCharacters: markedRange)
+    }
+
+    func inputMethodInsert(_ text: String) {
+        if var editor = renaming {
+            editor.apply(.insert(text), pasteboard: SystemPasteboard())
+            showRenaming(editor)
+        } else if folderPanel == nil {
+            applySearchFieldCommand(.insert(text))
+        }
+    }
+
+    func inputMethodSetMarkedText(_ text: String, selectedUTF16Range: NSRange) {
+        let selectedRange = SpringboardTextEditing.characterRange(ofUTF16Range: selectedUTF16Range, in: text)
+        if var editor = renaming {
+            editor.setMarkedText(text, selectedRange: selectedRange)
+            showRenaming(editor)
+        } else if folderPanel == nil {
+            activateSearchField()
+            searchEditor.setMarkedText(text, selectedRange: selectedRange)
+            searchFieldLayer.show(searchEditor.editing)
+        }
+    }
+
+    func inputMethodCommitMarkedText() {
+        commitInputMethodComposition(tellingInputMethod: false)
+    }
+
+    func inputMethodCaretRect() -> CGRect? {
+        if renaming != nil, let folderPanel {
+            let editorLayer = folderPanel.titleEditorLayer
+            return editorLayer.convert(editorLayer.caretFrame, to: containerLayer)
+        }
+        guard folderPanel == nil else { return nil }
+        return searchFieldLayer.convert(searchFieldLayer.caretFrame, to: containerLayer)
     }
 }

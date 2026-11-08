@@ -62,6 +62,11 @@ final class DockSpringboardHost: SpringboardHost {
         SpringboardRemoteTextField(configuration: configuration)
     }
 
+    /// The Dock is not an application input methods serve; the text input helper stands in.
+    var inputMethod: (any SpringboardInputMethod)? {
+        nil
+    }
+
     func isOnDock(_ globalPoint: CGPoint) -> Bool {
         DockBarReference.currentBarRect?.contains(globalPoint) ?? false
     }

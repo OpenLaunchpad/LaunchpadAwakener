@@ -108,6 +108,7 @@ package final class SpringboardController {
         newInterface.setVisibility(0)
         window = newWindow
         interface = newInterface
+        SpringboardHostSystem.host.inputMethod?.client = newInterface
         newWindow.orderIn()
         if animated {
             newInterface.animateEntrance(duration: SpringboardPreferences.showAnimationDuration)
@@ -140,6 +141,9 @@ package final class SpringboardController {
         idleGeneration += 1
         stopPinch()
         currentInterface.prepareForHiding()
+        if let inputMethod = SpringboardHostSystem.host.inputMethod, inputMethod.client === currentInterface {
+            inputMethod.client = nil
+        }
         // After the preparation: a drag it cancels may take a folder it had opened away with it.
         lastPosition = currentInterface.position
         currentWindow.releaseKeyFocus()

@@ -515,15 +515,15 @@ final class SpringboardTitleEditorLayer: CALayer {
     /// Shows `newEditing`: its text, and its selection or else its caret, which shows in full at once and
     /// then blinks, as after each key in a text field.
     func show(_ newEditing: SpringboardTextEditing) {
-        if newEditing.text != editing.text || textLayer.string == nil {
-            textLayer.string = newEditing.text
-            textLine = SpringboardTextLine(text: newEditing.text, font: SpringboardTypography.folderTitleFont)
+        if newEditing.displayText != editing.displayText || newEditing.displayMarkedRange != editing.displayMarkedRange || textLayer.string == nil {
+            textLayer.string = newEditing.displayString(font: SpringboardTypography.folderTitleFont, color: textLayer.foregroundColor)
+            textLine = SpringboardTextLine(text: newEditing.displayText, font: SpringboardTypography.folderTitleFont)
         }
         editing = newEditing
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        selectionLayer.isHidden = !newEditing.hasSelection
-        caretLayer.isHidden = newEditing.hasSelection
+        selectionLayer.isHidden = !newEditing.displaysSelection
+        caretLayer.isHidden = newEditing.displaysSelection
         CATransaction.commit()
         restartBlinking()
         setNeedsLayout()
@@ -531,7 +531,7 @@ final class SpringboardTitleEditorLayer: CALayer {
 
     private func restartBlinking() {
         caretLayer.removeAnimation(forKey: "blink")
-        guard !editing.hasSelection else { return }
+        guard !editing.displaysSelection else { return }
         let blinkAnimation = CABasicAnimation(keyPath: "opacity")
         blinkAnimation.fromValue = 1
         blinkAnimation.toValue = 0
@@ -566,13 +566,19 @@ final class SpringboardTitleEditorLayer: CALayer {
         return textLine.characterOffset(at: point.x - clippingLayer.frame.minX - lineStartX)
     }
 
+    /// The caret's frame in this layer, as laid out: where an input method puts its candidates.
+    var caretFrame: CGRect {
+        layoutIfNeeded()
+        return caretLayer.convert(caretLayer.bounds, to: self)
+    }
+
     override func layoutSublayers() {
         super.layoutSublayers()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         let inset = SpringboardLabelLayer.textInset
         clippingLayer.frame = bounds.insetBy(dx: inset + 4, dy: inset)
-        let caretX = textLine.caretXOffsets[editing.caretOffset]
+        let caretX = textLine.caretXOffsets[editing.displayCaretOffset]
         (lineStartX, scrollOffset) = Self.linePlacement(
             lineWidth: textLine.width,
             trailingWhitespaceWidth: textLine.trailingWhitespaceWidth,
@@ -584,8 +590,8 @@ final class SpringboardTitleEditorLayer: CALayer {
         let lineBottom = clippingLayer.bounds.maxY - textLine.height
         textLayer.frame = CGRect(x: lineStartX, y: 0, width: ceil(textLine.width) + Self.caretWidth, height: clippingLayer.bounds.height)
         caretLayer.frame = CGRect(x: lineStartX + caretX - Self.caretWidth / 2, y: lineBottom, width: Self.caretWidth, height: textLine.height)
-        let selectionStartX = textLine.caretXOffsets[editing.selectedRange.lowerBound]
-        let selectionEndX = textLine.caretXOffsets[editing.selectedRange.upperBound]
+        let selectionStartX = textLine.caretXOffsets[editing.displaySelectedRange.lowerBound]
+        let selectionEndX = textLine.caretXOffsets[editing.displaySelectedRange.upperBound]
         selectionLayer.frame = CGRect(x: lineStartX + selectionStartX, y: lineBottom, width: selectionEndX - selectionStartX, height: textLine.height)
         CATransaction.commit()
     }

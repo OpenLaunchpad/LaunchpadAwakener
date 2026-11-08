@@ -29,6 +29,11 @@ struct SpringboardTextEditing: Equatable, Sendable {
     private(set) var text: String
     private(set) var anchorOffset: Int
     private(set) var caretOffset: Int
+    /// Text an input method is composing. It stands in for the selection on screen until the input method
+    /// commits it, and is not part of `text` till then, so nothing is searched for or stored half typed.
+    private(set) var markedText: String?
+    /// The input method's own selection within ``markedText``, where it shows the caret.
+    private(set) var markedSelectedRange: Range<Int> = 0..<0
 
     /// All of `text` selected, as 15's field began: its service selected the text as soon as the field was
     /// set up (`-[ECTIHelperDelegate _handleSetupMessage:forPeer:]`, 15.5 `0x100001198`).
@@ -77,6 +82,9 @@ struct SpringboardTextEditing: Equatable, Sendable {
     }
 
     private mutating func replaceCharacters(in range: Range<Int>, with replacement: String) {
+        // Any change to the text ends composing; committing replaces the selection the composed text stood in for.
+        markedText = nil
+        markedSelectedRange = 0..<0
         let lowerIndex = text.index(text.startIndex, offsetBy: range.lowerBound)
         let upperIndex = text.index(text.startIndex, offsetBy: range.upperBound)
         let textBeforeCaret = String(text[..<lowerIndex]) + replacement
@@ -84,6 +92,125 @@ struct SpringboardTextEditing: Equatable, Sendable {
         // Counted afresh, not added up: a combining mark typed after a letter becomes part of it.
         caretOffset = min(textBeforeCaret.count, text.count)
         anchorOffset = caretOffset
+    }
+
+    // MARK: - Composing
+
+    var hasMarkedText: Bool {
+        markedText != nil
+    }
+
+    /// Starts or changes what an input method composes, `selectedRange` its selection within it in
+    /// characters; empty text ends composing, as `setMarkedText:` with an empty string does.
+    mutating func setMarkedText(_ composedText: String, selectedRange: Range<Int>) {
+        guard !composedText.isEmpty else {
+            discardMarkedText()
+            return
+        }
+        markedText = composedText
+        let upperOffset = min(max(selectedRange.upperBound, 0), composedText.count)
+        let lowerOffset = min(max(selectedRange.lowerBound, 0), upperOffset)
+        markedSelectedRange = lowerOffset..<upperOffset
+    }
+
+    /// Takes what was being composed as typed: `unmarkText`, which commits.
+    mutating func commitMarkedText() {
+        guard let markedText else { return }
+        insert(markedText)
+    }
+
+    /// Drops what was being composed, leaving the text as it was.
+    mutating func discardMarkedText() {
+        markedText = nil
+        markedSelectedRange = 0..<0
+    }
+
+    // MARK: - What a field shows
+
+    /// The text with the composed text in place of the selection.
+    var displayText: String {
+        guard let markedText else { return text }
+        let characters = Array(text)
+        return String(characters[..<selectedRange.lowerBound]) + markedText + String(characters[selectedRange.upperBound...])
+    }
+
+    /// Where the composed text stands in ``displayText``, underlined; nil while nothing is composed.
+    var displayMarkedRange: Range<Int>? {
+        markedText.map { selectedRange.lowerBound..<(selectedRange.lowerBound + $0.count) }
+    }
+
+    /// The caret in ``displayText``: inside the composed text where the input method put it.
+    var displayCaretOffset: Int {
+        guard markedText != nil else { return caretOffset }
+        return selectedRange.lowerBound + markedSelectedRange.upperBound
+    }
+
+    /// The selection in ``displayText``; while composing, none — the composed text is underlined instead.
+    var displaySelectedRange: Range<Int> {
+        guard markedText != nil else { return selectedRange }
+        return displayCaretOffset..<displayCaretOffset
+    }
+
+    var displaysSelection: Bool {
+        markedText == nil && hasSelection
+    }
+
+    /// What a field's text layer draws: the plain text, or while composing the display text with the
+    /// composed part underlined, as AppKit marks text an input method is composing. A text layer ignores
+    /// its own font and colour for an attributed string, so they come along.
+    func displayString(font: CTFont, color: CGColor?) -> Any {
+        guard let displayMarkedRange else { return text }
+        let shownText = displayText
+        var attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key(kCTFontAttributeName as String): font]
+        if let color {
+            attributes[NSAttributedString.Key(kCTForegroundColorAttributeName as String)] = color
+        }
+        let attributedString = NSMutableAttributedString(string: shownText, attributes: attributes)
+        attributedString.addAttribute(
+            NSAttributedString.Key(kCTUnderlineStyleAttributeName as String),
+            value: CTUnderlineStyle.single.rawValue,
+            range: Self.utf16Range(ofCharacters: displayMarkedRange, in: shownText)
+        )
+        return attributedString
+    }
+
+    // MARK: - Counting as AppKit does
+
+    /// `characterRange`, in characters of ``displayText``, in the UTF-16 units AppKit's text input counts in.
+    func displayUTF16Range(ofCharacters characterRange: Range<Int>) -> NSRange {
+        Self.utf16Range(ofCharacters: characterRange, in: displayText)
+    }
+
+    /// `characterRange`, in characters of `string`, in UTF-16 units.
+    static func utf16Range(ofCharacters characterRange: Range<Int>, in string: String) -> NSRange {
+        let characterCount = string.count
+        let lowerOffset = min(max(characterRange.lowerBound, 0), characterCount)
+        let upperOffset = min(max(characterRange.upperBound, lowerOffset), characterCount)
+        let lowerIndex = string.index(string.startIndex, offsetBy: lowerOffset)
+        let upperIndex = string.index(string.startIndex, offsetBy: upperOffset)
+        return NSRange(lowerIndex..<upperIndex, in: string)
+    }
+
+    /// `utf16Range` of `string` in whole characters, widened so that no character is split. An empty range
+    /// — a caret — stays empty, at the start of the character it falls in.
+    static func characterRange(ofUTF16Range utf16Range: NSRange, in string: String) -> Range<Int> {
+        let utf16Count = (string as NSString).length
+        let lowerUTF16Offset = min(max(utf16Range.location, 0), utf16Count)
+        guard utf16Range.length > 0, lowerUTF16Offset < utf16Count else {
+            let caretUTF16Offset = lowerUTF16Offset < utf16Count
+                ? (string as NSString).rangeOfComposedCharacterSequence(at: lowerUTF16Offset).location
+                : utf16Count
+            let caretOffset = string.distance(from: string.startIndex, to: String.Index(utf16Offset: caretUTF16Offset, in: string))
+            return caretOffset..<caretOffset
+        }
+        let upperUTF16Offset = min(max(utf16Range.location + max(utf16Range.length, 0), lowerUTF16Offset), utf16Count)
+        let lowerIndex = String.Index(utf16Offset: lowerUTF16Offset, in: string)
+        let upperIndex = String.Index(utf16Offset: upperUTF16Offset, in: string)
+        // `rangeOfComposedCharacterSequences` widens a range that cuts through a character.
+        let wholeRange = (string as NSString).rangeOfComposedCharacterSequences(for: NSRange(lowerIndex..<upperIndex, in: string))
+        guard let swiftRange = Range(wholeRange, in: string) else { return 0..<0 }
+        let lowerOffset = string.distance(from: string.startIndex, to: swiftRange.lowerBound)
+        return lowerOffset..<(lowerOffset + string[swiftRange].count)
     }
 
     // MARK: - Moving and selecting

@@ -40,6 +40,9 @@ package protocol SpringboardHost: AnyObject, Sendable {
     func makeGlassBackground(frame: CGRect, scale: CGFloat, backdropGroupName: String) -> (any SpringboardGlassBackground)?
     /// A text field another process hosts so that input methods work in it; nil edits the field in place.
     func makeHostedTextField(configuration: SpringboardHostedTextFieldConfiguration) -> (any SpringboardHostedTextField)?
+    /// The system's input methods for the fields edited in place, where the host's window takes the
+    /// keyboard itself; nil where they are out of reach, as in the Dock.
+    var inputMethod: (any SpringboardInputMethod)? { get }
     /// Whether a click at `globalPoint` — top-left origin, as `CGEvent.location` — belongs to a Dock drawn
     /// above the springboard.
     func isOnDock(_ globalPoint: CGPoint) -> Bool
@@ -236,6 +239,40 @@ extension SpringboardHostedTextField {
     }
 }
 
+/// The system's input methods, for a host whose own window takes the keyboard: the springboard offers
+/// them the keys that would type into a field, and every key while they compose.
+@MainActor
+package protocol SpringboardInputMethod: AnyObject {
+    /// The showing springboard, whose field the input methods type into.
+    var client: (any SpringboardInputMethodClient)? { get set }
+    /// Offers the key or modifier event being handled to the input methods; returns whether they took it.
+    /// A key they turn into a command, such as moving the caret, is not taken: it stays the springboard's.
+    func handleCurrentEvent() -> Bool
+    /// Tells the input methods that what they were composing was taken as typed, by a click elsewhere or
+    /// the field going away, so that they start afresh.
+    func discardComposition()
+}
+
+/// The springboard's side of the input methods: the field taking text — the folder's name while it is
+/// renamed, the search field otherwise. Ranges count UTF-16 units of the field's text as shown, with what
+/// is being composed in place of the selection, as AppKit's text input does.
+@MainActor
+package protocol SpringboardInputMethodClient: AnyObject {
+    /// The field's text as shown; nil while no field takes text.
+    var inputMethodText: String? { get }
+    var inputMethodSelectedRange: NSRange { get }
+    /// What is being composed; nil while nothing is.
+    var inputMethodMarkedRange: NSRange? { get }
+    /// Typed or committed text, in place of the selection or the composed text.
+    func inputMethodInsert(_ text: String)
+    func inputMethodSetMarkedText(_ text: String, selectedUTF16Range: NSRange)
+    /// Takes what was being composed as typed (`unmarkText`).
+    func inputMethodCommitMarkedText()
+    /// Where the caret is, for the input method's candidate window: points, from the bottom left of the
+    /// display the springboard shows on.
+    func inputMethodCaretRect() -> CGRect?
+}
+
 // MARK: - Until a host is chosen
 
 /// The host until one is chosen, as in unit tests: no window, no wallpaper, no glass, no hosted fields and
@@ -284,6 +321,10 @@ final class DetachedSpringboardHost: SpringboardHost {
     }
 
     func makeHostedTextField(configuration: SpringboardHostedTextFieldConfiguration) -> (any SpringboardHostedTextField)? {
+        nil
+    }
+
+    var inputMethod: (any SpringboardInputMethod)? {
         nil
     }
 

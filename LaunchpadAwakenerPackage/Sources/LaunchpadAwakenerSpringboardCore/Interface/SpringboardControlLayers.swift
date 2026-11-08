@@ -176,7 +176,7 @@ final class SpringboardSearchFieldLayer: CALayer {
             guard isComposingInHostedField != oldValue else { return }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            placeholderLayer.isHidden = !editing.text.isEmpty || isComposingInHostedField
+            placeholderLayer.isHidden = !editing.displayText.isEmpty || isComposingInHostedField
             CATransaction.commit()
         }
     }
@@ -206,15 +206,15 @@ final class SpringboardSearchFieldLayer: CALayer {
     private func updateCaretAndSelectionVisibility() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        caretLayer.isHidden = !hasFocus || editing.hasSelection
-        selectionLayer.isHidden = !hasFocus || !editing.hasSelection
+        caretLayer.isHidden = !hasFocus || editing.displaysSelection
+        selectionLayer.isHidden = !hasFocus || !editing.displaysSelection
         CATransaction.commit()
     }
 
     /// Shown in full at once, as after each key typed, then blinking.
     private func restartBlinking() {
         caretLayer.removeAnimation(forKey: "blink")
-        guard hasFocus, !editing.hasSelection else { return }
+        guard hasFocus, !editing.displaysSelection else { return }
         let blinkAnimation = CABasicAnimation(keyPath: "opacity")
         blinkAnimation.fromValue = 1
         blinkAnimation.toValue = 0
@@ -241,12 +241,12 @@ final class SpringboardSearchFieldLayer: CALayer {
     /// Shows `newEditing`: its text, and its caret or selection. The layout animates between the empty
     /// and the active arrangement as 15's did.
     func show(_ newEditing: SpringboardTextEditing) {
-        if newEditing.text != editing.text || textLayer.string == nil {
-            textLayer.string = newEditing.text
-            textLine = SpringboardTextLine(text: newEditing.text, font: SpringboardTypography.searchFont)
+        if newEditing.displayText != editing.displayText || newEditing.displayMarkedRange != editing.displayMarkedRange || textLayer.string == nil {
+            textLayer.string = newEditing.displayString(font: SpringboardTypography.searchFont, color: textLayer.foregroundColor)
+            textLine = SpringboardTextLine(text: newEditing.displayText, font: SpringboardTypography.searchFont)
         }
         editing = newEditing
-        placeholderLayer.isHidden = !newEditing.text.isEmpty || isComposingInHostedField
+        placeholderLayer.isHidden = !newEditing.displayText.isEmpty || isComposingInHostedField
         clearButtonLayer.isHidden = newEditing.text.isEmpty
         updateCaretAndSelectionVisibility()
         restartBlinking()
@@ -263,6 +263,12 @@ final class SpringboardSearchFieldLayer: CALayer {
     func characterOffset(at point: CGPoint) -> Int {
         layoutIfNeeded()
         return textLine.characterOffset(at: point.x - clippingLayer.frame.minX - lineStartX)
+    }
+
+    /// The caret's frame in this layer, as laid out: where an input method puts its candidates.
+    var caretFrame: CGRect {
+        layoutIfNeeded()
+        return caretLayer.convert(caretLayer.bounds, to: self)
     }
 
     /// Where a line starts in an area `areaWidth` wide, and how far it has scrolled: at the area's start
@@ -329,13 +335,13 @@ final class SpringboardSearchFieldLayer: CALayer {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         clippingLayer.frame = CGRect(x: Self.textOriginX - 1, y: 3, width: textWidth + 2, height: height - 6)
-        let caretX = textLine.caretXOffsets[min(editing.caretOffset, textLine.caretXOffsets.count - 1)]
+        let caretX = textLine.caretXOffsets[min(editing.displayCaretOffset, textLine.caretXOffsets.count - 1)]
         (lineStartX, scrollOffset) = Self.linePlacement(lineWidth: textLine.width, caretX: caretX, areaWidth: textWidth, scrollOffset: scrollOffset)
         let textStartX = 1 + lineStartX
         textLayer.frame = CGRect(x: textStartX, y: 1, width: ceil(textLine.width) + SpringboardTitleEditorLayer.caretWidth, height: textHeight)
         caretLayer.frame = CGRect(x: textStartX + caretX - 1, y: 0, width: 2, height: clippingLayer.bounds.height)
-        let selectionStartX = textLine.caretXOffsets[min(editing.selectedRange.lowerBound, textLine.caretXOffsets.count - 1)]
-        let selectionEndX = textLine.caretXOffsets[min(editing.selectedRange.upperBound, textLine.caretXOffsets.count - 1)]
+        let selectionStartX = textLine.caretXOffsets[min(editing.displaySelectedRange.lowerBound, textLine.caretXOffsets.count - 1)]
+        let selectionEndX = textLine.caretXOffsets[min(editing.displaySelectedRange.upperBound, textLine.caretXOffsets.count - 1)]
         selectionLayer.frame = CGRect(x: textStartX + selectionStartX, y: 0, width: selectionEndX - selectionStartX, height: clippingLayer.bounds.height)
         CATransaction.commit()
     }

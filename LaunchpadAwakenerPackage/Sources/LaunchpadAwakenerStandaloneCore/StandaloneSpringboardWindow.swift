@@ -17,6 +17,7 @@ final class StandaloneSpringboardWindow: SpringboardWindow {
     let rootLayer: CALayer
     private(set) var isOrderedIn = false
     private let window: StandaloneFullScreenWindow
+    private let contentView: StandaloneSpringboardContentView
 
     init?(displayIdentifier: CGDirectDisplayID) {
         guard let screen = StandaloneEnvironment.screen(forDisplay: displayIdentifier) else { return nil }
@@ -33,14 +34,18 @@ final class StandaloneSpringboardWindow: SpringboardWindow {
         window.acceptsMouseMovedEvents = true
         window.setFrame(screen.frame, display: false)
         // A layer-hosting view: the springboard owns the whole layer tree, as in the Dock's window.
-        let contentView = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
+        let contentView = StandaloneSpringboardContentView(frame: CGRect(origin: .zero, size: screen.frame.size))
         rootLayer = CALayer()
         rootLayer.frame = contentView.bounds
         contentView.layer = rootLayer
         contentView.wantsLayer = true
         window.contentView = contentView
-        window.eventHandler = { event in
+        self.contentView = contentView
+        window.eventHandler = { [contentView] event in
             guard let cgEvent = event.cgEvent else { return false }
+            // The input methods take the key from here, when the springboard offers it to them.
+            contentView.currentEvent = event
+            defer { contentView.currentEvent = nil }
             return SpringboardController.shared.handle(SpringboardInputEvent(event: cgEvent, eventType: cgEvent.type.rawValue))
         }
     }
@@ -54,6 +59,8 @@ final class StandaloneSpringboardWindow: SpringboardWindow {
         guard !isOrderedIn else { return }
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(contentView)
+        StandaloneInputMethod.shared.contentView = contentView
         isOrderedIn = true
         StandaloneWatchdog.shared.watch(windowNumber: window.windowNumber)
         #log(.info, "Ordered in window \(self.window.windowNumber, privacy: .public) at level \(self.window.level.rawValue, privacy: .public): key \(self.window.isKeyWindow, privacy: .public), app active \(NSApp.isActive, privacy: .public)")
@@ -69,6 +76,10 @@ final class StandaloneSpringboardWindow: SpringboardWindow {
     func orderOut() {
         guard isOrderedIn else { return }
         StandaloneWatchdog.shared.stopWatching(windowNumber: window.windowNumber)
+        if StandaloneInputMethod.shared.contentView === contentView {
+            contentView.inputContext?.discardMarkedText()
+            StandaloneInputMethod.shared.contentView = nil
+        }
         window.orderOut(nil)
         isOrderedIn = false
     }

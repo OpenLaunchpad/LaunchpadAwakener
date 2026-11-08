@@ -70,9 +70,29 @@ struct SpringboardFieldEditor {
         }
     }
 
-    /// Records the text as it was before a change, unless the change continues a run of typing.
+    // MARK: - Composing
+
+    /// Starts or changes what an input method composes. Composing is not a step to undo; only what it
+    /// commits is, as part of the run of typing.
+    mutating func setMarkedText(_ composedText: String, selectedRange: Range<Int>) {
+        editing.setMarkedText(composedText, selectedRange: selectedRange)
+    }
+
+    /// Takes the composed text as typed.
+    mutating func commitMarkedText() {
+        guard let markedText = editing.markedText else { return }
+        change(isTyping: true) { $0.insert(markedText) }
+    }
+
+    mutating func discardMarkedText() {
+        editing.discardMarkedText()
+    }
+
+    /// Records the text as it was before a change, unless the change continues a run of typing. What was
+    /// being composed is left out of the record: undoing goes back to the text, not to a half-typed word.
     private mutating func change(isTyping continuesTyping: Bool = false, _ body: (inout SpringboardTextEditing) -> Void) {
-        let editingBefore = editing
+        var editingBefore = editing
+        editingBefore.discardMarkedText()
         body(&editing)
         guard editing.text != editingBefore.text else { return }
         if !(continuesTyping && isTyping) {
