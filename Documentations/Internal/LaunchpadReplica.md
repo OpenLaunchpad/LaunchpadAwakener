@@ -13,7 +13,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **`DockBar` 只能经全局变量拿到。** 27.2 里没有任何导出的路径通向它；`-[DockBar rect]` 和 `-[DockBar setRollTile:]` 在鼠标划过 Dock 时都不会被调用，所以「hook 这两个方法、在调用时记下接收者」的办法拿不到它（原型试过）。`DockGlobals` 同样只能经全局变量拿到。读全局变量后还会核对对象的类：按类对象比较，不比类名，因为运行时给 Swift 类的名字是 `DockCore.DockGlobals`，不是查找它用的改编名 `_TtC8DockCore11DockGlobals`。26 的 `DockGlobals` 还是 Objective-C 类 `DockGlobals`，所以要查的类名也记在构建档案里。
 
-**26 与 27 用同一套复刻。** 26 的 Dock 里旧 Launchpad 的类（`Springboard`、`LPSpringboard`、`ECSB*`、`ECPager*`）都还在，但 23 处入口经一个恒返回 1 的函数一律改道到 `-[Spotlight sendLaunchAppsBrowsing]`，和 27 一样，所以拦这一个方法就接管了 Launchpad 键、Dock 上的 Apps 图标、触发角与 Apps 本身。复刻调用的 23 个方法与两个 hook 在 26.0 到 27.2 的每个构建里签名都相同。几处差别：26 的 `-[DockAppEventHandler handleMachMessage:size:]` 在 Exposé 或旧 Springboard 捕获事件时不调 `handleDockBarEvent:type:`（后者在 26 上从不捕获，Mission Control 打开时复刻收不到事件，和 15 一样）；26 的玻璃控制器没有 `updateUsingLayoutConfiguration:environment:`，可选的玻璃背景退回模糊；26 与 27.0 的 Dock 自己接捏合（见已知降级）。
+**26 与 27 用同一套复刻。** 26 的 Dock 里旧 Launchpad 的类（`Springboard`、`LPSpringboard`、`ECSB*`、`ECPager*`）都还在，但 23 处入口经一个恒返回 1 的函数一律改道到 `-[Spotlight sendLaunchAppsBrowsing]`，和 27 一样，所以拦这一个方法就接管了 Launchpad 键、Dock 上的 Apps 图标、触发角与 Apps 本身。复刻调用的 23 个方法与两个 hook 在 26.0 到 27.2 的每个构建里签名都相同。几处差别：26 的 `-[DockAppEventHandler handleMachMessage:size:]` 在 Exposé 或旧 Springboard 捕获事件时不调 `handleDockBarEvent:type:`（后者在 26 上从不捕获，Mission Control 打开时复刻收不到事件，和 15 一样）；26 的玻璃控制器没有 `updateUsingLayoutConfiguration:environment:`，可选的玻璃背景退回模糊；26 与 27.0 的 Dock 自己接捏合（见已知降级）；26 的壁纸窗口（`Wallpaper-`）还是 Dock 自己画的，和 15 一样，到 27 才归 WindowManager（`Wallpaper`）。所以截壁纸时按属主进程认窗口：WindowManager 的优先，没有就用 Dock 自己的。不按属主名认，因为那是本地化的名字，中文系统上 26 的 Dock 叫「程序坞」。
 
 **事件入口：hook 事件总入口加抢键盘焦点，不全局抢占事件。** 打开时 `CPSStealKeyFocusOnConnection(cid, 1152)`，关闭时归还，事件经 `-[DockAppEventHandler handleDockBarEvent:type:]` 接管——这正是 15 的做法。没有走 27 的 Cmd-Tab 切换器那种自建连接加 `CGSSetEventCapture`：一旦失控，整台机器的输入都会被锁住，26 上那次只能重启就是这种情形。也没有改用 `ECModalEventController`：它自建连接时只按 Dock 栏窗口的坐标做命中测试，处理者栈又与堆栈展开、Cmd-Tab 共用，打开 Launchpad 时会互相挤掉。
 
@@ -166,6 +166,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 图标大小与 15.5 对照（2026-11-08）：在 15.5 虚拟机的截图（1487×936 屏，Dock 默认大小）上逐像素量网格：列距 169、行距 145、图标 96 点、首行图标顶边距屏幕顶 72 点，与公式在留 79 点时的结果一致；图标图片占图标框的比例两边相同（约 81%），文件夹方块都是图标边长减 20 点。改后部署到 MacBook，自检日志为 Dock 79、单元格 193×171、图标 120（1739×1080 屏），正是 15 在这块屏幕上的结果。没有做交互验证。
 - 第 6 批的非交互验证（2026-11-08，MacBook 上）：部署后 hook 装上、23 个 Dock 方法签名全部吻合；开发构建的自检显示 Dock 的卸载器可用，149 个 App 里有 39 个可删（都是 App Store 的，只问不删）；19 个 App 带「新」标记，都是从 15 的库里带过来的，下次打开时启动过的会清掉。三指轻扫、文件夹方向键、关闭按钮与删除、搜索框编辑与复制粘贴都没有做交互验证。
 - 各构建的离线核对（2026-11-08）：26.0 到 27.2 的 24 个正式构建都从 Apple 的完整更新包里取出 Dock，去重后 16 个二进制，逐个核对了复刻用到的类与方法的声明，并在 IDA 里读出两个全局变量；读法先在 27.2 上验证过，得出的正是档案里原有的两个地址。单元测试核对档案恰好覆盖这 24 个版本、地址落在可执行文件里且按指针对齐、`DockGlobals` 的类名与大版本相符。
+- macOS 26 虚拟机上的验证（2026-11-08，26.6.2 25G83，Ultra 上的 VirtualBuddy）：日志认出这个 Dock（`Dock build 2427.6 of macOS 26.6.2`）、23 个方法签名全部吻合、两个 hook 装上；用户打开过界面，能打开、关闭。第一次背景是灰的：自检报 `No wallpaper window on display 1`，原因是 26 的壁纸窗口归 Dock 自己，复刻只认 WindowManager 的；改为按属主进程挑窗口后，自检报 `wallpaper captured, 2982×1804 pixels`。挑窗口的规则用两台机器上实际读到的窗口列表写了回归测试。改过的 WindowManager 那条路径还没在 27.2 的 MacBook 上跑过（只有单元测试）；27.2 的 Dock 没有沙盒，`proc_pidpath` 能查 WindowManager 的可执行文件。
 - 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认气泡的样子与真删一个 App。
 
 ## 已知降级

@@ -2,9 +2,9 @@
 
 在 macOS 26 与 27 的 Dock 里复刻 macOS 15 的 Launchpad：一个注入 Dock 的 payload，加上负责注入的 App 与特权 daemon。支持 26.0 到 27.2 的每个正式构建，别的构建在补上构建档案之前什么都不装（见实现说明「适配新的 Dock 构建」）。工程由 [InjectionScaffold](https://github.com/Mx-Iris/InjectionScaffold) 生成，方案见提案 [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](Documentations/Evolutions/draft-launchpad-replica.md)。
 
-## 只在测试用的 MacBook 上运行
+## 只在测试机上运行
 
-**开发机（两台 Mac Studio）上只编译、跑单元测试，绝不运行 App、注入 Dock 或重启 Dock。** 全屏窗口一旦失控，整台机器的输入都会被锁住，只能重启——这在 macOS 26 上真实发生过。运行与验证只在测试用的 MacBook 上做：`ssh JH@192.168.50.13`，macOS 27.2（26B123），SIP 已关，App 装在 `/Applications/LaunchpadAwakener.app`。
+**开发机（两台 Mac Studio）上只编译、跑单元测试，绝不运行 App、注入 Dock 或重启 Dock。** 全屏窗口一旦失控，整台机器的输入都会被锁住，只能重启——这在 macOS 26 上真实发生过。运行与验证只在测试机上做：27 用测试用的 MacBook，`ssh JH@192.168.50.13`，macOS 27.2（26B123），SIP 已关，App 装在 `/Applications/LaunchpadAwakener.app`；26 用下面说的虚拟机（虚拟机里失控只锁住虚拟机）。
 
 在开发机上编译后部署（`<agent>` 是 `claude` 或 `codex`，各用各的构建目录）：
 
@@ -18,6 +18,8 @@ ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakene
 日志的 subsystem 是 `com.MxIris.LaunchpadAwakener`，info 级要加 `--info`：`/usr/bin/log show --info --last 5m --predicate 'subsystem == "com.MxIris.LaunchpadAwakener"'`。经 ssh 跑时**必须写全路径**：MacBook 的登录 shell 是 zsh，zsh 有个同名的内建命令 `log`，裸写 `log show …` 只会报 `too many arguments`，配上 `2>/dev/null` 就成了「一条日志也没有」。
 
 出了问题，先经 ssh 退回系统的 Apps 并换掉注入过的 Dock：`touch /tmp/LaunchpadAwakener.disabled; killall Dock`。
+
+**macOS 26 上的验证**用 Ultra 上 VirtualBuddy 的 macOS 26 虚拟机：26.6.2（25G83），机器名 `VMdexuniji`，账户 `vm`，`ssh vm@<地址>` 免密（地址由 Ultra 的 `/var/db/dhcpd_leases` 按机器名查，2026-11-08 是 `192.168.64.16`），SIP 已关，App 装在 `/Applications/LaunchpadAwakener.app`，daemon 已在登录项里批准。部署照上面的命令，把地址换成虚拟机的。它和 15 的虚拟机一样没装开发工具（`otool`、`strings`、`python3` 会弹安装提示），查东西用 `md5`、`osascript -l JavaScript` 这类系统自带的命令。
 
 **用户要求看界面时**（截图、点击属于交互操作，用户没提就不做）：经 ssh 跑 `open -a Apps` 打开、`screencapture -x` 截图（能截到窗口内容）、`screencapture -v -V <秒>` 录屏后拷回本机用 ffmpeg 抽帧（录屏启动要零点几秒到一两秒，先开录、等一秒再操作）；点击与拖动用在 MacBook 上编译的一个发 `CGEvent` 的小工具，经 ssh 发的事件实测有效。开发构建 20 秒没有输入就自动收起，打开与操作要放在同一条命令里。拖动会改用户的布局，测完要还原。
 
