@@ -227,7 +227,8 @@ extension SpringboardInterface {
         } else if dragSession.pendingDrop != nil {
             performPendingDrop()
         } else {
-            evaluateDrag()
+            // 15 left the page alone until the next move; a pointer still moving fast keeps it so.
+            evaluateDragOnceSettled()
         }
     }
 
@@ -247,16 +248,23 @@ extension SpringboardInterface {
         )
         dragSession.lastLocation = location
         dragSession.lastTimestamp = timestamp
-        dragSession.settleTask?.cancel()
         // While the pointer is fast, nothing responds; it does once the pointer slows down or rests.
         if speed >= SpringboardDragging.settlingSpeedThreshold {
-            dragSession.settleTask = Task { [weak self] in
-                try? await Task.sleep(for: SpringboardDragging.settlingDelay)
-                guard !Task.isCancelled else { return }
-                self?.evaluateDrag()
-            }
+            evaluateDragOnceSettled()
         } else {
+            dragSession.settleTask?.cancel()
             evaluateDrag()
+        }
+    }
+
+    /// Responds to where the dragged icon is once no move has come for the settling delay.
+    private func evaluateDragOnceSettled() {
+        guard let dragSession else { return }
+        dragSession.settleTask?.cancel()
+        dragSession.settleTask = Task { [weak self] in
+            try? await Task.sleep(for: SpringboardDragging.settlingDelay)
+            guard !Task.isCancelled else { return }
+            self?.evaluateDrag()
         }
     }
 
