@@ -270,11 +270,16 @@ final class SpringboardInterface {
     func prepareForHiding() {
         if let dragSession {
             if dragSession.isLeavingSearch {
-                // Going now: a search result still on its way out of the search goes back at once.
+                // Going now: a search result still on its way out of the search goes with it, and the next
+                // showing opens on the page shown before the search, as `position` counts it.
                 dragSession.isLeavingSearch = false
+                dragSession.isEnding = true
+                dragSession.itemLayer.removeFromSuperlayer()
                 mainPages.scrollLayer.opacity = 1
+                finishDrag()
+            } else {
+                cancelDrag()
             }
-            cancelDrag()
         }
         commitRenaming()
         searchTask?.cancel()

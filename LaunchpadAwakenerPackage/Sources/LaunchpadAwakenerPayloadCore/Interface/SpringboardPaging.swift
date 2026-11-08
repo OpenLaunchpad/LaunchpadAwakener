@@ -224,9 +224,22 @@ package enum SpringboardDragging {
         return nil
     }
 
-    /// The page a dragged search result joins once the search has gone: the page's items without it, then
-    /// it after the rest, where 15 added it (`sub_1000B4388`).
-    package static func arrangement(joining item: LaunchpadItem, page pageItems: [LaunchpadItem]) -> [LaunchpadItem] {
-        pageItems.filter { $0.identifier != item.identifier } + [item]
+    /// The page a dragged item joins — after an edge turns the page, in a folder held open, or, for a
+    /// search result, once the search has gone: the page's entries without it, and it after them, where 15
+    /// added it (`sub_1000B4388`) — onto the last cell when the page is full, that cell's item spilling
+    /// over on the drop, as an icon carried out of a folder goes. `layers` keeps each entry's layer in
+    /// step, nil where the dragged item is; `index` is where it went.
+    package static func arrangement<ArrangedLayer>(
+        joining item: LaunchpadItem,
+        page pageEntries: [(item: LaunchpadItem, layer: ArrangedLayer)],
+        capacity: Int
+    ) -> (items: [LaunchpadItem], layers: [ArrangedLayer?], index: Int) {
+        let keptEntries = pageEntries.filter { $0.item.identifier != item.identifier }
+        let index = min(keptEntries.count, max(capacity - 1, 0))
+        var items = keptEntries.map(\.item)
+        var layers: [ArrangedLayer?] = keptEntries.map(\.layer)
+        items.insert(item, at: index)
+        layers.insert(nil, at: index)
+        return (items, layers, index)
     }
 }

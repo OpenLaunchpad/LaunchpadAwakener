@@ -15,8 +15,9 @@ final class SpringboardDragSession {
     let sourceContext: SpringboardInterface.GridContext
     let sourcePageIndex: Int
     let sourceItemIndex: Int
-    /// For an application dragged out of a folder whose panel never opened — a search result — the main
-    /// page that folder is on, where a cancel sends the icon back into the folder's icon.
+    /// For an application dragged out of a folder, the folder, and the main page it is on: unless that
+    /// folder is open, a cancel sends the icon back into the folder's icon there.
+    let sourceFolderIdentifier: LaunchpadItemIdentifier?
     let sourceFolderPageIndex: Int?
     /// The pointer's offset from the dragged cell's centre.
     let grabOffset: CGPoint
@@ -62,8 +63,8 @@ final class SpringboardDragSession {
     var edgeTask: Task<Void, Never>?
     var edgeDirection: Int?
 
-    /// - Parameter origin: For a search result, where its application really is; the drag starts from
-    ///   there, not from the results it was picked up in.
+    /// - Parameter origin: Where the item really is; the drag starts from there. For a search result that
+    ///   is not the results it was picked up in. Nil means the cell it was picked up from.
     init(
         item: LaunchpadItem,
         itemLayer: SpringboardItemLayer,
@@ -84,16 +85,19 @@ final class SpringboardDragSession {
             sourceContext = .main
             sourcePageIndex = originPageIndex
             sourceItemIndex = originItemIndex
+            sourceFolderIdentifier = nil
             sourceFolderPageIndex = nil
-        case let .folder(_, mainPageIndex, folderPageIndex, indexInFolder):
+        case let .folder(folderIdentifier, mainPageIndex, folderPageIndex, indexInFolder):
             sourceContext = .folder
             sourcePageIndex = folderPageIndex
             sourceItemIndex = indexInFolder
+            sourceFolderIdentifier = folderIdentifier
             sourceFolderPageIndex = mainPageIndex
         case nil:
             sourceContext = context
             sourcePageIndex = pageIndex
             sourceItemIndex = itemIndex
+            sourceFolderIdentifier = nil
             sourceFolderPageIndex = nil
         }
         self.grabOffset = grabOffset
@@ -136,14 +140,18 @@ extension SpringboardInterface {
             itemLayer.isDarkened = false
             return
         }
-        // A search result is dragged from where its application really is.
-        var origin: SpringboardDragging.Location?
+        // The drag starts from where the item really is: a search result from its application's place.
+        let origin: SpringboardDragging.Location
         if isShowingSearchResults {
             guard let resultOrigin = SpringboardDragging.location(of: item.identifier, in: layout) else {
                 itemLayer.isDarkened = false
                 return
             }
             origin = resultOrigin
+        } else if context == .folder, let folderPanel {
+            origin = .folder(folderPanel.folder.identifier, mainPageIndex: mainPages.currentPageIndex, pageIndex: pageIndex, itemIndex: itemIndex)
+        } else {
+            origin = .mainPage(pageIndex: pageIndex, itemIndex: itemIndex)
         }
         let frameInContainer = itemSuperlayer.convert(itemLayer.frame, to: containerLayer)
         CATransaction.begin()
@@ -173,7 +181,7 @@ extension SpringboardInterface {
             timestamp: timestamp,
             origin: origin
         )
-        if origin != nil {
+        if isShowingSearchResults {
             leaveSearchForDraggedResult()
         }
         continueDrag(to: location, timestamp: timestamp)
@@ -210,14 +218,16 @@ extension SpringboardInterface {
         }
         CATransaction.commit()
         if let pageGrid = mainPages.currentPageGrid {
-            let keptLayers = zip(pageGrid.items, pageGrid.itemLayers).compactMap { item, itemLayer in
-                item.identifier == dragSession.item.identifier ? nil : itemLayer
-            }
+            let joined = SpringboardDragging.arrangement(
+                joining: dragSession.item,
+                page: zip(pageGrid.items, pageGrid.itemLayers).map { (item: $0, layer: $1) },
+                capacity: pageGrid.capacity
+            )
             dragSession.context = .main
             dragSession.pageIndex = mainPages.currentPageIndex
-            dragSession.arrangement = SpringboardDragging.arrangement(joining: dragSession.item, page: pageGrid.items)
-            dragSession.arrangedLayers = keptLayers.map(Optional.some) + [nil]
-            dragSession.currentIndex = dragSession.arrangement.count - 1
+            dragSession.arrangement = joined.items
+            dragSession.arrangedLayers = joined.layers
+            dragSession.currentIndex = joined.index
             animateArrangement()
         }
         dragSession.isLeavingSearch = false
@@ -410,12 +420,7 @@ extension SpringboardInterface {
         endHover()
         cancelEdgePageTurn()
         dragSession.mainPageArrangement = (dragSession.pageIndex, dragSession.arrangedLayers)
-        // A search result held over its own folder: the panel shows the folder without it, so that it
-        // is not there twice.
-        let shownFolder = folder.applications.contains { $0.identifier == dragSession.item.identifier }
-            ? folder.removing(dragSession.item.identifier)
-            : folder
-        openFolder(shownFolder, from: folderItemLayer) { [weak self] in
+        openFolder(folder, from: folderItemLayer) { [weak self] in
             self?.carryDraggedItemIntoOpenFolder()
         }
         keepDraggedIconOnTop()
@@ -425,11 +430,24 @@ extension SpringboardInterface {
     /// after its last item.
     func carryDraggedItemIntoOpenFolder() {
         guard let dragSession, !dragSession.isEnding, let folderPanel, let currentPage = folderPanel.pages.currentPageGrid else { return }
+        // An application carried back into its own folder — a search result held over it — leaves its own
+        // icons there; the dragged one stands for it, as on the main pages.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for itemLayer in folderPanel.pages.itemLayers where itemLayer.item?.identifier == dragSession.item.identifier {
+            itemLayer.removeFromSuperlayer()
+        }
+        CATransaction.commit()
+        let joined = SpringboardDragging.arrangement(
+            joining: dragSession.item,
+            page: zip(currentPage.items, currentPage.itemLayers).map { (item: $0, layer: $1) },
+            capacity: currentPage.capacity
+        )
         dragSession.context = .folder
         dragSession.pageIndex = folderPanel.pages.currentPageIndex
-        dragSession.arrangement = currentPage.items + [dragSession.item]
-        dragSession.arrangedLayers = currentPage.itemLayers.map(Optional.some) + [nil]
-        dragSession.currentIndex = dragSession.arrangement.count - 1
+        dragSession.arrangement = joined.items
+        dragSession.arrangedLayers = joined.layers
+        dragSession.currentIndex = joined.index
         dragSession.wasInsideFolderPanel = true
         dragSession.hasRearranged = true
         keepDraggedIconOnTop()
@@ -578,15 +596,14 @@ extension SpringboardInterface {
         removeDraggedItemFromArrangement()
         pages.turn(toPageAt: targetPageIndex)
         guard let targetPage = pages.currentPageGrid else { return }
-        var arrangement = targetPage.items
-        var arrangedLayers: [SpringboardItemLayer?] = targetPage.itemLayers
-        if let draggedIndex = arrangement.firstIndex(where: { $0.identifier == dragSession.item.identifier }) {
-            arrangement.remove(at: draggedIndex)
-            arrangedLayers.remove(at: draggedIndex)
-        }
-        dragSession.arrangement = arrangement + [dragSession.item]
-        dragSession.arrangedLayers = arrangedLayers + [nil]
-        dragSession.currentIndex = dragSession.arrangement.count - 1
+        let joined = SpringboardDragging.arrangement(
+            joining: dragSession.item,
+            page: zip(targetPage.items, targetPage.itemLayers).map { (item: $0, layer: $1) },
+            capacity: targetPage.capacity
+        )
+        dragSession.arrangement = joined.items
+        dragSession.arrangedLayers = joined.layers
+        dragSession.currentIndex = joined.index
         dragSession.pageIndex = pages.currentPageIndex
         dragSession.isOnNewLastPage = dragSession.context == .main && targetPageIndex >= layout.pages.count
         dragSession.hasRearranged = true
@@ -716,7 +733,10 @@ extension SpringboardInterface {
         dragSession.unsavedFolderTarget = nil
         endHover()
         var closingFolder: LaunchpadFolder?
-        if let folderPanel, dragSession.sourceContext == .main {
+        let isSourceFolderOpen = dragSession.sourceContext == .folder
+            && folderPanel != nil
+            && folderPanel?.folder.identifier == dragSession.sourceFolderIdentifier
+        if let folderPanel, !isSourceFolderOpen {
             closingFolder = folderPanel.folder
             if isAnimatingFolder {
                 dismissFolderImmediately()
@@ -724,14 +744,18 @@ extension SpringboardInterface {
                 closeFolder()
             }
         }
-        if dragSession.sourceContext == .folder, folderPanel == nil {
-            // Dragged out of a folder that has closed since, or out of a closed one as a search result:
-            // back into the folder's icon, as 15 did.
+        if dragSession.sourceContext == .folder, !isSourceFolderOpen {
+            // Dragged out of a folder that has closed since — another one may have opened meanwhile — or
+            // out of a closed one as a search result: back into the folder's icon, as 15 did.
             showMainPages(pageIndex: dragSession.sourceFolderPageIndex ?? mainPages.currentPageIndex)
-            let folderIconLayer = mainPages.itemLayers.first { itemLayer in
-                guard case .folder(let folder) = itemLayer.item else { return false }
-                return folder.applications.contains { $0.identifier == dragSession.item.identifier }
+            if let closingFolder, folderPanel != nil {
+                hideFolderIcon(of: closingFolder)
             }
+            let folderIconLayer = mainPages.itemLayers.first { $0.item?.identifier == dragSession.sourceFolderIdentifier }
+                ?? mainPages.itemLayers.first { itemLayer in
+                    guard case .folder(let folder) = itemLayer.item else { return false }
+                    return folder.applications.contains { $0.identifier == dragSession.item.identifier }
+                }
             guard let folderIconLayer else {
                 dragSession.itemLayer.removeFromSuperlayer()
                 finishDrag()
@@ -751,6 +775,13 @@ extension SpringboardInterface {
                 hideFolderIcon(of: closingFolder)
             }
         } else if let folderPanel {
+            // The folder as stored: the open one may be a copy without the dragged application, opened by
+            // holding the icon over it after it had left.
+            if let storedFolder = storedFolder(for: folderPanel.folder, in: layout) {
+                folderPanel.update(with: storedFolder) { [weak self] itemLayer in
+                    self?.putIcons(in: itemLayer)
+                }
+            }
             folderPanel.reloadPages(pageIndex: dragSession.sourcePageIndex) { [weak self] itemLayer in
                 self?.putIcons(in: itemLayer)
             }

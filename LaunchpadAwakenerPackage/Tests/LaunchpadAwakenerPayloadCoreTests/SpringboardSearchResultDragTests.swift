@@ -58,14 +58,28 @@ struct SpringboardSearchResultDragTests {
         #expect(SpringboardDragging.location(of: Self.identifier(99), in: Self.layout) == nil)
     }
 
+    /// The second page's items, each with a stand-in for its layer.
+    private static let secondPageEntries = layout.pages[1].items.map { (item: $0, layer: "layer of \($0.identifier)") }
+
     @Test("the result goes after the page's other items, leaving its own place if it was on that page")
     func resultJoinsPage() {
-        let pageItems = Self.layout.pages[1].items
+        let fromSamePage = SpringboardDragging.arrangement(joining: .application(Self.application(20)), page: Self.secondPageEntries, capacity: 35)
+        let fromFolder = SpringboardDragging.arrangement(joining: .application(Self.application(13)), page: Self.secondPageEntries, capacity: 35)
 
-        let fromSamePage = SpringboardDragging.arrangement(joining: .application(Self.application(20)), page: pageItems)
-        let fromFolder = SpringboardDragging.arrangement(joining: .application(Self.application(13)), page: pageItems)
+        #expect(fromSamePage.items.map(\.identifier) == [Self.identifier(21), Self.identifier(20)])
+        #expect(fromSamePage.layers == ["layer of #21", nil])
+        #expect(fromSamePage.index == 1)
+        #expect(fromFolder.items.map(\.identifier) == [Self.identifier(20), Self.identifier(21), Self.identifier(13)])
+        #expect(fromFolder.layers == ["layer of #20", "layer of #21", nil])
+        #expect(fromFolder.index == 2)
+    }
 
-        #expect(fromSamePage.map(\.identifier) == [Self.identifier(21), Self.identifier(20)])
-        #expect(fromFolder.map(\.identifier) == [Self.identifier(20), Self.identifier(21), Self.identifier(13)])
+    @Test("on a full page the result takes the last cell, whose item spills over on the drop")
+    func resultJoinsFullPage() {
+        let joined = SpringboardDragging.arrangement(joining: .application(Self.application(13)), page: Self.secondPageEntries, capacity: 2)
+
+        #expect(joined.items.map(\.identifier) == [Self.identifier(20), Self.identifier(13), Self.identifier(21)])
+        #expect(joined.layers == ["layer of #20", nil, "layer of #21"])
+        #expect(joined.index == 1)
     }
 }

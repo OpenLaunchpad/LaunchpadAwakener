@@ -250,6 +250,21 @@ struct LaunchpadStoreFolderExitTests {
         }
     }
 
+    @Test("a folder left with one application by a move onto another folder's page dissolves")
+    func dissolveOnMovingOntoOtherFolderPage() throws {
+        try withTemporaryDirectory { directoryURL in
+            let (store, identifiers) = try Self.makeStoreWithFolder(in: directoryURL, titles: ["A", "B", "C", "D", "E"])
+            let otherFolderIdentifier = try store.makeFolder(merging: try #require(identifiers["D"]), with: try #require(identifiers["C"]), title: "Other", itemsPerPage: 35)
+            let otherFolderPage = try #require(try store.layout().folders.first { $0.identifier == otherFolderIdentifier }?.pages.first?.identifier)
+
+            try store.moveItem(try #require(identifiers["B"]), toIndex: 0, onPage: otherFolderPage, itemsPerPage: 35)
+
+            let layout = try store.layout()
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["A", "Other", "E"]])
+            #expect(layout.folders.map { folder in folder.applications.map(\.title) } == [["B", "C", "D"]])
+        }
+    }
+
     @Test("a folder left with one application by a drag past the last page dissolves")
     func dissolveOnMovingToNewLastPage() throws {
         try withTemporaryDirectory { directoryURL in

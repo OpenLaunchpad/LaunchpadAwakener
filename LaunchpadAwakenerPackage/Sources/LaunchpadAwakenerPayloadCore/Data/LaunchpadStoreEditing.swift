@@ -50,13 +50,18 @@ extension LaunchpadStore {
     // MARK: - Edits
 
     /// Moves an application or folder to `targetIndex` on `pageIdentifier` — a root page or a folder's page.
+    /// A folder the application leaves with one application or none is dissolved, wherever it goes.
     package func moveItem(_ itemIdentifier: LaunchpadItemIdentifier, toIndex targetIndex: Int, onPage pageIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
         try performTransaction {
+            let sourceFolder = try containingFolder(of: itemIdentifier)
             try detach(itemIdentifier)
             var pageChildren = try children(of: pageIdentifier)
             pageChildren.insert(itemIdentifier, at: min(max(targetIndex, 0), pageChildren.count))
             try setChildren(pageChildren, of: pageIdentifier)
             try tidyUp(itemsPerPage: itemsPerPage)
+            if let sourceFolder, try containingFolder(of: itemIdentifier) != sourceFolder {
+                try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
+            }
         }
     }
 
