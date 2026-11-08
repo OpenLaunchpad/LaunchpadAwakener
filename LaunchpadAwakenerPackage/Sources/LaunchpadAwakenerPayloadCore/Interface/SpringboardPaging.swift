@@ -191,4 +191,42 @@ package enum SpringboardDragging {
         }
         return min(index, itemCount - 1)
     }
+
+    // MARK: - Search results
+
+    /// Where an application is in a layout: on a main page, or inside a folder on one.
+    package enum Location: Equatable, Sendable {
+        case mainPage(pageIndex: Int, itemIndex: Int)
+        /// `pageIndex` and `itemIndex` count within the folder; `mainPageIndex` is the page the folder is on.
+        case folder(LaunchpadItemIdentifier, mainPageIndex: Int, pageIndex: Int, itemIndex: Int)
+    }
+
+    /// Where the application `applicationIdentifier` is in `layout`, looked up through the pages and the
+    /// folders on them as 15 looked up a dragged search result (`sub_1000B4388`, 15.5 `0x1000B4388`); nil
+    /// when it is in neither.
+    package static func location(of applicationIdentifier: LaunchpadItemIdentifier, in layout: LaunchpadLayout) -> Location? {
+        for (pageIndex, page) in layout.pages.enumerated() {
+            for (itemIndex, item) in page.items.enumerated() {
+                switch item {
+                case .application(let application):
+                    if application.identifier == applicationIdentifier {
+                        return .mainPage(pageIndex: pageIndex, itemIndex: itemIndex)
+                    }
+                case .folder(let folder):
+                    for (folderPageIndex, folderPage) in folder.pages.enumerated() {
+                        if let indexInFolder = folderPage.applications.firstIndex(where: { $0.identifier == applicationIdentifier }) {
+                            return .folder(folder.identifier, mainPageIndex: pageIndex, pageIndex: folderPageIndex, itemIndex: indexInFolder)
+                        }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The page a dragged search result joins once the search has gone: the page's items without it, then
+    /// it after the rest, where 15 added it (`sub_1000B4388`).
+    package static func arrangement(joining item: LaunchpadItem, page pageItems: [LaunchpadItem]) -> [LaunchpadItem] {
+        pageItems.filter { $0.identifier != item.identifier } + [item]
+    }
 }

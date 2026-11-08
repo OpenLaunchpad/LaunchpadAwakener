@@ -268,7 +268,12 @@ final class SpringboardInterface {
     /// Ends whatever is in progress as the springboard starts to go: a drag is cancelled, a new name
     /// is kept, a pending search is dropped.
     func prepareForHiding() {
-        if dragSession != nil {
+        if let dragSession {
+            if dragSession.isLeavingSearch {
+                // Going now: a search result still on its way out of the search goes back at once.
+                dragSession.isLeavingSearch = false
+                mainPages.scrollLayer.opacity = 1
+            }
             cancelDrag()
         }
         commitRenaming()
@@ -738,7 +743,7 @@ final class SpringboardInterface {
         showMainPages(pageIndex: pageIndexBeforeSearch)
     }
 
-    private func clearSearch() {
+    func clearSearch() {
         searchEditor = SpringboardFieldEditor(editing: SpringboardTextEditing(selectingAllOf: ""))
         searchTextDidChange()
     }

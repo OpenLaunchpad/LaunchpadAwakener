@@ -6,7 +6,7 @@
 - **最后更新**: 2026-11-08
 - **所属愿景**: 无
 - **关联提案**: 无
-- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；验证用原型在分支 `experiment/injection-prototype`
+- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；拖到 Dock 与拖动搜索结果在 `feature/drag-to-dock`（worktree `.worktrees/LaunchpadAwakener-DragToDock`）；验证用原型在分支 `experiment/injection-prototype`
 - **配套文档**: [实现说明](../Internal/LaunchpadReplica.md)
 
 ## 摘要
@@ -208,7 +208,7 @@ final class SpringboardController {
    2. ✅ 文件夹里的方向键导航，规则照 15 的 `-[ECSBGroupPager navigate:withEvent:]`。
    3. ✅ 新装 App 名字旁的蓝点，判据与画法照 15 的 `ECFlagLayer`。
    4. ✅ 抖动模式的关闭按钮与删除 App Store 的 App。15 的确认气泡由 `com.apple.dock.ecap` 服务画，27.2 的 Dock.app 里已经没有这个服务，要自己画。
-   5. ⏸ 把图标拖到 Dock 上加入 Dock，拖动搜索结果：逆向查清了做法，留作后续项（见决策日志）。
+   5. ◐ 把图标拖到 Dock 上加入 Dock，拖动搜索结果：2026-11-08 先留作后续项，同日接着做。拖动搜索结果已做：照 15 先退出搜索，再从 App 真正所在的地方接着拖（见决策日志）；拖到 Dock 在做。
    6. ◐ 搜索框与改名框的完整文本编辑（光标、选区、复制粘贴、撤销已做，输入法留作后续项）：搜索框的光标与选区、输入法、复制粘贴、撤销。15 用 `com.apple.dock.ecti` 服务里的真 `NSTextField`，27.2 里这个服务也没有了，方案先逆向再定。
    7. 捏合要用户关掉 Spotlight 的捏合后在真机上试，agent 做不了，留给用户。
 
@@ -292,3 +292,4 @@ final class SpringboardController {
 | 2026-11-08 | 第 6 批自审（code-review medium）：10 条发现，修 5 条——删除中的图标仍可点击与重复删除、弹出确认时还能翻页、页面重建后选中高亮残留、删除与对账竞争时编辑失败、打开前在主线程查 Spotlight；另 5 条判为误报或不修，记在 [已裁决清单](../Internal/ReviewAdjudications.md) | 修复各带回归测试，界面层里无法在测试进程中建出 Dock 的网格类的两条（翻页、选中高亮）没有测试 seam，只验证了编译与已有测试 |
 | 2026-11-08 | 第 6 批实现完成，待用户看过后收尾；输入法、拖到 Dock、拖动搜索结果是后续项 | — |
 | 2026-11-08 | 第 6 批已做完的部分收尾：合进 `main` 并推送，`feature/daily-gaps` 与它的 worktree 删除。提案保持 In Progress、不取号；拖到 Dock 与拖动搜索结果接着在第 6 批第 5 步做，输入法另起提案 | 用户要求先收尾、再继续做这三项，提案还没做完。文档：实现说明已写进这一批的决策与已知降级，没有调用方契约，不需要使用指南；没有新术语 |
+| 2026-11-08 | 拖动搜索结果照 15：一开始拖，结果淡出、搜索清空、回到搜索前的那页，App 挪到这页末尾再淡入，之后是普通拖动；拖动的来源是 App 在布局里的真实位置，在文件夹里的松手时移出文件夹，Esc 时滑回原处 | 逆向 15.5 的 `-[ECSBDragCapture _cancelFiltering]`（`0x1000B414C`）与两个完成回调（`0x1000B42B8`、`0x1000B4388`）：先淡出分页器的滚动层，回调里 `searchTextCleared` 清空搜索并回到搜索前的页，再在分页器的页里找到被拖项（文件夹里的也找），把它加到当前页末尾、把来源记成它真正所在的页与文件夹，期间来的取消等这一步做完再执行。数据在松手前不写，与 15 相同 |

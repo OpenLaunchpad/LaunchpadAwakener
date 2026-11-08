@@ -15,6 +15,9 @@ final class SpringboardDragSession {
     let sourceContext: SpringboardInterface.GridContext
     let sourcePageIndex: Int
     let sourceItemIndex: Int
+    /// For an application dragged out of a folder whose panel never opened — a search result — the main
+    /// page that folder is on, where a cancel sends the icon back into the folder's icon.
+    let sourceFolderPageIndex: Int?
     /// The pointer's offset from the dragged cell's centre.
     let grabOffset: CGPoint
 
@@ -37,6 +40,12 @@ final class SpringboardDragSession {
     var pendingDrop: (location: CGPoint, timestamp: UInt64)?
     /// Set from leaving a folder until its icon is back on the main page, 250 ms after it closed.
     var isWaitingForFolderToClose = false
+    /// Set while a dragged search result waits for the results to fade out and its page to come in, as
+    /// 15's `-[ECSBDragCapture _cancelFiltering]` (15.5 `0x1000B414C`) made it wait: the icon follows the
+    /// pointer, nothing else responds.
+    var isLeavingSearch = false
+    /// An Escape that came while leaving the search; carried out once the page is in.
+    var isCancelPending = false
 
     /// The main page as it was when a folder opened under the dragged icon: its icons, with a gap where
     /// the dragged one was. If the drag ends in the folder, the gap stays until the folder closes.
@@ -53,6 +62,8 @@ final class SpringboardDragSession {
     var edgeTask: Task<Void, Never>?
     var edgeDirection: Int?
 
+    /// - Parameter origin: For a search result, where its application really is; the drag starts from
+    ///   there, not from the results it was picked up in.
     init(
         item: LaunchpadItem,
         itemLayer: SpringboardItemLayer,
@@ -63,13 +74,28 @@ final class SpringboardDragSession {
         arrangedLayers: [SpringboardItemLayer?],
         grabOffset: CGPoint,
         location: CGPoint,
-        timestamp: UInt64
+        timestamp: UInt64,
+        origin: SpringboardDragging.Location? = nil
     ) {
         self.item = item
         self.itemLayer = itemLayer
-        sourceContext = context
-        sourcePageIndex = pageIndex
-        sourceItemIndex = itemIndex
+        switch origin {
+        case let .mainPage(originPageIndex, originItemIndex):
+            sourceContext = .main
+            sourcePageIndex = originPageIndex
+            sourceItemIndex = originItemIndex
+            sourceFolderPageIndex = nil
+        case let .folder(_, mainPageIndex, folderPageIndex, indexInFolder):
+            sourceContext = .folder
+            sourcePageIndex = folderPageIndex
+            sourceItemIndex = indexInFolder
+            sourceFolderPageIndex = mainPageIndex
+        case nil:
+            sourceContext = context
+            sourcePageIndex = pageIndex
+            sourceItemIndex = itemIndex
+            sourceFolderPageIndex = nil
+        }
         self.grabOffset = grabOffset
         self.context = context
         self.pageIndex = pageIndex
@@ -101,9 +127,7 @@ extension SpringboardInterface {
         location: CGPoint,
         timestamp: UInt64
     ) {
-        // 15 left search on the first move of a dragged result; here results are not dragged.
         guard
-            !isShowingSearchResults,
             !isAnimatingFolder,
             let item = itemLayer.item,
             let pageGrid = pages(for: context).currentPageGrid,
@@ -111,6 +135,15 @@ extension SpringboardInterface {
         else {
             itemLayer.isDarkened = false
             return
+        }
+        // A search result is dragged from where its application really is.
+        var origin: SpringboardDragging.Location?
+        if isShowingSearchResults {
+            guard let resultOrigin = SpringboardDragging.location(of: item.identifier, in: layout) else {
+                itemLayer.isDarkened = false
+                return
+            }
+            origin = resultOrigin
         }
         let frameInContainer = itemSuperlayer.convert(itemLayer.frame, to: containerLayer)
         CATransaction.begin()
@@ -137,9 +170,65 @@ extension SpringboardInterface {
             arrangedLayers: arrangedLayers,
             grabOffset: CGPoint(x: frameInContainer.midX - startLocation.x, y: frameInContainer.midY - startLocation.y),
             location: location,
-            timestamp: timestamp
+            timestamp: timestamp,
+            origin: origin
         )
+        if origin != nil {
+            leaveSearchForDraggedResult()
+        }
         continueDrag(to: location, timestamp: timestamp)
+    }
+
+    /// The first move of a dragged search result ends the search, as 15's did (`-[ECSBDragCapture
+    /// _cancelFiltering]`, 15.5 `0x1000B414C`, and its completion blocks `0x1000B42B8` and `0x1000B4388`):
+    /// the results fade out, the search is cleared, the page shown before it comes back with the result's
+    /// application after its other items, and the page fades in.
+    private func leaveSearchForDraggedResult() {
+        guard let dragSession else { return }
+        dragSession.isLeavingSearch = true
+        // Wherever it ends up, the application moves from where it is.
+        dragSession.hasRearranged = true
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.dragSession === dragSession, dragSession.isLeavingSearch else { return }
+                self.joinPageBeforeSearch(dragSession)
+            }
+        }
+        mainPages.scrollLayer.opacity = 0
+        CATransaction.commit()
+    }
+
+    private func joinPageBeforeSearch(_ dragSession: SpringboardDragSession) {
+        clearSearch()
+        // The application's own icons leave the pages, as 15 took them out (`removeItemLayer:`); the
+        // dragged icon stands for it. A folder it is in keeps showing it until the drop.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for itemLayer in mainPages.itemLayers where itemLayer.item?.identifier == dragSession.item.identifier {
+            itemLayer.removeFromSuperlayer()
+        }
+        CATransaction.commit()
+        if let pageGrid = mainPages.currentPageGrid {
+            let keptLayers = zip(pageGrid.items, pageGrid.itemLayers).compactMap { item, itemLayer in
+                item.identifier == dragSession.item.identifier ? nil : itemLayer
+            }
+            dragSession.context = .main
+            dragSession.pageIndex = mainPages.currentPageIndex
+            dragSession.arrangement = SpringboardDragging.arrangement(joining: dragSession.item, page: pageGrid.items)
+            dragSession.arrangedLayers = keptLayers.map(Optional.some) + [nil]
+            dragSession.currentIndex = dragSession.arrangement.count - 1
+            animateArrangement()
+        }
+        dragSession.isLeavingSearch = false
+        mainPages.scrollLayer.opacity = 1
+        if dragSession.isCancelPending {
+            cancelDrag()
+        } else if dragSession.pendingDrop != nil {
+            performPendingDrop()
+        } else {
+            evaluateDrag()
+        }
     }
 
     // MARK: - Moving
@@ -174,7 +263,7 @@ extension SpringboardInterface {
     /// Decides what the dragged icon's position means, in 15's order: leaving the open folder, an edge,
     /// another icon to drop onto, then a new place on the page.
     private func evaluateDrag() {
-        guard let dragSession, !dragSession.isEnding, !dragSession.isWaitingForFolderToClose, !isAnimatingFolder else { return }
+        guard let dragSession, !dragSession.isEnding, !dragSession.isWaitingForFolderToClose, !dragSession.isLeavingSearch, !isAnimatingFolder else { return }
         let cellCenter = dragSession.itemLayer.position
 
         if let folderPanel {
@@ -313,7 +402,12 @@ extension SpringboardInterface {
         endHover()
         cancelEdgePageTurn()
         dragSession.mainPageArrangement = (dragSession.pageIndex, dragSession.arrangedLayers)
-        openFolder(folder, from: folderItemLayer) { [weak self] in
+        // A search result held over its own folder: the panel shows the folder without it, so that it
+        // is not there twice.
+        let shownFolder = folder.applications.contains { $0.identifier == dragSession.item.identifier }
+            ? folder.removing(dragSession.item.identifier)
+            : folder
+        openFolder(shownFolder, from: folderItemLayer) { [weak self] in
             self?.carryDraggedItemIntoOpenFolder()
         }
         keepDraggedIconOnTop()
@@ -496,8 +590,9 @@ extension SpringboardInterface {
 
     func endDrag(at location: CGPoint, timestamp: UInt64) {
         guard let dragSession, !dragSession.isEnding else { return }
-        // A release while a folder opens or closes waits for it to finish, as 15's did.
-        if isAnimatingFolder || dragSession.isWaitingForFolderToClose {
+        // A release while a folder opens or closes, or while the search goes, waits for it to finish, as
+        // 15's did.
+        if isAnimatingFolder || dragSession.isWaitingForFolderToClose || dragSession.isLeavingSearch {
             dragSession.pendingDrop = (location, timestamp)
             return
         }
@@ -601,6 +696,12 @@ extension SpringboardInterface {
     /// animating is left to finish.
     func cancelDrag() {
         guard let dragSession, !dragSession.isEnding else { return }
+        // While a dragged search result leaves the search, the cancel waits until its page is in, as 15's
+        // waited (`sub_1000B4388`).
+        if dragSession.isLeavingSearch {
+            dragSession.isCancelPending = true
+            return
+        }
         dragSession.isEnding = true
         dragSession.cancelTimers()
         dragSession.mainPageArrangement = nil
@@ -616,8 +717,9 @@ extension SpringboardInterface {
             }
         }
         if dragSession.sourceContext == .folder, folderPanel == nil {
-            // Dragged out of a folder that has closed since: back into the folder's icon, as 15 did.
-            showMainPages(pageIndex: mainPages.currentPageIndex)
+            // Dragged out of a folder that has closed since, or out of a closed one as a search result:
+            // back into the folder's icon, as 15 did.
+            showMainPages(pageIndex: dragSession.sourceFolderPageIndex ?? mainPages.currentPageIndex)
             let folderIconLayer = mainPages.itemLayers.first { itemLayer in
                 guard case .folder(let folder) = itemLayer.item else { return false }
                 return folder.applications.contains { $0.identifier == dragSession.item.identifier }
