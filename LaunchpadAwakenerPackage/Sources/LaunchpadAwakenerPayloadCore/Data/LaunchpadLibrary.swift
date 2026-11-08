@@ -196,6 +196,8 @@ package enum LaunchpadEdit: Sendable, Equatable {
     case moveOutOfFolder(LaunchpadItemIdentifier, toIndex: Int, onPage: LaunchpadItemIdentifier)
     case moveToNewLastPage(LaunchpadItemIdentifier)
     case renameFolder(LaunchpadItemIdentifier, title: String)
+    /// The application was deleted from the disk.
+    case removeApplication(LaunchpadItemIdentifier)
 }
 
 extension LaunchpadLibrary {
@@ -230,6 +232,8 @@ extension LaunchpadLibrary {
                 try store.moveItemToNewLastPage(itemIdentifier, itemsPerPage: itemsPerPage)
             case let .renameFolder(folderIdentifier, title):
                 try store.renameFolder(folderIdentifier, to: title)
+            case let .removeApplication(itemIdentifier):
+                try store.removeApplication(itemIdentifier, itemsPerPage: itemsPerPage)
             }
             try await publishCurrentLayout()
             return true

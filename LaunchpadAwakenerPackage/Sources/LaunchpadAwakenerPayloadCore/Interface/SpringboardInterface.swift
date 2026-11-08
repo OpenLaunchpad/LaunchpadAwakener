@@ -74,9 +74,15 @@ final class SpringboardInterface {
         /// A press in the rename field, which drags out a selection: by character, or by word from
         /// `doubleClickedWord` after a double-click.
         case titleEditor(doubleClickedWord: Range<Int>?)
+        /// A press on a close box in jiggle mode; releasing on it asks to delete the application.
+        case closeBox(itemLayer: SpringboardItemLayer, context: GridContext)
     }
 
     private var pointerTracking: PointerTracking = .none
+    /// The confirmation asked before deleting an application; while it shows it takes all input.
+    var deletionPanel: SpringboardDeletionPanel?
+    /// What the Dock's uninstaller answered for each bundle path, asked once per showing.
+    var deletabilityByBundlePath: [String: Bool] = [:]
     /// Set while an icon is being dragged; see `SpringboardInterface+Dragging.swift`.
     var dragSession: SpringboardDragSession?
 
@@ -157,6 +163,9 @@ final class SpringboardInterface {
 
         mainPages.currentPageDidChange = { [weak self] in
             self?.select(itemAt: nil)
+        }
+        mainPages.itemLayerWillJiggle = { [weak self] itemLayer in
+            self?.prepareCloseBox(for: itemLayer)
         }
         restore(position)
     }
@@ -444,6 +453,9 @@ final class SpringboardInterface {
         newFolderPanel.pages.currentPageDidChange = { [weak self] in
             self?.select(itemAt: nil)
         }
+        newFolderPanel.pages.itemLayerWillJiggle = { [weak self] itemLayer in
+            self?.prepareCloseBox(for: itemLayer)
+        }
         isAnimatingFolder = true
         newFolderPanel.animateOpen(from: folderItemLayer, springboardLayer: springboardLayer, containerLayer: containerLayer) { [weak self] in
             self?.isAnimatingFolder = false
@@ -730,6 +742,12 @@ final class SpringboardInterface {
     // MARK: - Keys
 
     func handleKeyDown(keyCode: Int64, characters: String, modifierFlags: CGEventFlags) -> Action {
+        if deletionPanel != nil {
+            if let choice = SpringboardDeletionPanel.Choice(keyCode: keyCode, characters: characters, hasCommand: modifierFlags.contains(.maskCommand)) {
+                answerDeletionPanel(choice)
+            }
+            return .none
+        }
         guard !isAnimatingFolder else { return .none }
         if renaming != nil {
             handleRenamingKeyDown(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags)
@@ -866,6 +884,10 @@ final class SpringboardInterface {
 
     /// - Parameter clickCount: 2 for the second press of a double-click, and so on.
     func handleMouseDown(at containerPoint: CGPoint, timestamp: UInt64, modifierFlags: CGEventFlags = [], clickCount: Int64 = 1) -> Action {
+        if deletionPanel != nil {
+            pressWhileAskingToDelete(at: containerPoint)
+            return .none
+        }
         // A press while a drop is still settling waits, as one during a folder's animation does.
         guard !isAnimatingFolder, dragSession == nil else { return .none }
         cancelLongPress()
@@ -919,6 +941,13 @@ final class SpringboardInterface {
         let pointInPagesSuperlayer = containerLayer.convert(containerPoint, to: pages.scrollLayer.superlayer)
         if let pageIndex = pages.pageIndexOfIndicator(at: pointInPagesSuperlayer) {
             pointerTracking = .pagerIndicator(context: context, pageIndex: pageIndex)
+            return .none
+        }
+        if let (pageGrid, gridPoint) = pages.pointInCurrentGrid(pointInPagesSuperlayer), let hit = pageGrid.item(at: gridPoint),
+           hit.itemLayer.isOnCloseBox(hit.itemLayer.convert(containerPoint, from: containerLayer))
+        {
+            hit.itemLayer.isCloseBoxPressed = true
+            pointerTracking = .closeBox(itemLayer: hit.itemLayer, context: context)
             return .none
         }
         if let (pageGrid, gridPoint) = pages.pointInCurrentGrid(pointInPagesSuperlayer), let hit = pageGrid.item(at: gridPoint), hit.isOnIcon {
@@ -987,6 +1016,10 @@ final class SpringboardInterface {
             if let folderPanel {
                 dragInRenameField(to: folderPanel.pointInTitleEditor(containerPoint), doubleClickedWord: doubleClickedWord)
             }
+            return .none
+        case let .closeBox(itemLayer, _):
+            // As 15's button did, it shows pressed only while the pointer is on it.
+            itemLayer.isCloseBoxPressed = itemLayer.isOnCloseBox(itemLayer.convert(containerPoint, from: containerLayer))
             return .none
         case .none, .pagerIndicator, .searchField, .folderTitle:
             return .none
@@ -1067,6 +1100,15 @@ final class SpringboardInterface {
             // (`-[ECSBGroup leftMouseUp:in:]`, 15.5 `0x1000A36F0`).
             if SpringboardPreferences.allowsRenamingFolders {
                 startRenaming()
+            }
+            return .none
+        case let .closeBox(itemLayer, context):
+            // Let go on the close box: 15 asked before deleting (`-[ECSBItemLayer leftMouseUp:in:]`,
+            // 15.5 `0x100062994`).
+            let wasPressed = itemLayer.isCloseBoxPressed
+            itemLayer.isCloseBoxPressed = false
+            if wasPressed {
+                presentDeletionPanel(for: itemLayer, context: context)
             }
             return .none
         case .none, .searchField, .titleEditor:

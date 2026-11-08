@@ -40,10 +40,18 @@ final class SpringboardPagedGrids {
         }
     }
 
+    /// Called for each icon about to jiggle, so the owner can tell it whether it has a close box.
+    var itemLayerWillJiggle: ((SpringboardItemLayer) -> Void)?
+
     private func applyJiggling(to itemLayers: [SpringboardItemLayer]) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        itemLayers.forEach { $0.isJiggling = isJiggling }
+        for itemLayer in itemLayers {
+            if isJiggling {
+                itemLayerWillJiggle?(itemLayer)
+            }
+            itemLayer.isJiggling = isJiggling
+        }
         CATransaction.commit()
     }
 

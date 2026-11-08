@@ -446,6 +446,9 @@ final class SpringboardItemLayer: CALayer {
             imageLayer.frame = iconFrame
             labelLayer.frame = restingLabelFrame
         }
+        if let closeBoxLayer {
+            closeBoxLayer.frame = Self.closeBoxFrame(imageFrame: iconFrame, closeBoxSize: closeBoxLayer.bounds.size)
+        }
 
         if isFolder {
             let backdropFrame = folderBackdropFrame
@@ -488,7 +491,74 @@ final class SpringboardItemLayer: CALayer {
         didSet {
             guard isJiggling != oldValue else { return }
             updateJiggle()
+            updateCloseBox()
         }
+    }
+
+    // MARK: - Close box
+
+    /// The Dock's uninstaller would delete the application, so jiggle mode shows a close box on it.
+    var isDeletable = false {
+        didSet {
+            guard isDeletable != oldValue else { return }
+            updateCloseBox()
+        }
+    }
+
+    /// Pressed, the close box shows its darker texture, as 15's did while the pointer stayed on it.
+    var isCloseBoxPressed = false {
+        didSet {
+            guard isCloseBoxPressed != oldValue, let closeBoxLayer else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            closeBoxLayer.contents = SpringboardTextures.image(named: isCloseBoxPressed ? "ecsb_closebox_pressed" : "ecsb_closebox", scale: contentsScale)
+            CATransaction.commit()
+        }
+    }
+
+    private var closeBoxLayer: CALayer?
+
+    var showsCloseBox: Bool {
+        closeBoxLayer != nil
+    }
+
+    /// Shown in jiggle mode on a deletable application, never on a folder, without animation
+    /// (`-[ECSBItemLayer setCloseboxVisible:]`, 15.5 `0x1000616D4`); its texture's own size
+    /// (`_makeCloseBoxLayer`, `0x100061E7C`), 28 points in Dock.app.
+    private func updateCloseBox() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        guard isJiggling, isDeletable, !isFolder else {
+            closeBoxLayer?.removeFromSuperlayer()
+            closeBoxLayer = nil
+            isCloseBoxPressed = false
+            return
+        }
+        guard closeBoxLayer == nil, let closeBoxImage = SpringboardTextures.image(named: "ecsb_closebox", scale: contentsScale) else { return }
+        let newCloseBoxLayer = CALayer()
+        newCloseBoxLayer.contents = closeBoxImage
+        newCloseBoxLayer.contentsScale = contentsScale
+        newCloseBoxLayer.bounds = CGRect(x: 0, y: 0, width: CGFloat(closeBoxImage.width) / contentsScale, height: CGFloat(closeBoxImage.height) / contentsScale)
+        newCloseBoxLayer.frame = Self.closeBoxFrame(imageFrame: iconFrame, closeBoxSize: newCloseBoxLayer.bounds.size)
+        jitterLayer.addSublayer(newCloseBoxLayer)
+        closeBoxLayer = newCloseBoxLayer
+    }
+
+    /// Centred 10 % of the image in from its top left corner (`-[ECSBItemLayer _closeboxFrame]`,
+    /// 15.5 `0x1000621D0`), every part truncated as there.
+    static func closeBoxFrame(imageFrame: CGRect, closeBoxSize: CGSize) -> CGRect {
+        CGRect(
+            x: imageFrame.minX + CGFloat(Int(imageFrame.width * 0.1)) - CGFloat(Int(closeBoxSize.width * 0.5)),
+            y: imageFrame.maxY - (closeBoxSize.height + CGFloat(Int(imageFrame.height * 0.1))) + CGFloat(Int(closeBoxSize.height * 0.5)),
+            width: closeBoxSize.width,
+            height: closeBoxSize.height
+        )
+    }
+
+    /// Whether `point`, a point in this layer, is on the close box.
+    func isOnCloseBox(_ point: CGPoint) -> Bool {
+        closeBoxLayer?.frame.contains(point) ?? false
     }
 
     /// Keeps the icon still whatever `isJiggling` says, as 15 did for an icon picked up, held down or with

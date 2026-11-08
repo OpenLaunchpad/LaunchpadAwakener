@@ -115,6 +115,20 @@ enum DockEnvironment {
         return String(cString: encoding)
     }
 
+    /// `DockBar.environment`, a `DockCore.Environment`; nil when the `DockBar` is out of reach.
+    static var environmentObject: NSObject? {
+        DockBarReference.dockBar.flatMap { objectValue(of: $0, selector: dockBarEnvironment.selector) }
+    }
+
+    /// Whether `receiver`'s own class has `selector` with `expectedTypeEncoding`, frame offsets aside.
+    static func hasMethod(_ receiver: NSObject, selector: Selector, typeEncoding expectedTypeEncoding: String) -> Bool {
+        guard let encoding = typeEncoding(of: receiver, selector: selector), MethodHookInspector.typeEncodingsMatch(encoding, expectedTypeEncoding) else {
+            #log(.error, "-[\(String(cString: object_getClassName(receiver)), privacy: .public) \(NSStringFromSelector(selector), privacy: .public)] is missing or changed")
+            return false
+        }
+        return true
+    }
+
     /// Calls a `float`-returning, argument-less method whose signature is already known to match.
     private static func floatValue(of receiver: NSObject, selector: Selector) -> Float {
         typealias FloatFunction = @convention(c) (AnyObject, Selector) -> Float
@@ -130,7 +144,7 @@ enum DockEnvironment {
     }
 
     /// Same, after checking on the receiver's own class that the method takes nothing and returns an object.
-    private static func checkedObjectValue(of receiver: NSObject, selector: Selector) -> NSObject? {
+    static func checkedObjectValue(of receiver: NSObject, selector: Selector) -> NSObject? {
         guard let encoding = typeEncoding(of: receiver, selector: selector), MethodHookInspector.typeEncodingsMatch(encoding, "@16@0:8") else {
             #log(.error, "-[\(String(cString: object_getClassName(receiver)), privacy: .public) \(NSStringFromSelector(selector), privacy: .public)] is missing or changed")
             return nil

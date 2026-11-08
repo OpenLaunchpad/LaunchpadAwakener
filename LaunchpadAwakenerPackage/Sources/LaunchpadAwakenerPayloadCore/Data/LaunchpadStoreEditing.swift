@@ -140,6 +140,20 @@ extension LaunchpadStore {
         }
     }
 
+    /// Takes out an application that was deleted, as 15 did once its uninstall succeeded
+    /// (`-[Springboard _uninstallRunnable:]`): the page closes the gap without pulling items over from
+    /// the next one, a folder left with one application dissolves, and an emptied page goes.
+    package func removeApplication(_ itemIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
+        try performTransaction {
+            let sourceFolder = try containingFolder(of: itemIdentifier)
+            try removeItem(itemIdentifier)
+            if let sourceFolder {
+                try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
+            }
+            try tidyUp(itemsPerPage: itemsPerPage)
+        }
+    }
+
     /// The folder `itemIdentifier` sits in, or nil when it sits on a page of the springboard itself.
     private func containingFolder(of itemIdentifier: LaunchpadItemIdentifier) throws -> LaunchpadItemIdentifier? {
         let folderIdentifier = try parent(of: try parent(of: itemIdentifier))

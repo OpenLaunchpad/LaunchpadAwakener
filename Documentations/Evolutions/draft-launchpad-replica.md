@@ -207,7 +207,7 @@ final class SpringboardController {
    1. ✅ 三指轻扫翻页：读 Dock 收到的导航轻扫（手势事件，字段 110 为 16），照 15 的 `-[ECPagerLayer gesture:]` 每个方向有效的事件翻一页，主页与打开的文件夹都适用。
    2. ✅ 文件夹里的方向键导航，规则照 15 的 `-[ECSBGroupPager navigate:withEvent:]`。
    3. ✅ 新装 App 名字旁的蓝点，判据与画法照 15 的 `ECFlagLayer`。
-   4. 抖动模式的关闭按钮与删除 App Store 的 App。15 的确认气泡由 `com.apple.dock.ecap` 服务画，27.2 的 Dock.app 里已经没有这个服务，要自己画。
+   4. ✅ 抖动模式的关闭按钮与删除 App Store 的 App。15 的确认气泡由 `com.apple.dock.ecap` 服务画，27.2 的 Dock.app 里已经没有这个服务，要自己画。
    5. 把图标拖到 Dock 上加入 Dock，拖动搜索结果。
    6. 搜索框与改名框的完整文本编辑：搜索框的光标与选区、输入法、复制粘贴、撤销。15 用 `com.apple.dock.ecti` 服务里的真 `NSTextField`，27.2 里这个服务也没有了，方案先逆向再定。
    7. 捏合要用户关掉 Spotlight 的捏合后在真机上试，agent 做不了，留给用户。
@@ -285,3 +285,4 @@ final class SpringboardController {
 | 2026-11-08 | 第 6 批开始实现，在 `feature/daily-gaps` 上 | — |
 | 2026-11-08 | 文件夹里的按键照 15：方向键与主页同规则，Command-↑ 关闭并选中文件夹，键盘打开的文件夹选中第一项。Command-左右在首页或末页当作普通方向键，主页也改成这样 | 逆向查明 15 的分页器在不能翻页时就退化成普通方向键，主页与文件夹共用这段逻辑。顺带修了翻页后旧页上的选中高亮不清的问题，它会让文件夹里的选中项在翻页后残留 |
 | 2026-11-08 | 蓝点存在 `items.flags` 的 0x400 位，与 15 相同；对账时给带 App Store 收据的新 App 置位，从 Launchpad 启动或 Spotlight 记的使用时间晚于放进来的时间时清除 | 27.2 的 Dock 只在 Swift 内部处理下载完成与启动通知，没有可替换的入口；不 hook `handleApplicationLaunchNotification:`，它的数据没逆向，每次启动 App 都会经过它 |
+| 2026-11-08 | 删除 App 用 27.2 Dock 里还在的 `SystemApplicationUninstaller`，确认气泡照 ecap 的视图自己画；删除失败时图标在原处恢复，不像 15 那样放到下一个空位 | 卸载器经 `DockBar.environment` 就能调到，每个方法调用前在对象自己的类上核对签名；ecap 服务与它的文案都不在 27.2 的 Dock.app 里了，文案取自 15.5。真机上只核对了签名，真删一个 App 要用户自己试 |
