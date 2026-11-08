@@ -1,4 +1,5 @@
 import AppKit
+@testable import LaunchpadAwakenerSpringboardCore
 @testable import LaunchpadAwakenerStandaloneCore
 import Testing
 
@@ -14,5 +15,17 @@ struct StandaloneInputMethodTests {
         let contentView = StandaloneSpringboardContentView(frame: window.contentLayoutRect)
         window.contentView = contentView
         #expect(contentView.windowLevel() == 27)
+    }
+}
+
+/// Out of the Dock, the springboard still reads 15's resources from the Dock's bundle.
+@Suite("Standalone resources")
+@MainActor
+struct StandaloneResourceTests {
+    @Test("the standalone host reads its resources from the system's Dock.app")
+    func resourceBundleIsTheDock() throws {
+        let resourceBundle = try #require(StandaloneSpringboardHost.shared.resourceBundle)
+        #expect(resourceBundle.bundleIdentifier == "com.apple.dock")
+        #expect(SpringboardTextures.image(named: "ectl_search_background", scale: 2, in: resourceBundle) != nil)
     }
 }

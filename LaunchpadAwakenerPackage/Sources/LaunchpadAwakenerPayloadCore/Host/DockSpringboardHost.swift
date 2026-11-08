@@ -23,6 +23,11 @@ final class DockSpringboardHost: SpringboardHost {
         .standard(itemsPerPage: SpringboardPreferences.itemsPerPage)
     }
 
+    /// Inside the Dock, its main bundle.
+    nonisolated var resourceBundle: Bundle? {
+        Bundle.main
+    }
+
     var dockGeometry: SpringboardDockGeometry {
         SpringboardDockGeometry(
             orientation: DockEnvironment.dockOrientation,

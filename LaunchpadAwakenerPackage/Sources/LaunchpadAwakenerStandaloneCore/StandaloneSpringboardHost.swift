@@ -24,6 +24,11 @@ final class StandaloneSpringboardHost: SpringboardHost {
         StandaloneEnvironment.libraryConfiguration
     }
 
+    /// The system's Dock.app, as the Dock would read its own main bundle.
+    nonisolated var resourceBundle: Bundle? {
+        StandaloneEnvironment.dockBundle
+    }
+
     var dockGeometry: SpringboardDockGeometry {
         StandaloneEnvironment.dockGeometry
     }

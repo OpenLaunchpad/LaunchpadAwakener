@@ -8,6 +8,14 @@ enum StandaloneEnvironment {
     /// `springboard-*` keys. Thread-safe, so shared.
     nonisolated(unsafe) static let dockPreferences: UserDefaults = UserDefaults(suiteName: "com.apple.dock") ?? .standard
 
+    /// Where macOS keeps the Dock, whose bundle still carries macOS 15's Launchpad resources.
+    static let dockBundleURL = URL(filePath: "/System/Library/CoreServices/Dock.app", directoryHint: .isDirectory)
+
+    /// The Dock's bundle, read from here for the resources the Dock itself reads from its main bundle: the
+    /// search field's images, the springboard's language and "Untitled". Only its files are read; nothing of
+    /// it is loaded.
+    static let dockBundle: Bundle? = Bundle(url: dockBundleURL)
+
     /// The Dock's icon size when the preference is missing.
     static let defaultDockIconSize: Float = 64
 

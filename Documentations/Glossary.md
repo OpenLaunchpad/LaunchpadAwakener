@@ -32,7 +32,7 @@
 
 ### Host（宿主）
 
-画 Launchpad 的那个进程，以及它提供给界面层的那组能力（`SpringboardHost`）：窗口、图层类、Dock 的几何、图标样式、壁纸、玻璃、托管文本框、卸载器。Dock 里的宿主由 payload 提供，用 Dock 自己的类；独立版 App 是另一个宿主。每个进程启动时选定一次（`SpringboardHostSystem.bootstrap(host:)`），界面层只经它拿这些东西。不要和注入时的「目标进程」混用：目标进程只说注入到哪，宿主说的是界面层靠谁画。
+画 Launchpad 的那个进程，以及它提供给界面层的那组能力（`SpringboardHost`）：窗口、图层类、Dock 的几何、图标样式、壁纸、玻璃、托管文本框、输入法、卸载器，以及读 15 的资源（贴图、语言）用的 Dock 包。Dock 里的宿主由 payload 提供，用 Dock 自己的类；独立版 App 是另一个宿主。每个进程启动时选定一次（`SpringboardHostSystem.bootstrap(host:)`），界面层只经它拿这些东西。不要和注入时的「目标进程」混用：目标进程只说注入到哪，宿主说的是界面层靠谁画。
 
 - **主要出现在**：`LaunchpadAwakenerSpringboardCore/Hosting/SpringboardHost.swift`、`LaunchpadAwakenerPayloadCore/Host/DockSpringboardHost.swift`、[实现说明](Internal/LaunchpadReplica.md)「模块结构」
 

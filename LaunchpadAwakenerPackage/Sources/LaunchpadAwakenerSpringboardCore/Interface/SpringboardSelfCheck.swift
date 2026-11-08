@@ -45,6 +45,15 @@ enum SpringboardSelfCheck {
         }
         let recentlyAddedTitles = layout.applications.filter(\.isRecentlyAdded).map(\.title)
         #log(.info, "Self-check: \(recentlyAddedTitles.count, privacy: .public) application(s) marked new: \(recentlyAddedTitles.prefix(5).joined(separator: ", "), privacy: .public)")
+        if let resourceBundle = host.resourceBundle {
+            let searchFieldImageNames = ["ectl_search_background", "ectl_search_loupe", "ectl_search_close"]
+            let foundImageCount = searchFieldImageNames.count { imageName in
+                SpringboardTextures.image(named: imageName, scale: scale, in: resourceBundle) != nil
+            }
+            #log(.info, "Self-check: resources from \(resourceBundle.bundlePath, privacy: .public), language \(SpringboardLocalization.preferredLocalizations.first ?? "none", privacy: .public) (\"\(SpringboardStrings.search, privacy: .public)\"), \(foundImageCount, privacy: .public) of \(searchFieldImageNames.count, privacy: .public) search field image(s)")
+        } else {
+            #log(.error, "Self-check: no resource bundle; the search field has no images and the words are English")
+        }
 
         // Only the size is logged; the image stays in the Dock.
         let captureStartDate = Date()

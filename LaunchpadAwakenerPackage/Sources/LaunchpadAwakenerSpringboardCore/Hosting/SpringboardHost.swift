@@ -21,6 +21,10 @@ package protocol SpringboardHost: AnyObject, Sendable {
     nonisolated var preferences: UserDefaults { get }
     /// Where the layout library keeps its database and what it imports on its first start.
     nonisolated var libraryConfiguration: LaunchpadLibrary.Configuration { get }
+    /// The bundle macOS 15's own resources come from — the Dock's, where Launchpad lived: the search
+    /// field's and the close box's images, the languages the springboard speaks, and words such as
+    /// "Untitled". Nil leaves the images out and the words in English.
+    nonisolated var resourceBundle: Bundle? { get }
 
     /// The room the Dock takes at the edge of the screen, and the camera housing at the top.
     var dockGeometry: SpringboardDockGeometry { get }
@@ -278,8 +282,9 @@ package protocol SpringboardInputMethodClient: AnyObject {
 
 // MARK: - Until a host is chosen
 
-/// The host until one is chosen, as in unit tests: no window, no wallpaper, no glass, no hosted fields and
-/// no uninstaller, a Dock of the default size, and the replicas of the Dock's layer classes.
+/// The host until one is chosen, as in unit tests: no window, no wallpaper, no glass, no hosted fields, no
+/// uninstaller and none of the Dock's resources, a Dock of the default size, and the replicas of the Dock's
+/// layer classes.
 final class DetachedSpringboardHost: SpringboardHost {
     nonisolated init() {}
 
@@ -293,6 +298,10 @@ final class DetachedSpringboardHost: SpringboardHost {
 
     nonisolated var libraryConfiguration: LaunchpadLibrary.Configuration {
         .standard(itemsPerPage: SpringboardPreferences.itemsPerPage)
+    }
+
+    nonisolated var resourceBundle: Bundle? {
+        nil
     }
 
     var dockGeometry: SpringboardDockGeometry {

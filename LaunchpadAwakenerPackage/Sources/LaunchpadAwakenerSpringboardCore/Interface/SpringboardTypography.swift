@@ -94,15 +94,53 @@ enum SpringboardStrings {
     static var search: String { currentTranslation.search }
     static var noResults: String { currentTranslation.noResults }
 
-    /// The Dock's own language, which `Bundle.main` reports inside the Dock.
+    /// In the Dock's own language: the one its bundle — the host's resource bundle — picks for the user.
     private static var currentTranslation: (search: String, noResults: String) {
-        for localization in Bundle.main.preferredLocalizations {
+        translation(forLocalizations: SpringboardLocalization.preferredLocalizations)
+    }
+
+    /// The words for the first of `localizations` that 15 had them in; English when it had none of them.
+    static func translation(forLocalizations localizations: [String]) -> (search: String, noResults: String) {
+        SpringboardLocalization.firstTranslation(in: translations, forLocalizations: localizations) ?? translations["en"]!
+    }
+}
+
+/// The languages the springboard speaks: the Dock's, as the host's resource bundle — the Dock's bundle —
+/// would pick them for the user. English without one.
+///
+/// Worked out from the bundle's own list instead of asked of it: a bundle other than the main one follows
+/// the main bundle's language, and the standalone app's main bundle has only English, so there the Dock's
+/// bundle answered English on a Chinese system. Inside the Dock both ways give the same answer.
+enum SpringboardLocalization {
+    static var preferredLocalizations: [String] {
+        preferredLocalizations(of: SpringboardHostSystem.host.resourceBundle)
+    }
+
+    static func preferredLocalizations(of resourceBundle: Bundle?, forPreferences preferences: [String] = Locale.preferredLanguages) -> [String] {
+        guard let resourceBundle else { return [] }
+        return Bundle.preferredLocalizations(from: resourceBundle.localizations, forPreferences: preferences)
+    }
+
+    /// `key` from the bundle's `Localizable` strings in those languages; `defaultValue` without them.
+    static func string(forKey key: String, defaultValue: String, in resourceBundle: Bundle?, forPreferences preferences: [String] = Locale.preferredLanguages) -> String {
+        guard let resourceBundle else { return defaultValue }
+        if #available(macOS 15.4, *) {
+            let languages = preferredLocalizations(of: resourceBundle, forPreferences: preferences).map(Locale.Language.init(identifier:))
+            return resourceBundle.localizedString(forKey: key, value: defaultValue, table: nil, localizations: languages)
+        }
+        return resourceBundle.localizedString(forKey: key, value: defaultValue, table: nil)
+    }
+
+    /// The entry for the first of `localizations` in `translations`, keyed the way the Dock's `.lproj`
+    /// folders are named (`zh_CN`, `pt_BR`), falling back from a region to its language (`fr_CA` to `fr`).
+    static func firstTranslation<Translation>(in translations: [String: Translation], forLocalizations localizations: [String]) -> Translation? {
+        for localization in localizations {
             let normalizedLocalization = localization.replacingOccurrences(of: "-", with: "_")
             if let translation = translations[normalizedLocalization] ?? translations[String(normalizedLocalization.prefix(2))] {
                 return translation
             }
         }
-        return translations["en"]!
+        return nil
     }
 }
 
@@ -160,14 +198,8 @@ enum SpringboardDeletionStrings {
         currentTranslation.message.replacingOccurrences(of: "%@", with: applicationName)
     }
 
-    /// The Dock's own language, which `Bundle.main` reports inside the Dock.
+    /// In the Dock's own language, as ``SpringboardStrings`` are.
     private static var currentTranslation: (delete: String, cancel: String, message: String) {
-        for localization in Bundle.main.preferredLocalizations {
-            let normalizedLocalization = localization.replacingOccurrences(of: "-", with: "_")
-            if let translation = translations[normalizedLocalization] ?? translations[String(normalizedLocalization.prefix(2))] {
-                return translation
-            }
-        }
-        return translations["en"]!
+        SpringboardLocalization.firstTranslation(in: translations, forLocalizations: SpringboardLocalization.preferredLocalizations) ?? translations["en"]!
     }
 }

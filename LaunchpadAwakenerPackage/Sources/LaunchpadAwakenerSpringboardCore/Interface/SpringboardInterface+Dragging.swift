@@ -714,7 +714,12 @@ extension SpringboardInterface {
         {
             return categoryDescription
         }
-        return Bundle.main.localizedString(forKey: "Untitled", value: "Untitled", table: nil)
+        return Self.untitledFolderName(in: SpringboardHostSystem.host.resourceBundle)
+    }
+
+    /// "Untitled" in the Dock's language, from the Dock's own strings; in English without them.
+    static func untitledFolderName(in resourceBundle: Bundle?, forPreferences preferences: [String] = Locale.preferredLanguages) -> String {
+        SpringboardLocalization.string(forKey: "Untitled", defaultValue: "Untitled", in: resourceBundle, forPreferences: preferences)
     }
 
     /// Escape, or a drop that changed nothing: everything slides back where it was. A folder the drag

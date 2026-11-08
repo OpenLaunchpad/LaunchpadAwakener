@@ -757,19 +757,30 @@ final class SpringboardItemLayer: CALayer {
 enum SpringboardTextures {
     nonisolated(unsafe) private static var cache: [String: CGImage] = [:]
 
-    /// The `@2x` file on Retina displays, as `ECMultiScaleImage` would pick it.
+    /// The `@2x` file on Retina displays, as `ECMultiScaleImage` would pick it, from the host's resource
+    /// bundle: the Dock's, inside the Dock and out of it.
     static func image(named name: String, scale: CGFloat) -> CGImage? {
         let fileName = scale > 1 ? "\(name)@2x" : name
         if let cachedImage = cache[fileName] {
             return cachedImage
         }
         guard
-            let imageURL = Bundle.main.url(forResource: fileName, withExtension: "png") ?? Bundle.main.url(forResource: name, withExtension: "png"),
-            let imageSource = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
-            let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
+            let resourceBundle = SpringboardHostSystem.host.resourceBundle,
+            let image = image(named: name, scale: scale, in: resourceBundle)
         else { return nil }
         cache[fileName] = image
         return image
+    }
+
+    /// The image from `bundle`, uncached: the `@2x` file on Retina displays, the plain one otherwise or
+    /// when there is no `@2x`.
+    static func image(named name: String, scale: CGFloat, in bundle: Bundle) -> CGImage? {
+        let fileName = scale > 1 ? "\(name)@2x" : name
+        guard
+            let imageURL = bundle.url(forResource: fileName, withExtension: "png") ?? bundle.url(forResource: name, withExtension: "png"),
+            let imageSource = CGImageSourceCreateWithURL(imageURL as CFURL, nil)
+        else { return nil }
+        return CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
     }
 }
 
