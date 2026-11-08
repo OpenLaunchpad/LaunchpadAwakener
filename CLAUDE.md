@@ -39,21 +39,24 @@ ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakene
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerHookKit` | 带签名校验的 Objective-C 方法替换 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppCore` | daemon 生命周期、进程监视、注入编排 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerDaemonCore` | 组装特权 XPC 服务端 |
-| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore` | 跑在目标进程里的代码，hook 声明在这里 |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore` | Launchpad 本身：布局库与界面层。经宿主接口 `SpringboardHost` 拿窗口、图层类、壁纸这些，不认识 Dock，不链接 AppKit |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore` | 跑在 Dock 里、围着 Launchpad 的代码：Dock 宿主、hook 声明、入口 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore` | 文本输入辅助进程：XPC 服务、托管的 `NSTextField`。只有它链接 AppKit 的私有部分 |
 
 模块按「谁链接它」划分。App 不能链接 daemon 的特权依赖，payload 要尽量小 —— 它会被映射进一个并没有请求它的进程。
 
-`LaunchpadAwakenerPayloadCore` 再按层分目录：
+两个与 Launchpad 有关的模块再按层分目录：
 
 | 目录 | 放什么 |
 |---|---|
-| `Host/` | 调用 Dock 内部方法与私有接口的地方：构建档案、签名校验、`WALayerKitWindow`、SkyLight |
-| `Data/` | 布局库、旧库导入、App 的发现 |
-| `Interface/` | 界面层，按 15.5 的 `ECSB*` / `ECPager*` 划分 |
-| `Integration/` | hook 声明，以及入口与事件的接管 |
+| `SpringboardCore/Hosting/` | 宿主接口，以及选定宿主的 `SpringboardHostSystem` |
+| `SpringboardCore/System/` | 系统框架的私有接口（Core Animation 滤镜、IconServices、SkyLight），两个宿主都能用 |
+| `SpringboardCore/Data/` | 布局库、旧库导入、App 的发现 |
+| `SpringboardCore/Interface/` | 界面层，按 15.5 的 `ECSB*` / `ECPager*` 划分 |
+| `PayloadCore/Host/` | 调用 Dock 内部方法的地方，也是 Dock 这一侧的宿主：构建档案、签名校验、`WALayerKitWindow`、`EC*` 图层类 |
+| `PayloadCore/Integration/` | hook 声明，以及事件接管 |
 
-调 Dock 内部方法一律经过 `Host/`：先按类型编码校验，再调用。
+调 Dock 内部方法一律经过 `PayloadCore/Host/`：先按类型编码校验，再调用。界面层要 Dock 的东西，一律经宿主接口要，不直接调 `Host/` 里的类型。
 
 ## 构建
 

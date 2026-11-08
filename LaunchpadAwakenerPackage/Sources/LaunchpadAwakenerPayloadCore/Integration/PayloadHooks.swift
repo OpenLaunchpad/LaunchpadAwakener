@@ -3,6 +3,7 @@ import Foundation
 import ObjectiveC
 import OSToolbox
 import LaunchpadAwakenerHookKit
+import LaunchpadAwakenerSpringboardCore
 
 /// Declares every method this payload replaces in the host process.
 ///

@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import QuartzCore
+import LaunchpadAwakenerSpringboardCore
 
 /// The springboard's host inside the Dock: the Dock's own window, layer classes, glass and uninstaller,
 /// the text input helper for the fields, and the Dock's preferences domain.

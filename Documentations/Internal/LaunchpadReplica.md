@@ -115,52 +115,67 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 ## 模块结构
 
+复刻分在两个模块里：`LaunchpadAwakenerSpringboardCore` 是 Launchpad 本身（布局库与界面层），不认识 Dock，也不链接 AppKit，经宿主接口 `SpringboardHost` 拿它需要的窗口、图层类、壁纸与图标样式；`LaunchpadAwakenerPayloadCore` 是它在 Dock 里的宿主，加上 hook 与入口。payload 启动时先用 `SpringboardHostSystem.bootstrap(host:)` 选定 Dock 宿主，再装 hook。独立版 App 是另一个宿主，见提案[不注入 Dock 的独立版 Launchpad](../Evolutions/draft-standalone-launchpad.md)。
+
 ```
-LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
-├── PayloadEntry.swift                  # 注入后的入口；装 hook，再启动布局库
-├── Host/                               # 调 Dock 内部与私有接口的唯一地方
-│   ├── DockBuildProfile.swift          # 构建档案：UUID → 只对该构建成立的事实
-│   ├── DockHostInterface.swift         # 签名清单与校验；WALayerKitWindow、DockBar rect
-│   ├── DockBarReference.swift          # 经全局变量拿 DockBar 与 DockGlobals
-│   ├── DockGlassMaterial.swift         # Dock 自己的液态玻璃（Cmd-Tab 切换器那套控制器）
-│   ├── WallpaperSnapshot.swift         # 截 WindowManager 的壁纸窗口
-│   ├── DockEnvironment.swift           # Dock 的方向、厚度、刘海、图标样式
-│   ├── DockLayerFactory.swift          # ECGridLayer、ECTextLayer、ECShadowTextLayer、材质；CA 私有滤镜
+LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/
+├── Hosting/
+│   └── SpringboardHost.swift           # 宿主接口：窗口、图层工厂、Dock 几何、图标样式、壁纸、玻璃、托管文本框、卸载器；选定宿主的 SpringboardHostSystem
+├── System/                             # 系统框架的私有接口，两个宿主都能用
+│   ├── QuartzCorePrivate.swift         # CA 私有滤镜与 CABackdropLayer
 │   ├── IconServicesBridge.swift        # IconServices 取图
-│   ├── TextInputHelperClient.swift     # 连文本输入辅助进程；给它发键鼠事件
-│   └── SkyLightBridge.swift            # 连接、窗口层级、键盘焦点
-├── Data/                               # 布局库，可脱离 Dock 测试
+│   ├── SkyLightBridge.swift            # 连接、窗口层级、键盘焦点
+│   ├── WallpaperSnapshot.swift         # 截壁纸窗口（27 归 WindowManager，26 归 Dock）
+│   ├── SystemPasteboard.swift          # HIServices 的 Pasteboard Manager
+│   └── ApplicationLauncher.swift       # LaunchServices 启动 App
+├── Data/                               # 布局库
 │   ├── LaunchpadStore*.swift           # 自己的库：读、追加、编辑、整理
 │   ├── LegacyLaunchpadImporter.swift   # 只读导入 15 的库
 │   ├── ApplicationDiscovery.swift      # 扫描应用目录与排除名单
 │   ├── ApplicationDirectoryMonitor.swift # FSEvents
 │   ├── LayoutReconciliation.swift      # 与已安装的 App 对账
 │   └── LaunchpadLibrary.swift          # 把以上串起来的 actor；发布布局、接受编辑
-├── Interface/                          # 界面层，按 15.5 的 ECSB* 划分
-│   ├── SpringboardController.swift     # 显示、隐藏与进出场、事件分派、启动动画、捏合、保险机制
-│   ├── SpringboardWindow.swift         # 全屏窗口、27/29 层、键盘焦点
-│   ├── SpringboardInterface.swift      # 页面、搜索、选中、点击、文件夹开合与改名、背景（ECSBSpringboard + ECSBLayer）
-│   ├── SpringboardInterface+Dragging.swift # 拖动整理（ECSBDragCapture 与各 DragState）
-│   ├── SpringboardInterface+FolderMaking.swift # 拖到图标上建文件夹、放进文件夹、未存的文件夹与解散
-│   ├── SpringboardIconFlight.swift     # 图片缩进文件夹缩略图的动画
-│   ├── SpringboardJiggle.swift         # 抖动模式：15 的两段抖动动画、长按时长、Option 规则
-│   ├── SpringboardBackground.swift     # 背景：15 的模糊壁纸，或 Dock 的液态玻璃
-│   ├── SpringboardPagedGrids.swift     # 主界面与文件夹共用的翻页器（ECPagerLayer）
-│   ├── SpringboardFolderPanel.swift    # 打开的文件夹（ECSBGroupLayer）与改名编辑框
-│   ├── SpringboardTextEditing.swift    # 改名的文字与选区、按键的读法、字间位置（纯计算）
-│   ├── SpringboardPageGrid.swift       # 每页一个 ECGridLayer 及其数据源
-│   ├── SpringboardItemLayer.swift      # 图标、文件夹图标与标题（ECSBItemLayer、ECSBGroupItemLayer、ECSBLabelLayer）
-│   ├── SpringboardControlLayers.swift  # 页码、搜索框、无结果
+└── Interface/                          # 界面层，按 15.5 的 ECSB* 划分
+    ├── LaunchpadServices.swift         # 布局库的单例，配置取自宿主
+    ├── SpringboardController.swift     # 显示、隐藏与进出场、事件分派、启动动画、捏合、保险机制
+    ├── SpringboardInputEvent*.swift    # 事件的跨线程表示，及从 CGEvent 的换算
+    ├── SpringboardInterface.swift      # 页面、搜索、选中、点击、文件夹开合与改名、背景（ECSBSpringboard + ECSBLayer）
+    ├── SpringboardInterface+Dragging.swift # 拖动整理（ECSBDragCapture 与各 DragState）
+    ├── SpringboardInterface+FolderMaking.swift # 拖到图标上建文件夹、放进文件夹、未存的文件夹与解散
+    ├── SpringboardInterface+Deleting.swift # 抖动模式的关闭按钮与删除
+    ├── SpringboardIconFlight.swift     # 图片缩进文件夹缩略图的动画
+    ├── SpringboardJiggle.swift         # 抖动模式：15 的两段抖动动画、长按时长、Option 规则
+    ├── SpringboardBackground.swift     # 背景：15 的模糊壁纸，或宿主给的玻璃
+    ├── SpringboardPagedGrids.swift     # 主界面与文件夹共用的翻页器（ECPagerLayer）
+    ├── SpringboardFolderPanel.swift    # 打开的文件夹（ECSBGroupLayer）与改名编辑框
+    ├── SpringboardTextEditing.swift    # 改名的文字与选区、按键的读法、字间位置（纯计算）
+    ├── SpringboardPageGrid.swift       # 每页一个网格（Dock 里是 ECGridLayer）及其数据源
+    ├── SpringboardItemLayer.swift      # 图标、文件夹图标与标题（ECSBItemLayer、ECSBGroupItemLayer、ECSBLabelLayer）
+    ├── SpringboardControlLayers.swift  # 页码、搜索框、无结果
+    ├── SpringboardMetrics.swift        # 15.5 的主界面几何（纯计算）
+    ├── SpringboardFolderMetrics.swift  # 15.5 的文件夹几何（纯计算）
+    ├── SpringboardSearch.swift         # 15.5 的搜索规则（纯计算）
+    ├── SpringboardPaging.swift         # 15.5 的翻页、方向键与拖动命中规则（纯计算）
+    ├── SpringboardPinch.swift          # 15.5 的捏合映射与弹簧（纯计算）
+    ├── SpringboardPosition.swift       # 再次打开时回到的页与文件夹，及其在新布局里的换算（纯计算）
+    ├── SpringboardEntry.swift          # 「打开 Apps」请求的应答：打开、关闭，或认出点 Apps 图标后不动（纯计算）
+    └── SpringboardSelfCheck.swift      # 开发构建的离屏自检
+
+LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
+├── PayloadEntry.swift                  # 注入后的入口；选定 Dock 宿主，装 hook，再启动布局库
+├── Host/                               # 调 Dock 内部的唯一地方，也是 Dock 这一侧的宿主
+│   ├── DockSpringboardHost.swift       # Dock 宿主：把宿主接口接到下面这些类型上
+│   ├── DockSpringboardWindow.swift     # 全屏窗口、27/29 层、键盘焦点
+│   ├── DockBuildProfile.swift          # 构建档案：UUID → 只对该构建成立的事实
+│   ├── DockHostInterface.swift         # 签名清单与校验；WALayerKitWindow、DockBar rect
+│   ├── DockBarReference.swift          # 经全局变量拿 DockBar 与 DockGlobals
+│   ├── DockGlassMaterial.swift         # Dock 自己的液态玻璃（Cmd-Tab 切换器那套控制器）
+│   ├── DockEnvironment.swift           # Dock 的方向、厚度、刘海、图标样式
+│   ├── DockLayerFactory.swift          # ECGridLayer、ECImageGridLayer、ECTextLayer、ECShadowTextLayer、材质
+│   ├── DockApplicationUninstaller.swift # Dock 的卸载器
 │   ├── SpringboardRemoteTextField.swift # 辅助进程托管的搜索框与改名框：CALayerHost 与事件转发
-│   ├── SpringboardMetrics.swift        # 15.5 的主界面几何（纯计算）
-│   ├── SpringboardFolderMetrics.swift  # 15.5 的文件夹几何（纯计算）
-│   ├── SpringboardSearch.swift         # 15.5 的搜索规则（纯计算）
-│   ├── SpringboardPaging.swift         # 15.5 的翻页、方向键与拖动命中规则（纯计算）
-│   ├── SpringboardPinch.swift          # 15.5 的捏合映射与弹簧（纯计算）
-│   ├── SpringboardPosition.swift       # 再次打开时回到的页与文件夹，及其在新布局里的换算（纯计算）
-│   ├── SpringboardEntry.swift          # 「打开 Apps」请求的应答：打开、关闭，或认出点 Apps 图标后不动（纯计算）
-│   └── SpringboardSelfCheck.swift      # 开发构建的离屏自检
-└── Integration/                        # hook 声明与入口、事件的接管
+│   └── TextInputHelperClient.swift     # 连文本输入辅助进程；给它发键鼠事件
+└── Integration/                        # hook 声明，以及事件接管时记下的当前事件
 ```
 
 ## 核心数据流

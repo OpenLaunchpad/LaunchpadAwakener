@@ -1,5 +1,5 @@
 import Foundation
-import LaunchpadAwakenerPayloadCore
+import LaunchpadAwakenerSpringboardCore
 
 /// Writes a database the way macOS 15's Launchpad left it on disk.
 ///

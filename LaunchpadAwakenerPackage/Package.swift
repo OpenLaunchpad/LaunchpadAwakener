@@ -75,13 +75,27 @@ let package = Package(
             ]
         ),
 
-        // Payload side: what runs inside the host process. Keep this dependency list minimal —
-        // every library here is mapped into a process that did not ask for it.
+        // The springboard itself — the layout library and macOS 15's interface — for whichever process
+        // draws it: the Dock through the payload, or the standalone app. It reaches its host only
+        // through `SpringboardHost`, and links neither AppKit nor anything Dock-specific, since the
+        // payload carries it into the Dock.
+        .target(
+            name: "LaunchpadAwakenerSpringboardCore",
+            dependencies: [
+                "LaunchpadAwakenerHookKit",
+                .product(name: "OSToolbox", package: "FrameworkToolbox"),
+            ]
+        ),
+
+        // Payload side: what runs inside the host process, around the springboard — the Dock's side of
+        // the host, the hooks and the entry. Keep this dependency list minimal — every library here is
+        // mapped into a process that did not ask for it.
         .target(
             name: "LaunchpadAwakenerPayloadCore",
             dependencies: [
                 "LaunchpadAwakenerShared",
                 "LaunchpadAwakenerHookKit",
+                "LaunchpadAwakenerSpringboardCore",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
             ]
         ),
@@ -101,18 +115,24 @@ let package = Package(
         // package can link it and it never ends up in a shipped binary.
         .target(
             name: "TestingSupport",
-            dependencies: ["LaunchpadAwakenerPayloadCore"],
+            dependencies: ["LaunchpadAwakenerSpringboardCore"],
             path: "Tests/TestingSupport"
         ),
         .testTarget(name: "TestingSupportTests", dependencies: ["TestingSupport"]),
 
-        // Only the payload's pure logic is tested here — the data layer and anything else that does not
-        // need a live Dock. Nothing in these tests creates a window or touches the Dock.
+        // The springboard's logic — the data layer, the interface's rules and its layers drawn off screen.
+        // Nothing in these tests creates a window or touches the Dock.
         .testTarget(
-            name: "LaunchpadAwakenerPayloadCoreTests",
-            dependencies: ["LaunchpadAwakenerPayloadCore", "TestingSupport"],
+            name: "LaunchpadAwakenerSpringboardCoreTests",
+            dependencies: ["LaunchpadAwakenerSpringboardCore", "TestingSupport"],
             // macOS 15.5's own copy, which the exclusion list and default layout are checked against.
             resources: [.copy("Resources/LaunchPadLayout.plist")]
+        ),
+
+        // The Dock's side: the build profiles. Read from the Dock binaries' facts, never from a live Dock.
+        .testTarget(
+            name: "LaunchpadAwakenerPayloadCoreTests",
+            dependencies: ["LaunchpadAwakenerPayloadCore"]
         ),
     ]
 )

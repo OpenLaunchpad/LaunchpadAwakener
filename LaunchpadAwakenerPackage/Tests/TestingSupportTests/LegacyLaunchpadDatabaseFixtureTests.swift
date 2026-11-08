@@ -1,5 +1,5 @@
 import Foundation
-import LaunchpadAwakenerPayloadCore
+import LaunchpadAwakenerSpringboardCore
 import Testing
 import TestingSupport
 

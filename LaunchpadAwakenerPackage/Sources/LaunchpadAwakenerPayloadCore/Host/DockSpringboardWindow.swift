@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import OSToolbox
 import QuartzCore
+import LaunchpadAwakenerSpringboardCore
 
 /// The full-screen Dock window the springboard draws in, shown the way macOS 15 showed Launchpad.
 ///

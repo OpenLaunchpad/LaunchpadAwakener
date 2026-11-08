@@ -3,6 +3,7 @@ import Foundation
 import LaunchpadAwakenerHookKit
 import ObjectiveC
 import OSToolbox
+import LaunchpadAwakenerSpringboardCore
 
 /// What the springboard needs to know about the Dock and its display, read from the Dock itself.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "DockEnvironment")

@@ -6,4 +6,4 @@
 - [Evolutions/draft-standalone-launchpad.md](Evolutions/draft-standalone-launchpad.md) —— 不注入 Dock 的独立版 Launchpad：与注入版共用数据层与界面层（In Progress）
 - [Internal/LaunchpadReplica.md](Internal/LaunchpadReplica.md) —— Launchpad 复刻的实现说明：关键决策、模块结构、验证、新 Dock 构建的适配流程
 - [Internal/ReviewAdjudications.md](Internal/ReviewAdjudications.md) —— 代码审查的已裁决清单：判为误报或不修的发现与理由
-- [Glossary.md](Glossary.md) —— 术语表：构建档案、DockSwipe、退回开关、离屏自检、Springboard、文本输入辅助进程
+- [Glossary.md](Glossary.md) —— 术语表：构建档案、DockSwipe、宿主、退回开关、离屏自检、Springboard、文本输入辅助进程

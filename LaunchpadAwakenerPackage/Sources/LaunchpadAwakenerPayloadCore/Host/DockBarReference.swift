@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import ObjectiveC
 import OSToolbox
+import LaunchpadAwakenerSpringboardCore
 
 /// The Dock's `DockBar` and `DockGlobals`, read from the globals listed in the build profile.
 ///

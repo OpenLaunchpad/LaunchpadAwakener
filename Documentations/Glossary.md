@@ -28,40 +28,46 @@
 
 系统手势在 Dock 那里的原始形态：CGEvent 类型 30、HID 事件类型 23 的事件，字段 123 是动作（3 为捏合或张开），124 是进度，132 是阶段。捏合手势就是读它实现的；它不是 macOS 27 的 Gestures.framework 识别出的手势。
 
-- **主要出现在**：`LaunchpadAwakenerPayloadCore/Interface/SpringboardInputEvent.swift`、`Integration/SpringboardInputEvent+CoreGraphics.swift`
+- **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardInputEvent.swift`、`SpringboardInputEvent+CoreGraphics.swift`
+
+### Host（宿主）
+
+画 Launchpad 的那个进程，以及它提供给界面层的那组能力（`SpringboardHost`）：窗口、图层类、Dock 的几何、图标样式、壁纸、玻璃、托管文本框、卸载器。Dock 里的宿主由 payload 提供，用 Dock 自己的类；独立版 App 是另一个宿主。每个进程启动时选定一次（`SpringboardHostSystem.bootstrap(host:)`），界面层只经它拿这些东西。不要和注入时的「目标进程」混用：目标进程只说注入到哪，宿主说的是界面层靠谁画。
+
+- **主要出现在**：`LaunchpadAwakenerSpringboardCore/Hosting/SpringboardHost.swift`、`LaunchpadAwakenerPayloadCore/Host/DockSpringboardHost.swift`、[实现说明](Internal/LaunchpadReplica.md)「模块结构」
 
 ### Jiggle mode（抖动模式）
 
 长按图标或按住 Option 后，当前页面（文件夹开着时是文件夹里）的图标一起抖动的状态，可以接着拖动整理。15 的代码管它叫 `deleting`，因为 15 在这个状态下给 App Store 的 App 显示关闭按钮用来删除；复刻只做了抖动，没做删除。不要和 15 代码里的 `editing` 混淆：那是「正在按着或拖着图标」，与抖动无关。
 
-- **主要出现在**：`LaunchpadAwakenerPayloadCore/Interface/SpringboardJiggle.swift`、`SpringboardPagedGrids.isJiggling`、[实现说明](Internal/LaunchpadReplica.md)「关键设计决策」
+- **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardJiggle.swift`、`SpringboardPagedGrids.isJiggling`、[实现说明](Internal/LaunchpadReplica.md)「关键设计决策」
 
 ### Kill switch（退回开关）
 
 文件 `/tmp/LaunchpadAwakener.disabled`。它存在时，所有「打开 Apps」的入口退回系统的 Apps，正在显示的界面在下一个事件时收起。界面失控、屏幕不能用时，经 ssh 创建它是出路。
 
-- **主要出现在**：`LaunchpadAwakenerPayloadCore/Interface/SpringboardController.swift`、项目 `CLAUDE.md`
+- **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardController.swift`、项目 `CLAUDE.md`
 
 ### Self-check（离屏自检）
 
 开发构建在 Dock 启动、布局第一次加载时，不上屏地建一次界面，把 Dock 图层类的产物（网格类名、图标与标题的位置、文件夹缩略图、壁纸截图尺寸）写进日志。用来在不打开界面的情况下核对接线。正式构建没有它。
 
-- **主要出现在**：`LaunchpadAwakenerPayloadCore/Interface/SpringboardSelfCheck.swift`
+- **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardSelfCheck.swift`
 
 ### Springboard
 
 本项目沿用 macOS 15 的叫法：Launchpad 的主界面及其主控。代码里的 `Springboard*` 类型分别对应 15.5 的 `Springboard`、`ECSBSpringboard`、`ECSBLayer`、`ECSBGroupLayer` 等；与 iOS 的 SpringBoard 无关。
 
-- **主要出现在**：`LaunchpadAwakenerPayloadCore/Interface/`
+- **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/`
 
 ### Text input helper（文本输入辅助进程）
 
 嵌在 App 里的 LaunchAgent `LaunchpadAwakenerTextInput`，替 Launchpad 托管搜索框或改名框（一次一个），好让输入法能用；相当于 15 的 Dock 包里的 `com.apple.dock.ecti` 服务。payload 在 Dock 里用 `CALayerHost` 显示它的文本框，把按键与点按转发给它；它不可用时 payload 退回本地编辑。
 
-- **主要出现在**：`LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore/`、`LaunchpadAwakenerPayloadCore/Interface/SpringboardRemoteTextField.swift`、[实现说明](Internal/LaunchpadReplica.md)「输入法靠一个托管文本框的辅助进程」
+- **主要出现在**：`LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore/`、`LaunchpadAwakenerPayloadCore/Host/SpringboardRemoteTextField.swift`、[实现说明](Internal/LaunchpadReplica.md)「输入法靠一个托管文本框的辅助进程」
 
 ### Unsaved folder（未存的文件夹）
 
 拖动时界面上已经出现、库里还没有的文件夹：停在 App 上 1 秒弹开的那个，或快速松手后库写好之前的那个。它的标识符是负数（`LaunchpadItemIdentifier.unsavedFolder`），库发布的新布局到达时按第一个 App 换成真正的文件夹；停住弹开的那个要在面板里松手才写库，拖出面板就解散，库里什么也不留。
 
-- **主要出现在**：`LaunchpadAwakenerPayloadCore/Interface/SpringboardInterface+FolderMaking.swift`、[实现说明](Internal/LaunchpadReplica.md)「建文件夹先在界面上做出来」
+- **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardInterface+FolderMaking.swift`、[实现说明](Internal/LaunchpadReplica.md)「建文件夹先在界面上做出来」

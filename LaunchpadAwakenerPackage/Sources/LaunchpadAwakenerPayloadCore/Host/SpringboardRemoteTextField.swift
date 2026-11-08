@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import OSToolbox
 import QuartzCore
+import LaunchpadAwakenerSpringboardCore
 
 /// A springboard text field hosted by the text input helper, so that input methods work in it: the
 /// `CALayerHost` that shows it in the Dock, and the keys and clicks that go to it, as macOS 15's

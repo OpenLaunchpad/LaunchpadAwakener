@@ -4,6 +4,7 @@ import LaunchpadAwakenerHookKit
 import ObjectiveC
 import OSToolbox
 import QuartzCore
+import LaunchpadAwakenerSpringboardCore
 
 /// One Dock method the payload calls, with the signature the call was written against.
 struct DockMethodSignature: Sendable {

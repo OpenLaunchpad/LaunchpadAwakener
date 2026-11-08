@@ -2,6 +2,7 @@ import Foundation
 import OSLog
 import LaunchpadAwakenerHookKit
 import LaunchpadAwakenerShared
+import LaunchpadAwakenerSpringboardCore
 
 /// Called by `LaunchpadAwakenerPayload/main.m` from both injection paths.
 ///
