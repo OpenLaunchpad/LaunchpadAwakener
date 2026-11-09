@@ -77,11 +77,12 @@ hook 与 Dock 自己的类（Dock 不导出任何类）用 FrameworkToolbox 的 
 
 调 Dock 内部方法一律经过 `PayloadCore/Host/`：先按类型编码校验，再调用。界面层要 Dock 的东西，一律经宿主接口要，不直接调 `Host/` 里的类型。
 
-私有方法的三种写法：
+私有方法的写法：
 
 - **系统框架导出的类**（IconServices、IconFoundation、SkyLight、QuartzCore、AppKit）在两个 `PrivateInterfaces` 模块的头文件里声明，直接调用，**运行时不再核对**。所以新加的声明必须先在 26 与 27 上确认方法存在、签名一致（两台测试机上用 `osascript -l JavaScript` 调 `class_getInstanceMethod` 与 `method_getTypeEncoding`，它们没装开发工具也能跑），再在 `SystemPrivateInterfaceTests` 或 `StandaloneIconStyleTests` 里实际调用一次。私有框架经 `Package.swift` 的 `linkingPrivateFrameworks` 链接；类簇照样声明在对外的那个类上（`ISIcon` 的 `+alloc` 给的是 `ISIconFactory`）。
-- **Dock 里类名固定的实例方法**写成 `@RuntimeClassProxy("类名")` 协议：选择子与编码由 Swift 声明推出，第一次调用前整批核对。Dock 的要把协议的 `methodRequirements` 加进 `DockHostInterface.requiredMethods`（或玻璃、Dock 显隐各自的清单），编码记进 `DockSignatureTests`。可选功能的方法单独成协议，一个不符整个协议就停用。
-- **Dock 的类方法、init、经别的对象拿到的对象、带 block 的调用**用 `DynamicObject`（`ObjC.类名(…)`），调用前按对象的实际类核对编码。它按原样拷参数的字节、不做类型换算：每个参数都要是编码对应的那个 Swift 类型（`f` 只能传 `Float`，传 `CGFloat` 只会传进半个 double），超过三个字长的结构体（`CGRect`）包进 `NSValue`，block 要声明成 `@convention(block)`。返回 `CGImage`、`CGColor` 这类可能为空的指针时按 `UnsafeRawPointer??` 取。
+- **Dock 里类名固定的类**写成 `@RuntimeClassProxy("类名")` 协议：选择子与编码由 Swift 声明推出，第一次调用前整批核对。实例方法与属性照常写；构造写成 `init?(…)`（第一个标签决定选择子，`init(frame:)` 即 `initWithFrame:`）；类方法写成 `static func`；block 参数写成 `@escaping @convention(block) (…) -> …`。Dock 的要把协议的 `methodRequirements` 加进 `DockHostInterface.requiredMethods`（或玻璃、Dock 显隐各自的清单），编码记进 `DockSignatureTests`（类方法的键前加 `+`）。可选功能的方法单独成协议，一个不符整个协议就停用。
+- **经别的对象拿到、类名随系统版本变的对象**（`DockBar.environment` 交出的那些，环境对象在 26 上叫 `Environment`、27 上叫 `_TtC8DockCore11Environment`）写成 `@RuntimeObjectProxy` 协议：写法相同，按对象自己的类核对，每个类核对一次。它没有类可调，不能写 `init?` 与 `static`。编码同样记进 `DockSignatureTests`。
+- **代码里不写类型编码字面量**，也不用 `DynamicObject`：它按原样拷参数字节、不核对参数类型。宏表达不了的调用，先给 FrameworkToolbox 的 ObjCRuntimeToolbox 补上，再来用。
 
 ## 构建
 

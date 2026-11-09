@@ -54,7 +54,7 @@ let package = Package(
         // would link it into two images fails instead of quietly turning it into an @rpath dylib the
         // payload could not carry into the Dock, and its `DynamicObject` hands an initialiser its
         // receiver, so `[[Class alloc] init…]` returning nil no longer over-releases inside the Dock.
-        .package(url: "https://github.com/Mx-Iris/FrameworkToolbox", from: "0.17.2"),
+        .package(url: "https://github.com/Mx-Iris/FrameworkToolbox", from: "0.18.0"),
         // The standalone app's global shortcut: a recorder for its settings and a Carbon hot key, which
         // needs no permission. Only the standalone module links it.
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", from: "3.1.0"),

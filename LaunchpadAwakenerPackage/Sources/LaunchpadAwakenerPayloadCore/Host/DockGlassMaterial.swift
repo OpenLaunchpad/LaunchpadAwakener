@@ -6,6 +6,13 @@ import QuartzCore
 
 @RuntimeClassProxy("DockGlassMaterialLayerController")
 protocol DockGlassMaterialLayerController {
+    /// `variant` is the Dock's: 0 its own glass, 2 the same without foreground effects, 4 the
+    /// Command-Tab switcher's. `adaptive` lets the glass turn light or dark with what is behind it.
+    init?(variant: Int, adaptive: Bool)
+    /// Reads the Dock's accessibility settings, its display's scale and the glass tint the user chose.
+    /// `colorScheme` is 1 for dark. It also reads the Dock's `DockBar` and `DockGlobals` and traps when
+    /// either does not exist yet, so it is only called once both are there.
+    static func currentDockMaterialEnvironmentWithColorScheme(_ colorScheme: Int) -> NSObject?
     /// Placed by the controller itself, at the frame given to ``DockGlassMaterial/update(frame:cornerRadius:isDark:displayScale:backdropGroupName:)``
     /// in its superlayer; geometry-flipped, and hit-tests as opaque.
     var rootLayer: CALayer? { get }
@@ -49,21 +56,8 @@ protocol DockGlassMaterialEnvironment {
 final class DockGlassMaterial {
     // MARK: - Signatures
 
-    static let controllerInitialiser = DockMethodSignature(
-        className: "DockGlassMaterialLayerController",
-        selectorName: "initWithVariant:adaptive:",
-        typeEncoding: "@28@0:8q16B24"
-    )
-    /// A class method. It reads the Dock's `DockBar` and `DockGlobals` and traps when either does not
-    /// exist yet, so it is only called once both are there.
-    static let controllerEnvironment = DockMethodSignature(
-        className: "DockGlassMaterialLayerController",
-        selectorName: "currentDockMaterialEnvironmentWithColorScheme:",
-        typeEncoding: "@24@0:8q16"
-    )
-
-    private static let instanceMethods: [DockMethodSignature] = [controllerInitialiser]
-        + DockMethodSignature.signatures(
+    private static let methods: [DockMethodSignature] =
+        DockMethodSignature.signatures(
             ofClassNamed: DockGlassMaterialLayerControllerImplementation.runtimeClassName,
             requirements: DockGlassMaterialLayerControllerImplementation.methodRequirements
         )
@@ -84,18 +78,8 @@ final class DockGlassMaterial {
     static let isAvailable: Bool = checkSignatures()
 
     private static func checkSignatures() -> Bool {
-        var mismatchedNames = instanceMethods.compactMap { signature -> String? in
-            RuntimeMethodInspector.hasMethod(className: signature.className, selector: signature.selector, matchingTypeEncoding: signature.typeEncoding)
-                ? nil
-                : "-[\(signature.className) \(signature.selectorName)]"
-        }
-        if !RuntimeMethodInspector.hasMethod(
-            className: controllerEnvironment.className,
-            selector: controllerEnvironment.selector,
-            matchingTypeEncoding: controllerEnvironment.typeEncoding,
-            isInstanceMethod: false
-        ) {
-            mismatchedNames.append("+[\(controllerEnvironment.className) \(controllerEnvironment.selectorName)]")
+        let mismatchedNames = methods.compactMap { signature in
+            signature.isPresent ? nil : signature.methodName
         }
         guard mismatchedNames.isEmpty else {
             #log(.error, "The Dock's glass is missing or changed (\(mismatchedNames.joined(separator: ", "), privacy: .public)); the background falls back to a plain blur")
@@ -117,8 +101,7 @@ final class DockGlassMaterial {
         // Unavailable is already logged, once, by `checkSignatures()`.
         guard Self.isAvailable else { return nil }
         guard
-            let controllerObject = ObjC.DockGlassMaterialLayerController(variant: variant, adaptive: isAdaptive).asObject,
-            let controller = DockGlassMaterialLayerControllerImplementation(controllerObject),
+            let controller = DockGlassMaterialLayerControllerImplementation(variant: variant, adaptive: isAdaptive),
             let rootLayer = controller.rootLayer
         else {
             #log(.error, "The Dock's glass controller could not be made")
@@ -164,13 +147,7 @@ final class DockGlassMaterial {
         (NSClassFromString(className) as? NSObject.Type)?.init()
     }
 
-    /// `+currentDockMaterialEnvironmentWithColorScheme:`, which also reads the Dock's accessibility
-    /// settings, its display's scale and the glass tint the user chose. The color scheme is the `q` the
-    /// class method takes, 1 for dark.
     private static func currentEnvironment(isDark: Bool) -> NSObject? {
-        let colorScheme: Int = isDark ? 1 : 0
-        return DynamicObject(className: controllerEnvironment.className)
-            .currentDockMaterialEnvironmentWithColorScheme(colorScheme)
-            .asObject
+        DockGlassMaterialLayerControllerImplementation.currentDockMaterialEnvironmentWithColorScheme(isDark ? 1 : 0)
     }
 }

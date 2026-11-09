@@ -116,10 +116,8 @@ final class LiveDockVisibility: DockVisibilityCalls {
     /// What the running Dock lacks of the methods and the ivar used here, checked by class: empty when
     /// everything matches. Logged once as the payload starts, so a Dock update can be read off the log.
     nonisolated static func missingMembers() -> [String] {
-        var missingMembers = methods.compactMap { signature -> String? in
-            RuntimeMethodInspector.hasMethod(className: signature.className, selector: signature.selector, matchingTypeEncoding: signature.typeEncoding)
-                ? nil
-                : "-[\(signature.className) \(signature.selectorName)]"
+        var missingMembers = methods.compactMap { signature in
+            signature.isPresent ? nil : signature.methodName
         }
         let controllerClassName = DockVisibilityControllerImplementation.runtimeClassName
         if forceHiddenReasonsIvar(of: NSClassFromString(controllerClassName)) == nil {

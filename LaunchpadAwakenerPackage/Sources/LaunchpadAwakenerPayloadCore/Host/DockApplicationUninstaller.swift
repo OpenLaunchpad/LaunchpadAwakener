@@ -13,21 +13,16 @@ import OSToolbox
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "DockApplicationUninstaller")
 @MainActor
 enum DockApplicationUninstaller {
-    private static let uninstallabilitySelector = NSSelectorFromString("uninstallabilityOfFileAtURL:")
-    private static let uninstallSelector = NSSelectorFromString("uninstallBundleAtURL:handler:")
-
     /// `DockBar.environment.applicationUninstaller` with both methods as 27.2 has them; nil otherwise.
     ///
-    /// Called through `DynamicObject`: the uninstaller is reached through the environment, and
-    /// `uninstallBundleAtURL:handler:` takes a block, whose `@?` the proxy macro cannot derive.
-    private static var uninstaller: NSObject? {
+    /// Both objects are checked as the class they turn out to have, like the rest of what the environment
+    /// hands out (see ``DockEnvironmentIconAppearanceAccess``).
+    private static var uninstaller: DockApplicationUninstallingImplementation? {
         guard
             let environment = DockEnvironment.environmentObject,
-            let uninstaller = DockEnvironment.objectValue(of: environment, named: "applicationUninstaller"),
-            DockEnvironment.hasMethod(uninstaller, selector: uninstallabilitySelector, typeEncoding: "i24@0:8@16"),
-            DockEnvironment.hasMethod(uninstaller, selector: uninstallSelector, typeEncoding: "v32@0:8@16@?24")
+            let uninstaller = DockEnvironmentUninstallerAccessImplementation(environment)?.applicationUninstaller
         else { return nil }
-        return uninstaller
+        return DockApplicationUninstallingImplementation(uninstaller)
     }
 
     /// Whether the Dock's uninstaller can be called at all.
@@ -39,8 +34,7 @@ enum DockApplicationUninstaller {
     /// droplet or a wrapped application (`uninstallabilityOfFileAtURL:` answering 1), which is when 15
     /// showed the close box.
     static func canUninstall(applicationAt bundleURL: URL) -> Bool {
-        guard let uninstaller else { return false }
-        return ObjC(uninstaller).uninstallabilityOfFileAtURL(bundleURL as NSURL).asInt32 == 1
+        uninstaller?.uninstallabilityOfFileAtURL(bundleURL as NSURL) == 1
     }
 
     /// Deletes the application; `completion` runs on the main actor with whether it went.
@@ -50,10 +44,9 @@ enum DockApplicationUninstaller {
             return
         }
         #log(.info, "Deleting \(bundleURL.path, privacy: .public)")
-        // Typed as a block so that DynamicObject passes it as one; a plain Swift closure would not be an
-        // Objective-C object.
-        let handler: @convention(block) (ObjCBool) -> Void = { hasUninstalled in
-            // The answer comes on an XPC or a global queue.
+        // `@Sendable`, so the block is not taken for one isolated to the main actor: the answer comes on an
+        // XPC or a global queue.
+        uninstaller.uninstallBundleAtURL(bundleURL as NSURL) { @Sendable hasUninstalled in
             let hasSucceeded = hasUninstalled.boolValue
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -61,6 +54,21 @@ enum DockApplicationUninstaller {
                 }
             }
         }
-        ObjC(uninstaller).uninstallBundleAtURL(bundleURL as NSURL, handler: handler)
     }
+}
+
+/// `DockCore.Environment`, as far as deleting applications goes.
+@RuntimeObjectProxy
+protocol DockEnvironmentUninstallerAccess {
+    /// A `DockCore.SystemApplicationUninstaller`.
+    var applicationUninstaller: NSObject? { get }
+}
+
+/// `DockCore.SystemApplicationUninstaller`.
+@RuntimeObjectProxy
+protocol DockApplicationUninstalling {
+    /// 1 when the uninstaller takes the application.
+    func uninstallabilityOfFileAtURL(_ url: NSURL) -> Int32?
+    /// The handler is called once, with whether the application was deleted.
+    func uninstallBundleAtURL(_ url: NSURL, handler: @escaping @convention(block) (ObjCBool) -> Void)
 }

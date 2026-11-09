@@ -89,16 +89,16 @@ enum DockEnvironment {
 
     /// `DockBar.environment.iconAppearanceMonitor.appearance`; nil when any step is missing.
     ///
-    /// The objects past the environment are Swift classes whose class is whatever the object turns out to
-    /// be, so each member is checked on the object's own class and called through `DynamicObject`.
-    /// Without them icons fall back to the default style.
+    /// Each object on the way is checked as the class it turns out to have — see
+    /// ``DockEnvironmentIconAppearanceAccess``. Without them icons fall back to the default style.
     static var iconAppearance: IconAppearance? {
         guard
             let environment = environmentObject,
-            let monitor = objectValue(of: environment, named: "iconAppearanceMonitor"),
-            let appearance = objectValue(of: monitor, named: "appearance"),
-            let iconDescriptor = objectValue(of: appearance, named: "iconDescription"),
-            let style = checkedMember(of: appearance, named: "style", typeEncoding: "C16@0:8")?.asUInt8
+            let monitor = DockEnvironmentIconAppearanceAccessImplementation(environment)?.iconAppearanceMonitor,
+            let appearance = DockIconAppearanceMonitorImplementation(monitor)?.appearance,
+            let dockAppearance = DockIconAppearanceImplementation(appearance),
+            let iconDescriptor = dockAppearance.iconDescription,
+            let style = dockAppearance.style
         else {
             #log(.error, "The Dock's icon appearance is out of reach; icons use the default style")
             return nil
@@ -112,35 +112,34 @@ enum DockEnvironment {
     static var environmentObject: NSObject? {
         DockBarReference.dockBar.flatMap { DockBarGeometryImplementation($0)?.environment }
     }
+}
 
-    /// Whether `receiver`'s own class has `selector` with `expectedTypeEncoding`, frame offsets aside; logs
-    /// when it does not.
-    ///
-    /// For objects whose class is not known in advance — the Dock's Swift classes reached through other
-    /// objects — where a `@RuntimeClassProxy`, which names one class, does not fit.
-    static func hasMethod(_ receiver: NSObject, selector: Selector, typeEncoding expectedTypeEncoding: String) -> Bool {
-        guard
-            let receiverClass = object_getClass(receiver),
-            let encoding = RuntimeMethodInspector.typeEncoding(forClass: receiverClass, selector: selector),
-            ObjCTypeEncodingNormalization.matches(encoding, expectedTypeEncoding)
-        else {
-            #log(.error, "-[\(String(cString: object_getClassName(receiver)), privacy: .public) \(NSStringFromSelector(selector), privacy: .public)] is missing or changed")
-            return false
-        }
-        return true
-    }
+// MARK: - Reached through the environment
 
-    /// `receiver.<memberName>`, a member that takes nothing, through `DynamicObject` — once ``hasMethod(_:selector:typeEncoding:)``
-    /// has found it with `typeEncoding` on the receiver's own class.
-    static func checkedMember(of receiver: NSObject, named memberName: String, typeEncoding: String) -> DynamicObject? {
-        guard hasMethod(receiver, selector: NSSelectorFromString(memberName), typeEncoding: typeEncoding) else { return nil }
-        let member: DynamicObject = DynamicObject(receiver)[dynamicMember: memberName]
-        return member
-    }
+// The environment and what it hands out are the Dock's Swift classes, reached through protocols the Dock
+// declares, and their Objective-C class names are not stable: the environment is `Environment` in the
+// 26.6.2 Dock and `_TtC8DockCore11Environment` in 27.2. So these proxies check whatever class each object
+// turns out to have, the first time they meet it.
 
-    /// An object-returning member that takes nothing, checked as ``checkedMember(of:named:typeEncoding:)``
-    /// checks it.
-    static func objectValue(of receiver: NSObject, named memberName: String) -> NSObject? {
-        checkedMember(of: receiver, named: memberName, typeEncoding: "@16@0:8")?.asObject
-    }
+/// `DockCore.Environment`, as far as icon style goes.
+@RuntimeObjectProxy
+protocol DockEnvironmentIconAppearanceAccess {
+    /// A `DockCore.SystemIconAppearanceMonitor`.
+    var iconAppearanceMonitor: NSObject? { get }
+}
+
+/// `DockCore.SystemIconAppearanceMonitor`.
+@RuntimeObjectProxy
+protocol DockIconAppearanceMonitor {
+    /// An `IconAppearance`.
+    var appearance: NSObject? { get }
+}
+
+/// `IconAppearance`, the style the Dock draws its own tiles in.
+@RuntimeObjectProxy
+protocol DockIconAppearance {
+    /// An `ISImageDescriptor` set up for the current style.
+    var iconDescription: NSObject? { get }
+    /// `IconStyle`, an `unsigned char`.
+    var style: UInt8? { get }
 }

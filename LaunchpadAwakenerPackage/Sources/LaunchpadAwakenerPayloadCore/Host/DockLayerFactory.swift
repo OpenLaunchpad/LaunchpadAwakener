@@ -6,6 +6,9 @@ import QuartzCore
 /// `ECGridLayer`, a grid laid out row by row from the top left, its cells sized from its bounds.
 @RuntimeClassProxy("ECGridLayer")
 protocol DockGridLayer {
+    /// Sizes cells from the bounds and asks the source for the item count once, right away. The source
+    /// is held weakly.
+    init?(layerSource: NSObject, rows: Int, columns: Int, scaleFactor: Float, layoutRTL: Bool)
     /// Not `layoutSublayers`, so Core Animation never calls it by itself.
     func layout()
 }
@@ -14,6 +17,7 @@ protocol DockGridLayer {
 /// count again after `layerSourceInvalidated:`.
 @RuntimeClassProxy("ECImageGridLayer")
 protocol DockImageGridLayer {
+    init?(layerSource: NSObject, rows: Int, columns: Int, spacing: UInt, scaleFactor: Float, layoutRTL: Bool)
     func layout()
     /// Makes the grid ask its source for the item count and every item again, then lay out.
     func layerSourceInvalidated(_ source: AnyObject)
@@ -27,10 +31,17 @@ protocol DockImageGridLayer {
 /// scales the shadow by 0.6 × its contents scale when drawing on a Retina display.
 @RuntimeClassProxy("ECShadowTextLayer")
 protocol DockShadowTextLayer {
+    init?()
     /// A `CGColor`, which the Dock declares as an object.
     func setTextShadowColor(_ color: AnyObject)
     func setTextShadowOffset(_ offset: CGSize)
     func setTextShadowBlur(_ blur: CGFloat)
+}
+
+/// `ECTextLayer`, the Dock's text layer without a drawn shadow.
+@RuntimeClassProxy("ECTextLayer")
+protocol DockTextLayer {
+    init?()
 }
 
 /// The Dock's category on `CALayer` that 15's selection highlight used (`setMaterialControl:3 appearance:1`).
@@ -47,29 +58,8 @@ protocol DockLayerMaterial {
 enum DockLayerFactory {
     // MARK: - Signatures
 
-    /// `-[ECGridLayer initWithLayerSource:rows:columns:scaleFactor:layoutRTL:]`: sizes cells from its
-    /// bounds and asks the source for the item count once, right away. The source is held weakly.
-    static let gridLayerInitialiser = DockMethodSignature(
-        className: "ECGridLayer",
-        selectorName: "initWithLayerSource:rows:columns:scaleFactor:layoutRTL:",
-        typeEncoding: "@48@0:8@16q24q32f40B44"
-    )
-    static let shadowTextLayerInitialiser = DockMethodSignature(className: "ECShadowTextLayer", selectorName: "init", typeEncoding: "@16@0:8")
-    static let textLayerInitialiser = DockMethodSignature(className: "ECTextLayer", selectorName: "init", typeEncoding: "@16@0:8")
-    /// `-[ECImageGridLayer initWithLayerSource:rows:columns:spacing:scaleFactor:layoutRTL:]`.
-    static let imageGridLayerInitialiser = DockMethodSignature(
-        className: "ECImageGridLayer",
-        selectorName: "initWithLayerSource:rows:columns:spacing:scaleFactor:layoutRTL:",
-        typeEncoding: "@56@0:8@16q24q32Q40f48B52"
-    )
-
-    static let requiredMethods: [DockMethodSignature] = [
-        gridLayerInitialiser,
-        shadowTextLayerInitialiser,
-        textLayerInitialiser,
-        imageGridLayerInitialiser,
-    ]
-        + DockMethodSignature.signatures(
+    static let requiredMethods: [DockMethodSignature] =
+        DockMethodSignature.signatures(
             ofClassNamed: DockGridLayerImplementation.runtimeClassName,
             requirements: DockGridLayerImplementation.methodRequirements
         )
@@ -82,6 +72,10 @@ enum DockLayerFactory {
             requirements: DockShadowTextLayerImplementation.methodRequirements
         )
         + DockMethodSignature.signatures(
+            ofClassNamed: DockTextLayerImplementation.runtimeClassName,
+            requirements: DockTextLayerImplementation.methodRequirements
+        )
+        + DockMethodSignature.signatures(
             ofClassNamed: DockLayerMaterialImplementation.runtimeClassName,
             requirements: DockLayerMaterialImplementation.methodRequirements
         )
@@ -91,17 +85,14 @@ enum DockLayerFactory {
     /// A grid laid out row by row from the top left, its cells sized from its bounds. `source` must
     /// answer `numberOfItemsForLayer:`, `makeLayerForLayer:` and
     /// `setContentInLayers:withDataRange:forLayer:usingScaleFactor:`, and must outlive the grid.
-    ///
-    /// `DynamicObject` copies each argument's bytes as they are, so the scale factor has to be the `Float`
-    /// the Dock's `f` asks for — a `CGFloat` would pass half of a double.
     static func makeGridLayer(source: NSObject, rowCount: Int, columnCount: Int, scaleFactor: Float) -> CALayer? {
-        ObjC.ECGridLayer(
+        DockGridLayerImplementation(
             layerSource: source,
             rows: rowCount,
             columns: columnCount,
             scaleFactor: scaleFactor,
             layoutRTL: false
-        ).asObject as? CALayer
+        )?.host as? CALayer
     }
 
     static func layoutGridLayer(_ gridLayer: CALayer) {
@@ -111,14 +102,14 @@ enum DockLayerFactory {
     // MARK: - ECImageGridLayer
 
     static func makeImageGridLayer(source: NSObject, rowCount: Int, columnCount: Int, spacing: UInt, scaleFactor: Float) -> CALayer? {
-        ObjC.ECImageGridLayer(
+        DockImageGridLayerImplementation(
             layerSource: source,
             rows: rowCount,
             columns: columnCount,
             spacing: spacing,
             scaleFactor: scaleFactor,
             layoutRTL: false
-        ).asObject as? CALayer
+        )?.host as? CALayer
     }
 
     static func layoutImageGridLayer(_ gridLayer: CALayer) {
@@ -146,9 +137,8 @@ enum DockLayerFactory {
     /// A Dock text layer; `ECShadowTextLayer` draws its shadow with the text rather than as a layer
     /// shadow. Falls back to a plain `CATextLayer` only if the class is missing.
     static func makeTextLayer(withShadow: Bool) -> CATextLayer {
-        let className = withShadow ? shadowTextLayerInitialiser.className : textLayerInitialiser.className
-        guard let textLayerClass = NSClassFromString(className) as? CATextLayer.Type else { return CATextLayer() }
-        return textLayerClass.init()
+        let textLayer = withShadow ? DockShadowTextLayerImplementation()?.host : DockTextLayerImplementation()?.host
+        return textLayer as? CATextLayer ?? CATextLayer()
     }
 
     /// The text shadow of an `ECShadowTextLayer`, in points; does nothing to any other text layer.
