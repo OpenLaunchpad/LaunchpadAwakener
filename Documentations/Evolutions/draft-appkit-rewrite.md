@@ -348,7 +348,7 @@ extension LaunchpadOrganizerViewModel {
 2. **依赖与空模块。**（已完成）加四个库、两个新模块与测试 target，App target 改为只链接 `LaunchpadAwakenerAppUI`（第 7 步之前，SwiftUI 外壳经它拿到 AppCore），这样这一步就用 Xcode 编到了 UIFoundation。确认 trait 在旧 PIF 构建器下生效（`LayerBackedView` 继承自 `NSLayerBackedView`，没有 `NSEdgeInsets` 的 `==` 歧义），不生效就停下来问用户。
 3. **AppCore。**（已完成）横幅呈现、两行状态、整理窗口的视图模型，加单元测试；SwiftUI 视图暂时改调它们，行为不变。
 4. **共用模块。**（已完成）分组表单、窗口尺寸规则、标准主菜单、登录时启动的判断，加单元测试。
-5. **注入版 App 的控制面板、菜单栏与 delegate。**
+5. **注入版 App 的控制面板、菜单栏与 delegate。**（已完成；delegate 挪到第 7 步）
 6. **整理窗口。**
 7. **注入版 App 的外壳换成 `main.swift`**，删掉三个 SwiftUI 文件。
 8. **独立版**：设置窗口、主菜单、`main.swift`，删掉两个 SwiftUI 文件。
@@ -379,3 +379,4 @@ extension LaunchpadOrganizerViewModel {
 | 2026-11-09 | 控制面板按完整内容定高 | 改写前的 SwiftUI 版在 MacBook 上开出来是 670 点高（含标题栏），最后一行被截掉、要滚动：`sizeThatFits` 给表单的理想高度比内容矮。代码注释的意图是「按内容开、不超过屏幕可见区域」，AppKit 版照意图按完整内容定高，屏幕放得下时不必滚动。 |
 | 2026-11-09 | 第 3 步不改 SwiftUI 视图 | 横幅呈现、状态行与整理窗口的视图模型都进了 AppCore 并有测试；原来的 SwiftUI 视图第 7 步整个删掉，这期间不改调新类型，省掉一次马上作废的改动。视图模型的编辑都经它转给 `LaunchpadOrganizer`，每次编辑或刷新之后就地修正选中项，不靠观察布局的变化来触发：观察闭包里写被观察的属性会让它不停重跑。整理窗口测试用的样例布局与替身通道改成测试 target 内共用。 |
 | 2026-11-09 | 表单的尺寸取自改写前的截图 | 在 MacBook 的截图上量出：分组圆角 12 点，节与节之间 30 点，节标题与分组之间 10 点，行内边距 10 点（一行字的行 36 点高，带一行说明的 52.5 点），分隔线 1 点、缩进 10 点。分组底色取 `tertiarySystemFill`（深色下与截图同为 4.7% 的白），分隔线取系统分隔线色的一半不透明度（与截图同为约 6% 的白）。这些数写进了共用模块的测试。滚动交给 AppKitPlus 的 `NSScrollViewController`，表单本身只负责排列。 |
+| 2026-11-09 | delegate 与外壳切换同一步 | `ApplicationDelegate` 要引用整理窗口，放在第 5 步就得留个空壳才能单独编过；改为第 7 步与 `main.swift` 一起落地。第 5 步只交控制面板与菜单栏。控制器的开关只有 `setEnabled(_:)` 这样的方法、没有可写属性，`UIBinding` 绑不上：界面跟着状态走用 `observe {}`，用户的操作经动作调方法。菜单项的闭包动作用 AppKitPlus 的 `NSAction`。 |
