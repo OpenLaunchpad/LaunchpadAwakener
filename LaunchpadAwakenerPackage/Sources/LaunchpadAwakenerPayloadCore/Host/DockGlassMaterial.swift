@@ -114,8 +114,9 @@ final class DockGlassMaterial {
     /// `variant` is the Dock's: 0 its own glass, 2 the same without foreground effects, 4 the
     /// Command-Tab switcher's. `isAdaptive` lets the glass turn light or dark with what is behind it.
     init?(variant: Int, isAdaptive: Bool) {
+        // Unavailable is already logged, once, by `checkSignatures()`.
+        guard Self.isAvailable else { return nil }
         guard
-            Self.isAvailable,
             let controllerObject = ObjC.DockGlassMaterialLayerController(variant: variant, adaptive: isAdaptive).asObject,
             let controller = DockGlassMaterialLayerControllerImplementation(controllerObject),
             let rootLayer = controller.rootLayer

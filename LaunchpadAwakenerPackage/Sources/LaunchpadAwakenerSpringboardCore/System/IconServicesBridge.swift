@@ -32,14 +32,15 @@ enum IconServicesBridge {
 
     /// The icon of the file or bundle at `fileURL`, rendered for `descriptor`. Blocks while
     /// IconServices renders, so call it off the main thread.
+    ///
+    /// `ISIcon` is a class cluster: `+alloc` hands out an `ISIconFactory`, and `initWithURL:` lives there,
+    /// not on `ISIcon`, so the initialiser is checked on what `alloc` returned and sent to that object.
     static func makeIconImage(forFileAt fileURL: URL, descriptor: NSObject) -> CGImage? {
+        let allocation: DynamicObject = ObjC.ISIcon[dynamicMember: "alloc"]
         guard
-            RuntimeMethodInspector.hasMethod(
-                className: "ISIcon",
-                selector: NSSelectorFromString("initWithURL:"),
-                matchingTypeEncoding: "@24@0:8@16"
-            ),
-            let icon = ObjC.ISIcon(URL: fileURL as NSURL).asObject,
+            let allocatedIcon = allocation.asObject,
+            hasMethod(allocatedIcon, "initWithURL:", typeEncoding: "@24@0:8@16"),
+            let icon = ObjC(allocatedIcon).initWithURL(fileURL as NSURL).asObject,
             hasMethod(icon, "prepareImagesForImageDescriptors:", typeEncoding: "v24@0:8@16"),
             hasMethod(icon, "imageForImageDescriptor:", typeEncoding: "@24@0:8@16")
         else { return nil }

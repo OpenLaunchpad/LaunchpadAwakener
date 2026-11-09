@@ -78,7 +78,7 @@ payload、独立版与文本输入辅助进程里调用 Objective-C 私有方法
 4. **已完成。** 37 处实例方法改 `@RuntimeClassProxy`，23 个方法的核对清单改由 proxy 汇总，加编码一致性测试。
 5. **已完成。** 27 处改 `DynamicObject`，含 7 处 init。
 6. **已完成。** 文档：`CLAUDE.md`、实现说明、`PayloadHooks.swift` 开头的说明。
-7. 部署到 MacBook 与 26 虚拟机做非交互验证，独立版跑 `--self-check`。
+7. **已完成。** 部署到 MacBook 与 26 虚拟机做非交互验证，独立版跑 `--self-check`。
 
 ### 没有询问就采用的假设
 
@@ -102,3 +102,5 @@ payload、独立版与文本输入辅助进程里调用 Objective-C 私有方法
 | 2026-11-09 | 辅助进程读 `contextId` 不另加编码核对 | 无参 getter：`DynamicObject` 按真实签名取返回值，`asUInt32` 还核对返回值的大小；原来用 KVC 读，也没有核对。`_contextForLayerHosting` 照旧核对 |
 | 2026-11-09 | 文本输入辅助进程的 `NSDockTile` proxy 没有签名测试 | 这个模块没有测试 target；两个编码由 `Int`、`Bool` 推出，运行时 proxy 自己也会核对。两个方法在 27.2 的 AppKit 里声明在 `NSDockTile` 本身上 |
 | 2026-11-09 | 实现完成，第 7 步的测试机验证待做 | 包测试与两个 scheme 的构建都通过，payload 的链接清单与改动前一致；MacBook 正被 AppKit 重写那条线做交互测试，部署会打断它，26 虚拟机没有开机。没有合进主检出：主检出里有未提交的 `Package.swift` 与 `Package.resolved` 改动，挡住了快进 |
+| 2026-11-09 | `ISIcon` 的初始化方法改回在 `alloc` 出的对象上核对 | 第一次部署时所有图标都取不到：`ISIcon` 是类簇，`initWithURL:` 在 `+alloc` 给出的 `ISIconFactory` 上，按类名核对找不到。同类排查：另外两处由「在对象上核对」改成按类名核对的（`DockVisibility`、`SLSIconAppearanceConfiguration`）查过，对象就是那个类本身，不受影响 |
+| 2026-11-09 | 测试机验证完成 | MacBook 27.2 与 26.6.2 虚拟机：23 个方法全部吻合、两个 hook 装上、离屏自检与改前一致，图标全部取到；独立版自检解析出图标样式。没有做交互验证 |
