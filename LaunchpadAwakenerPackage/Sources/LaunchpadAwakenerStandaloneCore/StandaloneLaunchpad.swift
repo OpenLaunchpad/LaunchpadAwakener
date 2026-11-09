@@ -1,8 +1,10 @@
 import AppKit
 import KeyboardShortcuts
+import LaunchpadAwakenerSharedUI
 import LaunchpadAwakenerSpringboardCore
 import OSToolbox
 import ServiceManagement
+import UIFoundation
 
 /// The standalone Launchpad: chooses its host, opens the layout library, and shows and hides the
 /// springboard for the app delegate.
@@ -132,6 +134,11 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // Read first: the open event that tells a launch at login apart is only current until launching
+        // finishes.
+        let wasLaunchedAtLogin = ApplicationLaunch.wasLaunchedAtLogin
+        NSApp.mainMenu = ApplicationMainMenu.make(applicationName: "Launchpad", settingsItem: makeSettingsItem())
+
         let launchpad = StandaloneLaunchpad.shared
         launchpad.start()
         if StandaloneLaunchpad.isSelfCheckLaunch {
@@ -141,8 +148,15 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
         launchpad.registerLoginItemOnFirstLaunch()
         launchpad.listenForShortcut()
         // Opened at login, it waits in the background for the first click on its Dock icon.
-        guard !Self.wasLaunchedAsLoginItem else { return }
+        guard !wasLaunchedAtLogin else { return }
         launchpad.show(reason: "launched")
+    }
+
+    /// The application menu's Settings… item, with the gear SwiftUI gave it.
+    private func makeSettingsItem() -> NSMenuItem {
+        let settingsItem = MainMenu.Application.settings(action: #selector(showSettings(_:)), target: self)
+        settingsItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
+        return settingsItem
     }
 
     /// A click on the app's Dock icon, or opening it again from the Finder.
@@ -171,10 +185,4 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
         StandaloneSettings.show()
     }
 
-    /// Whether this launch is the one at login: the open event says so for an item under Open at Login.
-    private static var wasLaunchedAsLoginItem: Bool {
-        guard let openEvent = NSAppleEventManager.shared().currentAppleEvent else { return false }
-        return openEvent.eventID == kAEOpenApplication
-            && openEvent.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
-    }
 }
