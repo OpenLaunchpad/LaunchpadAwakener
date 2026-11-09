@@ -1,6 +1,6 @@
 import AppKit
 import Darwin
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import LaunchpadAwakenerShared
 import ObjectiveC
 import OSToolbox
@@ -336,7 +336,7 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
             #log(.error, "No -\(selectorName, privacy: .public) on \(String(describing: type(of: receiver)), privacy: .public)")
             return nil
         }
-        guard MethodHookInspector.typeEncodingsMatch(String(cString: typeEncoding), expectedTypeEncoding) else {
+        guard ObjCTypeEncodingNormalization.matches(String(cString: typeEncoding), expectedTypeEncoding) else {
             #log(.error, "-\(selectorName, privacy: .public) is \(String(cString: typeEncoding), privacy: .public), not \(expectedTypeEncoding, privacy: .public)")
             return nil
         }

@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import QuartzCore
 
 /// Core Animation's private filters, by the names the system exports for them.
@@ -73,7 +73,7 @@ package enum QuartzCorePrivate {
     package static func makeFilter(type filterType: String) -> NSObject? {
         guard
             let filterClass = NSClassFromString("CAFilter") as? NSObject.Type,
-            MethodHookInspector.hasMethod(
+            RuntimeMethodInspector.hasMethod(
                 className: "CAFilter",
                 selector: NSSelectorFromString("filterWithType:"),
                 matchingTypeEncoding: "@24@0:8@16",

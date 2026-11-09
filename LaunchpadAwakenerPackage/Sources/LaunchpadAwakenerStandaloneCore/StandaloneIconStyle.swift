@@ -1,5 +1,5 @@
 import AppKit
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import LaunchpadAwakenerSpringboardCore
 import ObjectiveC
 import OSToolbox
@@ -95,7 +95,7 @@ enum StandaloneIconStyle {
     private static func fetchConfiguration() -> Configuration? {
         let configurationClassName = "SLSIconAppearanceConfiguration"
         guard
-            MethodHookInspector.hasMethod(className: configurationClassName, selector: NSSelectorFromString("fetchCurrentIconAppearanceConfiguration"), matchingTypeEncoding: "@16@0:8", isInstanceMethod: false),
+            RuntimeMethodInspector.hasMethod(className: configurationClassName, selector: NSSelectorFromString("fetchCurrentIconAppearanceConfiguration"), matchingTypeEncoding: "@16@0:8", isInstanceMethod: false),
             let configurationClass = NSClassFromString(configurationClassName) as? NSObject.Type,
             let configuration = configurationClass.perform(NSSelectorFromString("fetchCurrentIconAppearanceConfiguration"))?.takeUnretainedValue() as? NSObject
         else {
@@ -153,7 +153,7 @@ enum StandaloneIconStyle {
     private static func makeColor(systemColor: Int, isDark: Bool) -> NSObject? {
         let selector = NSSelectorFromString("initWithSystemColor:appearance:contrast:vibrancy:")
         guard
-            MethodHookInspector.hasMethod(className: "IFColor", selector: selector, matchingTypeEncoding: "@48@0:8q16q24q32q40", isInstanceMethod: true),
+            RuntimeMethodInspector.hasMethod(className: "IFColor", selector: selector, matchingTypeEncoding: "@48@0:8q16q24q32q40", isInstanceMethod: true),
             let colorClass = NSClassFromString("IFColor") as? NSObject.Type,
             let initialiserImplementation = class_getMethodImplementation(colorClass, selector),
             let allocatedColor = colorClass.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue()
@@ -167,7 +167,7 @@ enum StandaloneIconStyle {
     private static func makeColor(wrapping color: CGColor) -> NSObject? {
         let selector = NSSelectorFromString("initWithCGColor:")
         guard
-            MethodHookInspector.hasMethod(className: "IFColor", selector: selector, matchingTypeEncoding: "@24@0:8^{CGColor=}16", isInstanceMethod: true),
+            RuntimeMethodInspector.hasMethod(className: "IFColor", selector: selector, matchingTypeEncoding: "@24@0:8^{CGColor=}16", isInstanceMethod: true),
             let colorClass = NSClassFromString("IFColor") as? NSObject.Type,
             let initialiserImplementation = class_getMethodImplementation(colorClass, selector),
             let allocatedColor = colorClass.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue()
@@ -183,7 +183,7 @@ enum StandaloneIconStyle {
             let method = class_getInstanceMethod(object_getClass(object), selector),
             let typeEncoding = method_getTypeEncoding(method)
         else { return false }
-        return MethodHookInspector.typeEncodingsMatch(String(cString: typeEncoding), expectedTypeEncoding)
+        return ObjCTypeEncodingNormalization.matches(String(cString: typeEncoding), expectedTypeEncoding)
     }
 
     private static func unsignedValue(of object: NSObject, selectorName: String) -> UInt32? {

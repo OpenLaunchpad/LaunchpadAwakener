@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import ObjectiveC
 
 /// Application icons from IconServices, the way the Dock gets its own tile images.
@@ -68,6 +68,6 @@ enum IconServicesBridge {
 
     private static func hasMethod(_ object: NSObject, _ selector: Selector, typeEncoding expectedTypeEncoding: String) -> Bool {
         guard let method = class_getInstanceMethod(object_getClass(object), selector), let encoding = method_getTypeEncoding(method) else { return false }
-        return MethodHookInspector.typeEncodingsMatch(String(cString: encoding), expectedTypeEncoding)
+        return ObjCTypeEncodingNormalization.matches(String(cString: encoding), expectedTypeEncoding)
     }
 }

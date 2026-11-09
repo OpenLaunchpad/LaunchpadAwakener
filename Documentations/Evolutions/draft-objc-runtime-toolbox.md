@@ -1,6 +1,6 @@
 # Draft - 用 ObjCRuntimeToolbox 改写 hook 与私有调用
 
-- **状态**: Accepted
+- **状态**: In Progress
 - **创建日期**: 2026-11-09
 - **最后更新**: 2026-11-09
 - **实现分支**: LaunchpadAwakener `feature/objc-runtime-toolbox`；FrameworkToolbox `feature/objc-runtime-method-families`
@@ -72,9 +72,9 @@ payload、独立版与文本输入辅助进程里调用 Objective-C 私有方法
 
 ### 落地步骤
 
-1. FrameworkToolbox：`DynamicObject` 按 ARC 规则判断方法族、正确处理 init，先写失败的引用计数测试；三个宏对接不住的方法族在编译期报错，配宏测试；更新文档；合进 `main` 推送，打 0.17.2 推送。
-2. LaunchpadAwakener 依赖 0.17.2 与 `ObjCRuntimeToolbox-Static`，`HookKit` 的用处换成工具箱后删掉 `HookKit`；构建、测试、核对 payload 的 `otool -L`。
-3. 两个 hook 改 `@RuntimeClassHook`，加编码一致性测试。
+1. **已完成。** FrameworkToolbox：`DynamicObject` 按 ARC 规则判断方法族、正确处理 init，先写失败的引用计数测试；三个宏对接不住的方法族在编译期报错，配宏测试；更新文档；合进 `main` 推送，打 0.17.2 推送。
+2. **已完成。** LaunchpadAwakener 依赖 0.17.2 与 `ObjCRuntimeToolbox-Static`，`HookKit` 的用处换成工具箱后删掉 `HookKit`；构建、测试、核对 payload 的 `otool -L`。
+3. **已完成。** 两个 hook 改 `@RuntimeClassHook`，加编码一致性测试。
 4. 37 处实例方法改 `@RuntimeClassProxy`，23 个方法的核对清单改由 proxy 汇总，加编码一致性测试。
 5. 27 处改 `DynamicObject`，含 7 处 init。
 6. 文档：`CLAUDE.md`、实现说明、`PayloadHooks.swift` 开头的说明。

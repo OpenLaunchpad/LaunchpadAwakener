@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import ObjectiveC
 import OSToolbox
 import LaunchpadAwakenerSpringboardCore
@@ -64,7 +64,7 @@ enum DockEnvironment {
         guard
             let dockBar = DockBarReference.dockBar,
             let display = objectValue(of: dockBar, selector: dockBarDisplay.selector),
-            MethodHookInspector.typeEncodingsMatch(typeEncoding(of: display, selector: displayNotchBounds.selector) ?? "", displayNotchBounds.typeEncoding)
+            ObjCTypeEncodingNormalization.matches(typeEncoding(of: display, selector: displayNotchBounds.selector) ?? "", displayNotchBounds.typeEncoding)
         else { return 0 }
         typealias RectFunction = @convention(c) (AnyObject, Selector) -> CGRect
         let implementation = unsafeBitCast(display.method(for: displayNotchBounds.selector), to: RectFunction.self)
@@ -90,7 +90,7 @@ enum DockEnvironment {
             let monitor = checkedObjectValue(of: environment, selector: iconAppearanceMonitorSelector),
             let appearance = checkedObjectValue(of: monitor, selector: appearanceSelector),
             let iconDescriptor = checkedObjectValue(of: appearance, selector: iconDescriptionSelector),
-            typeEncoding(of: appearance, selector: styleSelector).map({ MethodHookInspector.typeEncodingsMatch($0, "C16@0:8") }) == true
+            typeEncoding(of: appearance, selector: styleSelector).map({ ObjCTypeEncodingNormalization.matches($0, "C16@0:8") }) == true
         else {
             #log(.error, "The Dock's icon appearance is out of reach; icons use the default style")
             return nil
@@ -114,7 +114,7 @@ enum DockEnvironment {
 
     /// Whether `receiver`'s own class has `selector` with `expectedTypeEncoding`, frame offsets aside.
     static func hasMethod(_ receiver: NSObject, selector: Selector, typeEncoding expectedTypeEncoding: String) -> Bool {
-        guard let encoding = typeEncoding(of: receiver, selector: selector), MethodHookInspector.typeEncodingsMatch(encoding, expectedTypeEncoding) else {
+        guard let encoding = typeEncoding(of: receiver, selector: selector), ObjCTypeEncodingNormalization.matches(encoding, expectedTypeEncoding) else {
             #log(.error, "-[\(String(cString: object_getClassName(receiver)), privacy: .public) \(NSStringFromSelector(selector), privacy: .public)] is missing or changed")
             return false
         }
@@ -137,7 +137,7 @@ enum DockEnvironment {
 
     /// Same, after checking on the receiver's own class that the method takes nothing and returns an object.
     static func checkedObjectValue(of receiver: NSObject, selector: Selector) -> NSObject? {
-        guard let encoding = typeEncoding(of: receiver, selector: selector), MethodHookInspector.typeEncodingsMatch(encoding, "@16@0:8") else {
+        guard let encoding = typeEncoding(of: receiver, selector: selector), ObjCTypeEncodingNormalization.matches(encoding, "@16@0:8") else {
             #log(.error, "-[\(String(cString: object_getClassName(receiver)), privacy: .public) \(NSStringFromSelector(selector), privacy: .public)] is missing or changed")
             return nil
         }

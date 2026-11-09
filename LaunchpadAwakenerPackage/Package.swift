@@ -24,8 +24,6 @@ let package = Package(
         .library(name: "LaunchpadAwakenerTextInputCore", targets: ["LaunchpadAwakenerTextInputCore"]),
         // Linked by the standalone app, which draws the springboard in a window of its own.
         .library(name: "LaunchpadAwakenerStandaloneCore", targets: ["LaunchpadAwakenerStandaloneCore"]),
-        // Standalone so it can be reused or tested without dragging in the payload's specifics.
-        .library(name: "LaunchpadAwakenerHookKit", targets: ["LaunchpadAwakenerHookKit"]),
         .library(name: "LaunchpadAwakenerShared", targets: ["LaunchpadAwakenerShared"]),
         // The request types the app and the injected payload speak to each other.
         .library(name: "LaunchpadAwakenerPayloadInterface", targets: ["LaunchpadAwakenerPayloadInterface"]),
@@ -40,9 +38,15 @@ let package = Package(
         // To develop against a local checkout, replace this line with:
         //   .package(path: "../../swift-helper-service")
         .package(url: "https://github.com/Mx-Iris/swift-helper-service", exact: "0.1.4"),
-        // `@Loggable` and `#log` for the payload's logging. Already in the graph through
-        // swift-helper-service; named here because the payload uses it directly.
-        .package(url: "https://github.com/Mx-Iris/FrameworkToolbox", from: "0.17.0"),
+        // `@Loggable` and `#log` for the payload's logging, and `ObjCRuntimeToolbox` for every call into
+        // and hook on a class that has no header. Already in the graph through swift-helper-service;
+        // named here because the payload uses it directly.
+        //
+        // 0.17.2 is the floor: it declares `ObjCRuntimeToolbox-Static` `.static`, so a build that
+        // would link it into two images fails instead of quietly turning it into an @rpath dylib the
+        // payload could not carry into the Dock, and its `DynamicObject` hands an initialiser its
+        // receiver, so `[[Class alloc] init…]` returning nil no longer over-releases inside the Dock.
+        .package(url: "https://github.com/Mx-Iris/FrameworkToolbox", from: "0.17.2"),
         // The standalone app's global shortcut: a recorder for its settings and a Carbon hot key, which
         // needs no permission. Only the standalone module links it.
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", from: "3.1.0"),
@@ -51,10 +55,6 @@ let package = Package(
         // Names, versions and paths shared by all three binaries. No dependencies on purpose —
         // anything heavier would end up inside the payload.
         .target(name: "LaunchpadAwakenerShared"),
-
-        // Objective-C method replacement with signature validation and atomic batch installation.
-        // Depends on nothing but the Objective-C runtime.
-        .target(name: "LaunchpadAwakenerHookKit"),
 
         // What the app and the payload say to each other over their direct XPC channel. Both sides
         // link this, so it holds request types and nothing else.
@@ -103,13 +103,18 @@ let package = Package(
         // draws it: the Dock through the payload, or the standalone app. It reaches its host only
         // through `SpringboardHost`, and links neither AppKit nor anything Dock-specific, since the
         // payload carries it into the Dock.
+        //
+        // `ObjCRuntimeToolbox-Static` rather than the `.dynamic` product: the payload has to be
+        // self-contained, with nothing to find through @rpath inside the Dock. Its state is then per
+        // image, which is fine as long as each process embeds one copy — the payload in the Dock, the
+        // standalone app, the text input helper — and every module here takes the same product.
         .target(
             name: "LaunchpadAwakenerSpringboardCore",
             dependencies: [
                 // For the kill switch's path, which the app's window also toggles.
                 "LaunchpadAwakenerShared",
-                "LaunchpadAwakenerHookKit",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
+                .product(name: "ObjCRuntimeToolbox-Static", package: "FrameworkToolbox"),
             ]
         ),
 
@@ -122,10 +127,10 @@ let package = Package(
             name: "LaunchpadAwakenerPayloadCore",
             dependencies: [
                 "LaunchpadAwakenerShared",
-                "LaunchpadAwakenerHookKit",
                 "LaunchpadAwakenerSpringboardCore",
                 "LaunchpadAwakenerPayloadInterface",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
+                .product(name: "ObjCRuntimeToolbox-Static", package: "FrameworkToolbox"),
                 .product(name: "HelperClient", package: "swift-helper-service"),
                 .product(name: "HelperPeer", package: "swift-helper-service"),
                 .product(name: "InjectedEndpointRegistryServiceInterface", package: "swift-helper-service"),
@@ -137,9 +142,9 @@ let package = Package(
         .target(
             name: "LaunchpadAwakenerStandaloneCore",
             dependencies: [
-                "LaunchpadAwakenerHookKit",
                 "LaunchpadAwakenerSpringboardCore",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
+                .product(name: "ObjCRuntimeToolbox-Static", package: "FrameworkToolbox"),
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
             ]
         ),
@@ -149,9 +154,9 @@ let package = Package(
         .target(
             name: "LaunchpadAwakenerTextInputCore",
             dependencies: [
-                "LaunchpadAwakenerHookKit",
                 "LaunchpadAwakenerShared",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
+                .product(name: "ObjCRuntimeToolbox-Static", package: "FrameworkToolbox"),
             ]
         ),
 

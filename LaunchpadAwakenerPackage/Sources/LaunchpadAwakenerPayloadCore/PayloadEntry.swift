@@ -1,6 +1,6 @@
 import Foundation
 import OSLog
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import LaunchpadAwakenerPayloadInterface
 import LaunchpadAwakenerShared
 import LaunchpadAwakenerSpringboardCore
@@ -85,7 +85,7 @@ public enum PayloadEntry {
         }
 
         do {
-            try MethodHookInstaller.installAtomically(hooks)
+            try RuntimeMethodHook.installAtomically(hooks)
             logger.info("Installed \(hooks.count, privacy: .public) hook(s)")
             let missingVisibilityMembers = LiveDockVisibility.missingMembers()
             if missingVisibilityMembers.isEmpty {

@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import ObjectiveC
 import QuartzCore
 

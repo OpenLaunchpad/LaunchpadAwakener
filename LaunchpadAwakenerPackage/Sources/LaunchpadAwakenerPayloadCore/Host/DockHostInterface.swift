@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import ObjectiveC
 import OSToolbox
 import QuartzCore
@@ -73,14 +73,14 @@ enum DockHostInterface {
     private static func checkRequiredMethods() -> Bool {
         var mismatchCount = 0
         for requiredMethod in requiredMethods {
-            let isMatching = MethodHookInspector.hasMethod(
+            let isMatching = RuntimeMethodInspector.hasMethod(
                 className: requiredMethod.className,
                 selector: requiredMethod.selector,
                 matchingTypeEncoding: requiredMethod.typeEncoding
             )
             guard !isMatching else { continue }
             mismatchCount += 1
-            let liveTypeEncoding = MethodHookInspector.typeEncoding(
+            let liveTypeEncoding = RuntimeMethodInspector.typeEncoding(
                 forClassNamed: requiredMethod.className,
                 selector: requiredMethod.selector
             )

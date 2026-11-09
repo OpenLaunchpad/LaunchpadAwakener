@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import ObjectiveC
 import OSToolbox
 import QuartzCore
@@ -73,11 +73,11 @@ final class DockGlassMaterial {
 
     private static func checkSignatures() -> Bool {
         var mismatchedNames = instanceMethods.compactMap { signature -> String? in
-            MethodHookInspector.hasMethod(className: signature.className, selector: signature.selector, matchingTypeEncoding: signature.typeEncoding)
+            RuntimeMethodInspector.hasMethod(className: signature.className, selector: signature.selector, matchingTypeEncoding: signature.typeEncoding)
                 ? nil
                 : "-[\(signature.className) \(signature.selectorName)]"
         }
-        if !MethodHookInspector.hasMethod(
+        if !RuntimeMethodInspector.hasMethod(
             className: controllerEnvironment.className,
             selector: controllerEnvironment.selector,
             matchingTypeEncoding: controllerEnvironment.typeEncoding,

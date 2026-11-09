@@ -1,5 +1,5 @@
 import Foundation
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import ObjectiveC
 import OSToolbox
 import LaunchpadAwakenerSpringboardCore
@@ -133,7 +133,7 @@ final class LiveDockVisibility: DockVisibilityCalls {
     /// everything matches. Logged once as the payload starts, so a Dock update can be read off the log.
     nonisolated static func missingMembers() -> [String] {
         var missingMembers = ([visibilityControllerSignature] + controllerMethods).compactMap { signature -> String? in
-            MethodHookInspector.hasMethod(className: signature.className, selector: signature.selector, matchingTypeEncoding: signature.typeEncoding)
+            RuntimeMethodInspector.hasMethod(className: signature.className, selector: signature.selector, matchingTypeEncoding: signature.typeEncoding)
                 ? nil
                 : "-[\(signature.className) \(signature.selectorName)]"
         }

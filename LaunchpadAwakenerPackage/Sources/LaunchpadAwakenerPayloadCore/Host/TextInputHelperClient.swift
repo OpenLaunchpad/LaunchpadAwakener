@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import LaunchpadAwakenerHookKit
+import ObjCRuntimeToolbox
 import LaunchpadAwakenerShared
 import ObjectiveC
 import OSToolbox
@@ -137,7 +137,7 @@ final class TextInputHelperClient {
         let selector = NSSelectorFromString("setContextId:")
         guard
             let hostClass = NSClassFromString("CALayerHost") as? CALayer.Type,
-            MethodHookInspector.hasMethod(className: "CALayerHost", selector: selector, matchingTypeEncoding: "v20@0:8I16"),
+            RuntimeMethodInspector.hasMethod(className: "CALayerHost", selector: selector, matchingTypeEncoding: "v20@0:8I16"),
             let method = class_getInstanceMethod(hostClass, selector)
         else {
             #log(.error, "-[CALayerHost setContextId:] is missing or changed; the fields are edited here")
