@@ -16,8 +16,10 @@ package actor LaunchpadLibrary {
         package var exclusionList: ApplicationExclusionList
         /// Capacity of a page, and where a new application starts a new page.
         package var itemsPerPage: Int
-        /// Whether an application discovery did not find is installed elsewhere.
-        package var isStillInstalled: @Sendable (LaunchpadApplication) -> Bool
+        /// Where an application's bookmark leads now.
+        package var bookmarkedBundle: @Sendable (LaunchpadApplication) -> BookmarkedBundle
+        /// Every installed copy of the application with an identifier, outside the search directories too.
+        package var installedBundleURLs: @Sendable (String) -> [URL]
         /// The first page laid out when there is no macOS 15 layout to import.
         package var defaultMainPage: [DefaultLaunchpadLayout.Entry]
 
@@ -27,7 +29,8 @@ package actor LaunchpadLibrary {
             searchDirectories: [URL],
             exclusionList: ApplicationExclusionList,
             itemsPerPage: Int,
-            isStillInstalled: @escaping @Sendable (LaunchpadApplication) -> Bool,
+            bookmarkedBundle: @escaping @Sendable (LaunchpadApplication) -> BookmarkedBundle = ApplicationDiscovery.bookmarkedBundle(of:),
+            installedBundleURLs: @escaping @Sendable (String) -> [URL] = ApplicationDiscovery.installedBundleURLs(forBundleIdentifier:),
             defaultMainPage: [DefaultLaunchpadLayout.Entry] = DefaultLaunchpadLayout.mainPage
         ) {
             self.databaseURL = databaseURL
@@ -35,7 +38,8 @@ package actor LaunchpadLibrary {
             self.searchDirectories = searchDirectories
             self.exclusionList = exclusionList
             self.itemsPerPage = itemsPerPage
-            self.isStillInstalled = isStillInstalled
+            self.bookmarkedBundle = bookmarkedBundle
+            self.installedBundleURLs = installedBundleURLs
             self.defaultMainPage = defaultMainPage
         }
 
@@ -49,8 +53,7 @@ package actor LaunchpadLibrary {
                 legacyDatabaseURL: LegacyLaunchpadImporter.defaultLegacyDatabaseURL,
                 searchDirectories: ApplicationDiscovery.standardSearchDirectories,
                 exclusionList: .standard,
-                itemsPerPage: itemsPerPage,
-                isStillInstalled: ApplicationDiscovery.isStillInstalled
+                itemsPerPage: itemsPerPage
             )
         }
     }
@@ -61,6 +64,9 @@ package actor LaunchpadLibrary {
     private var directoryMonitor: ApplicationDirectoryMonitor?
     /// Bundle locations from the latest discovery, by bundle identifier.
     private var discoveredBundleURLs: [String: URL] = [:]
+    /// The bundle each application stood for at the latest reconciliation: several entries can share an
+    /// identifier — copies of Xcode — and each opens its own.
+    private var reconciledBundleURLs: [LaunchpadItemIdentifier: URL] = [:]
     private var pendingReconciliation: Task<Void, Never>?
 
     package private(set) var layout: LaunchpadLayout = .empty
@@ -125,14 +131,16 @@ package actor LaunchpadLibrary {
         return discoveredApplications
     }
 
-    /// Where an application's bundle is: where discovery found it, or else where its bookmark points.
+    /// Where an application's bundle is: the one it stood for at the latest reconciliation, or else where
+    /// its bookmark leads, or else the first copy discovery found with its identifier.
     private func bundleURL(for application: LaunchpadApplication) -> URL? {
-        if let discoveredBundleURL = discoveredBundleURLs[application.bundleIdentifier] {
-            return discoveredBundleURL
+        if let reconciledBundleURL = reconciledBundleURLs[application.identifier] {
+            return reconciledBundleURL
         }
-        guard let bookmarkData = application.bookmarkData else { return nil }
-        var isStale = false
-        return try? URL(resolvingBookmarkData: bookmarkData, options: [.withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &isStale)
+        if case .found(let bookmarkedBundleURL) = configuration.bookmarkedBundle(application) {
+            return bookmarkedBundleURL
+        }
+        return discoveredBundleURLs[application.bundleIdentifier]
     }
 
     private func populate(_ store: LaunchpadStore, discoveredApplications: [DiscoveredApplication]) throws {
@@ -151,14 +159,27 @@ package actor LaunchpadLibrary {
     }
 
     private func reconcile(_ store: LaunchpadStore, discoveredApplications: [DiscoveredApplication]) throws {
+        let layout = try store.layout()
         let reconciliation = LayoutReconciliation.plan(
-            layout: try store.layout(),
+            layout: layout,
             discoveredApplications: discoveredApplications,
-            isStillInstalled: configuration.isStillInstalled
+            bookmarkedBundle: configuration.bookmarkedBundle,
+            installedBundleURLs: configuration.installedBundleURLs
         )
+        reconciledBundleURLs = reconciliation.bundleURLs
         guard !reconciliation.isEmpty else { return }
         try store.apply(reconciliation, itemsPerPage: configuration.itemsPerPage)
-        #log(.info, "Reconciled: added \(reconciliation.applicationsToAdd.map(\.bundleIdentifier), privacy: .public), removed \(reconciliation.itemsToRemove.count, privacy: .public) item(s)")
+        // An entry just added stands for the copy discovery found, which its bookmark records: another copy
+        // with the same identifier — a second Xcode — is another entry.
+        for application in try store.layout().applications where reconciledBundleURLs[application.identifier] == nil {
+            if case .found(let bundleURL) = configuration.bookmarkedBundle(application) {
+                reconciledBundleURLs[application.identifier] = bundleURL
+            }
+        }
+        let removedApplications = layout.applications
+            .filter { reconciliation.bundleURLs[$0.identifier] == nil }
+            .map { "\($0.title) [\($0.bundleIdentifier)]" }
+        #log(.info, "Reconciled: added \(reconciliation.applicationsToAdd.map(\.bundleIdentifier), privacy: .public), removed \(removedApplications, privacy: .public) in \(reconciliation.itemsToRemove.count, privacy: .public) item(s)")
     }
 
     var currentStore: LaunchpadStore? {

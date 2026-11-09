@@ -5,6 +5,8 @@ import TestingSupport
 
 @Suite("Keeping the layout in line with what is installed")
 struct LaunchpadLibraryTests {
+    /// Checks bookmarks the way the Dock does, but asks LaunchServices for nothing: what it knows depends
+    /// on the machine running the tests.
     private static func configuration(in directoryURL: URL, legacyDatabaseURL: URL?, itemsPerPage: Int = 35) -> LaunchpadLibrary.Configuration {
         LaunchpadLibrary.Configuration(
             databaseURL: directoryURL.appendingPathComponent("Store/Launchpad.db"),
@@ -12,8 +14,13 @@ struct LaunchpadLibraryTests {
             searchDirectories: [directoryURL.appendingPathComponent("Applications", isDirectory: true)],
             exclusionList: .standard,
             itemsPerPage: itemsPerPage,
-            isStillInstalled: { _ in false }
+            installedBundleURLs: { _ in [] }
         )
+    }
+
+    /// LaunchServices knowing a copy of every application, somewhere outside the search directories.
+    private static func installedEverywhere(bundleIdentifier: String) -> [URL] {
+        [URL(fileURLWithPath: "/Installed/\(bundleIdentifier).app", isDirectory: true)]
     }
 
     private static func installApplications(_ fixtures: [ApplicationBundleFixture], in directoryURL: URL) throws {
@@ -81,11 +88,122 @@ struct LaunchpadLibraryTests {
             try LegacyLaunchpadDatabaseFixture(pages: [[.application(title: "Elsewhere", bundleIdentifier: "com.example.elsewhere")]])
                 .write(to: legacyDatabaseURL)
             var configuration = Self.configuration(in: directoryURL, legacyDatabaseURL: legacyDatabaseURL)
-            configuration.isStillInstalled = { application in application.bundleIdentifier == "com.example.elsewhere" }
+            configuration.installedBundleURLs = { bundleIdentifier in
+                bundleIdentifier == "com.example.elsewhere" ? [URL(fileURLWithPath: "/Elsewhere/Elsewhere.app", isDirectory: true)] : []
+            }
 
             let layout = await Self.startedLibrary(configuration: configuration)
 
             #expect(layout.applications.map(\.title) == ["Elsewhere"])
+        }
+    }
+
+    /// Mos, ChatGPT, Xcodes and PixelSnap were each replaced in place by a build with another bundle
+    /// identifier. The old entry's bookmark still led to a bundle, so it counted as installed and stayed,
+    /// while the new identifier was added beside it: the same application twice.
+    @Test("an application replaced in place by one with another identifier is listed once, under the new one")
+    func applicationReplacedInPlaceIsListedOnce() async throws {
+        try await withTemporaryDirectory { directoryURL in
+            let applicationsURL = directoryURL.appendingPathComponent("Applications", isDirectory: true)
+            let bundleURL = try ApplicationBundleFixture(name: "Mos", bundleIdentifier: "com.example.mos.fork").write(in: applicationsURL)
+            let legacyDatabaseURL = directoryURL.appendingPathComponent("legacy.db")
+            try LegacyLaunchpadDatabaseFixture(pages: [[
+                .application(title: "Mos", bundleIdentifier: "com.example.mos", bookmarkData: try bundleURL.bookmarkData()),
+                .application(title: "Mos", bundleIdentifier: "com.example.mos.fork", bookmarkData: try bundleURL.bookmarkData()),
+            ]]).write(to: legacyDatabaseURL)
+
+            let layout = await Self.startedLibrary(configuration: Self.configuration(in: directoryURL, legacyDatabaseURL: legacyDatabaseURL))
+
+            #expect(layout.applications.map(\.bundleIdentifier) == ["com.example.mos.fork"])
+        }
+    }
+
+    /// Xcode-16.4.0 stayed after it was deleted, because other Xcodes with the same identifier were
+    /// still installed — each of them already in the layout under its own entry.
+    @Test("a deleted application leaves even when other copies with its identifier are installed, each already listed")
+    func deletedCopyLeavesWhenTheOtherCopiesAreListed() async throws {
+        try await withTemporaryDirectory { directoryURL in
+            let applicationsURL = directoryURL.appendingPathComponent("Applications", isDirectory: true)
+            let releaseURL = try ApplicationBundleFixture(name: "Tool", bundleIdentifier: "com.example.tool").write(in: applicationsURL)
+            let betaURL = try ApplicationBundleFixture(name: "Tool-Beta", bundleIdentifier: "com.example.tool").write(in: applicationsURL)
+            let deletedURL = try ApplicationBundleFixture(name: "Tool-Old", bundleIdentifier: "com.example.tool").write(in: applicationsURL)
+            let deletedBookmarkData = try deletedURL.bookmarkData()
+            try FileManager.default.removeItem(at: deletedURL)
+            let legacyDatabaseURL = directoryURL.appendingPathComponent("legacy.db")
+            try LegacyLaunchpadDatabaseFixture(pages: [[
+                .application(title: "Tool", bundleIdentifier: "com.example.tool", bookmarkData: try releaseURL.bookmarkData()),
+                .application(title: "Tool-Beta", bundleIdentifier: "com.example.tool", bookmarkData: try betaURL.bookmarkData()),
+                .application(title: "Tool-Old", bundleIdentifier: "com.example.tool", bookmarkData: deletedBookmarkData),
+            ]]).write(to: legacyDatabaseURL)
+
+            let layout = await Self.startedLibrary(configuration: Self.configuration(in: directoryURL, legacyDatabaseURL: legacyDatabaseURL))
+
+            #expect(layout.applications.map(\.title) == ["Tool", "Tool-Beta"])
+        }
+    }
+
+    /// IDA 9.2 to 9.5 and two of the three Xcodes were installed but never shown: their identifier was
+    /// already in the layout.
+    @Test("each installed copy of an application gets its own entry")
+    func unlistedCopiesAreAdded() async throws {
+        try await withTemporaryDirectory { directoryURL in
+            let applicationsURL = directoryURL.appendingPathComponent("Applications", isDirectory: true)
+            let releaseURL = try ApplicationBundleFixture(name: "Tool", bundleIdentifier: "com.example.tool").write(in: applicationsURL)
+            try ApplicationBundleFixture(name: "Tool-Beta", bundleIdentifier: "com.example.tool").write(in: applicationsURL)
+            try ApplicationBundleFixture(name: "Tool-Nightly", bundleIdentifier: "com.example.tool").write(in: applicationsURL)
+            let legacyDatabaseURL = directoryURL.appendingPathComponent("legacy.db")
+            try LegacyLaunchpadDatabaseFixture(pages: [[
+                .application(title: "Tool", bundleIdentifier: "com.example.tool", bookmarkData: try releaseURL.bookmarkData()),
+            ]]).write(to: legacyDatabaseURL)
+
+            let layout = await Self.startedLibrary(configuration: Self.configuration(in: directoryURL, legacyDatabaseURL: legacyDatabaseURL))
+
+            #expect(layout.applications.map(\.title) == ["Tool", "Tool-Beta", "Tool-Nightly"])
+            #expect(layout.applications.map { $0.bundleURL?.standardizedFileURL.lastPathComponent } == ["Tool.app", "Tool-Beta.app", "Tool-Nightly.app"])
+        }
+    }
+
+    /// Updaters and the App Store put a new bundle where the old one was; the bookmark still finds it there.
+    @Test("an application updated by a new bundle at the same path keeps its place")
+    func updatedApplicationKeepsItsPlace() async throws {
+        try await withTemporaryDirectory { directoryURL in
+            let applicationsURL = directoryURL.appendingPathComponent("Applications", isDirectory: true)
+            let bundleURL = try ApplicationBundleFixture(name: "Tool", bundleIdentifier: "com.example.tool").write(in: applicationsURL)
+            let bookmarkData = try bundleURL.bookmarkData()
+            try FileManager.default.removeItem(at: bundleURL)
+            try ApplicationBundleFixture(name: "Tool", bundleIdentifier: "com.example.tool").write(in: applicationsURL)
+            let legacyDatabaseURL = directoryURL.appendingPathComponent("legacy.db")
+            try LegacyLaunchpadDatabaseFixture(pages: [[
+                .folder(title: "Tools", pages: [[
+                    .application(title: "Tool", bundleIdentifier: "com.example.tool", bookmarkData: bookmarkData),
+                    .application(title: "Other", bundleIdentifier: "com.example.other"),
+                ]]),
+            ]]).write(to: legacyDatabaseURL)
+            var configuration = Self.configuration(in: directoryURL, legacyDatabaseURL: legacyDatabaseURL)
+            configuration.installedBundleURLs = Self.installedEverywhere(bundleIdentifier:)
+
+            let layout = await Self.startedLibrary(configuration: configuration)
+
+            #expect(layout.folders.first?.applications.map(\.title) == ["Tool", "Other"])
+            #expect(layout.applications.count == 2)
+        }
+    }
+
+    @Test("copies of one application each open their own bundle")
+    func copiesOpenTheirOwnBundles() async throws {
+        try await withTemporaryDirectory { directoryURL in
+            let applicationsURL = directoryURL.appendingPathComponent("Applications", isDirectory: true)
+            let releaseURL = try ApplicationBundleFixture(name: "Tool", bundleIdentifier: "com.example.tool").write(in: applicationsURL)
+            let betaURL = try ApplicationBundleFixture(name: "Tool-Beta", bundleIdentifier: "com.example.tool").write(in: applicationsURL)
+            let legacyDatabaseURL = directoryURL.appendingPathComponent("legacy.db")
+            try LegacyLaunchpadDatabaseFixture(pages: [[
+                .application(title: "Tool-Beta", bundleIdentifier: "com.example.tool", bookmarkData: try betaURL.bookmarkData()),
+                .application(title: "Tool", bundleIdentifier: "com.example.tool", bookmarkData: try releaseURL.bookmarkData()),
+            ]]).write(to: legacyDatabaseURL)
+
+            let layout = await Self.startedLibrary(configuration: Self.configuration(in: directoryURL, legacyDatabaseURL: legacyDatabaseURL))
+
+            #expect(layout.applications.map { $0.bundleURL?.standardizedFileURL.lastPathComponent } == ["Tool-Beta.app", "Tool.app"])
         }
     }
 
@@ -105,7 +223,7 @@ struct LaunchpadLibraryTests {
                 .application(title: "App Cleaner & Uninstaller", bundleIdentifier: "com.nektony.App-Cleaner-SIII"),
             ]]).write(to: legacyDatabaseURL)
             var configuration = Self.configuration(in: directoryURL, legacyDatabaseURL: legacyDatabaseURL)
-            configuration.isStillInstalled = { _ in true }
+            configuration.installedBundleURLs = Self.installedEverywhere(bundleIdentifier:)
             try #require(configuration.exclusionList.excludes(bundleIdentifier: "com.nektony.App-Cleaner-SIII", name: "App Cleaner & Uninstaller"))
 
             let layout = await Self.startedLibrary(configuration: configuration)
@@ -128,7 +246,7 @@ struct LaunchpadLibraryTests {
                 .application(title: "Launchpad", bundleIdentifier: "com.MxIris.LaunchpadAwakener.Launchpad.debug"),
             ]]).write(to: legacyDatabaseURL)
             var configuration = Self.configuration(in: directoryURL, legacyDatabaseURL: legacyDatabaseURL)
-            configuration.isStillInstalled = { _ in true }
+            configuration.installedBundleURLs = Self.installedEverywhere(bundleIdentifier:)
 
             let layout = await Self.startedLibrary(configuration: configuration)
 
@@ -216,7 +334,7 @@ struct LaunchpadLibraryEditingTests {
                 searchDirectories: [directoryURL.appendingPathComponent("Applications", isDirectory: true)],
                 exclusionList: .standard,
                 itemsPerPage: 35,
-                isStillInstalled: { _ in false }
+                installedBundleURLs: { _ in [] }
             )
             let library = LaunchpadLibrary(configuration: configuration, layoutHandler: { _ in })
             await library.start(watchesApplicationDirectories: false)

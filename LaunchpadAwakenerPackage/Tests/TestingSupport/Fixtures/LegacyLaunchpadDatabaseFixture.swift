@@ -8,7 +8,8 @@ import LaunchpadAwakenerSpringboardCore
 /// page whose parent no longer exists.
 package struct LegacyLaunchpadDatabaseFixture {
     package indirect enum Item {
-        case application(title: String, bundleIdentifier: String, iconPNGData: Data? = nil)
+        /// `bookmarkData` is where macOS 15 last saw the bundle; nil records none.
+        case application(title: String, bundleIdentifier: String, iconPNGData: Data? = nil, bookmarkData: Data? = nil)
         case folder(title: String, pages: [[Item]])
         case downloadingApplication(title: String, bundleIdentifier: String)
     }
@@ -62,11 +63,11 @@ package struct LegacyLaunchpadDatabaseFixture {
         for (itemIndex, item) in items.enumerated() {
             let ordering = Int64(itemIndex)
             switch item {
-            case let .application(title, bundleIdentifier, iconPNGData):
+            case let .application(title, bundleIdentifier, iconPNGData, bookmarkData):
                 let applicationRowIdentifier = try insertItem(uuid: UUID().uuidString, type: .application, parent: pageRowIdentifier, ordering: ordering, into: database)
                 try database.run(
-                    "INSERT INTO apps (item_id, title, bundleid, storeid, category_id, moddate, bookmark) VALUES (?, ?, ?, NULL, NULL, 768029962.0, NULL)",
-                    [.integer(applicationRowIdentifier), .text(title), .text(bundleIdentifier)]
+                    "INSERT INTO apps (item_id, title, bundleid, storeid, category_id, moddate, bookmark) VALUES (?, ?, ?, NULL, NULL, 768029962.0, ?)",
+                    [.integer(applicationRowIdentifier), .text(title), .text(bundleIdentifier), bookmarkData.map { .blob($0) } ?? .null]
                 )
                 if let iconPNGData {
                     try database.run(

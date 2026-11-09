@@ -66,6 +66,20 @@ struct ApplicationDiscoveryTests {
         }
     }
 
+    /// The Dock runs for days. A bundle replaced in place must be read afresh, not from what the process
+    /// cached the first time it looked at that path.
+    @Test("a bundle replaced in place is read afresh")
+    func replacedBundleIsReadAfresh() throws {
+        try withTemporaryDirectory { directoryURL in
+            try ApplicationBundleFixture(name: "Mos", bundleIdentifier: "com.example.mos").write(in: directoryURL)
+            #expect(ApplicationDiscovery.discoverApplications(in: [directoryURL], exclusionList: .standard).map(\.bundleIdentifier) == ["com.example.mos"])
+
+            try ApplicationBundleFixture(name: "Mos", bundleIdentifier: "com.example.mos.fork").write(in: directoryURL)
+
+            #expect(ApplicationDiscovery.discoverApplications(in: [directoryURL], exclusionList: .standard).map(\.bundleIdentifier) == ["com.example.mos.fork"])
+        }
+    }
+
     @Test("an application reachable through a symbolic link is listed once")
     func symbolicLinksDoNotDuplicate() throws {
         try withTemporaryDirectory { directoryURL in

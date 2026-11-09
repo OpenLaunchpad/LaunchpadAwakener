@@ -24,6 +24,17 @@ package struct DiscoveredApplication: Sendable, Equatable {
     }
 }
 
+/// Where an application's bookmark leads.
+package enum BookmarkedBundle: Sendable, Equatable {
+    /// To a bundle with the application's identifier.
+    case found(URL)
+    /// To a bundle that now has another identifier: the application there was replaced in place, as when
+    /// a Setapp build or a fork takes over the same path.
+    case replaced(URL)
+    /// Nowhere: there is no bookmark, or the bundle it led to is gone.
+    case missing
+}
+
 /// Finds the applications Launchpad shows; the scanning half of macOS 15's `LPAppSource`.
 package enum ApplicationDiscovery {
     /// How deep below a search directory folders are searched, as in `/Applications/Vendor/Suite/Tool.app`.
@@ -86,13 +97,11 @@ package enum ApplicationDiscovery {
 
     /// Reads the bundle at `applicationURL`; nil for anything Launchpad would not show.
     private static func describeApplication(at applicationURL: URL) -> DiscoveredApplication? {
-        // iOS applications installed on a Mac are wrapped: the outer bundle has no Info.plist, the
-        // real one sits behind the `WrappedBundle` link.
-        let bundle = Bundle(url: applicationURL)
-        let wrappedBundle = Bundle(url: applicationURL.appendingPathComponent("WrappedBundle", isDirectory: true))
-        guard let bundleIdentifier = bundle?.bundleIdentifier ?? wrappedBundle?.bundleIdentifier else { return nil }
-        let informationBundle = bundle?.bundleIdentifier != nil ? bundle : wrappedBundle
-        if isTrue(informationBundle?.object(forInfoDictionaryKey: "LSBackgroundOnly")) {
+        guard
+            let informationDictionary = informationDictionary(ofBundleAt: applicationURL),
+            let bundleIdentifier = informationDictionary[kCFBundleIdentifierKey as String] as? String
+        else { return nil }
+        if isTrue(informationDictionary["LSBackgroundOnly"]) {
             return nil
         }
         var title = FileManager.default.displayName(atPath: applicationURL.path)
@@ -111,27 +120,54 @@ package enum ApplicationDiscovery {
         }
     }
 
-    /// Whether an application the layout holds is still installed somewhere, even outside the search
-    /// directories: its bookmark still resolves, or LaunchServices still knows a bundle with its identifier.
-    package static func isStillInstalled(_ application: LaunchpadApplication) -> Bool {
-        if let bookmarkData = application.bookmarkData {
-            var isStale = false
+    /// Where `application`'s bookmark leads now, and whether the bundle there is still that application.
+    package static func bookmarkedBundle(of application: LaunchpadApplication) -> BookmarkedBundle {
+        guard let bookmarkData = application.bookmarkData else { return .missing }
+        var isStale = false
+        guard
+            let resolvedURL = try? URL(
+                resolvingBookmarkData: bookmarkData,
+                options: [.withoutUI, .withoutMounting],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ),
+            FileManager.default.fileExists(atPath: resolvedURL.path)
+        else { return .missing }
+        return bundleIdentifier(ofBundleAt: resolvedURL) == application.bundleIdentifier ? .found(resolvedURL) : .replaced(resolvedURL)
+    }
+
+    /// Every bundle LaunchServices knows with `bundleIdentifier` that is still there and still has it,
+    /// wherever it is.
+    package static func installedBundleURLs(forBundleIdentifier bundleIdentifier: String) -> [URL] {
+        guard
+            let applicationURLs = LSCopyApplicationURLsForBundleIdentifier(bundleIdentifier as CFString, nil)?
+                .takeRetainedValue() as? [URL]
+        else { return [] }
+        return applicationURLs.filter { applicationURL in
+            FileManager.default.fileExists(atPath: applicationURL.path) && self.bundleIdentifier(ofBundleAt: applicationURL) == bundleIdentifier
+        }
+    }
+
+    /// The identifier of the bundle at `bundleURL`, read afresh.
+    package static func bundleIdentifier(ofBundleAt bundleURL: URL) -> String? {
+        informationDictionary(ofBundleAt: bundleURL)?[kCFBundleIdentifierKey as String] as? String
+    }
+
+    /// The bundle's Info.plist, read from disk each time. `Bundle(url:)` keeps the first one it read for a
+    /// path for the life of the process, and the Dock lives for days: a bundle replaced in place — a new
+    /// build with another identifier — would go on reading as the old one.
+    ///
+    /// iOS applications installed on a Mac are wrapped: the outer bundle has no Info.plist, the real one
+    /// sits behind the `WrappedBundle` link.
+    private static func informationDictionary(ofBundleAt bundleURL: URL) -> [String: Any]? {
+        for candidateURL in [bundleURL, bundleURL.appendingPathComponent("WrappedBundle", isDirectory: true)] {
             if
-                let resolvedURL = try? URL(
-                    resolvingBookmarkData: bookmarkData,
-                    options: [.withoutUI, .withoutMounting],
-                    relativeTo: nil,
-                    bookmarkDataIsStale: &isStale
-                ),
-                FileManager.default.fileExists(atPath: resolvedURL.path)
+                let informationDictionary = CFBundleCopyInfoDictionaryForURL(candidateURL as CFURL) as? [String: Any],
+                informationDictionary[kCFBundleIdentifierKey as String] is String
             {
-                return true
+                return informationDictionary
             }
         }
-        guard
-            let applicationURLs = LSCopyApplicationURLsForBundleIdentifier(application.bundleIdentifier as CFString, nil)?
-                .takeRetainedValue() as? [URL]
-        else { return false }
-        return applicationURLs.contains { FileManager.default.fileExists(atPath: $0.path) }
+        return nil
     }
 }
