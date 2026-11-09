@@ -93,26 +93,42 @@ enum StandaloneIconStyle {
     // MARK: - SkyLight
 
     private static func fetchConfiguration() -> Configuration? {
-        let configurationClassName = "SLSIconAppearanceConfiguration"
         guard
-            RuntimeMethodInspector.hasMethod(className: configurationClassName, selector: NSSelectorFromString("fetchCurrentIconAppearanceConfiguration"), matchingTypeEncoding: "@16@0:8", isInstanceMethod: false),
-            let configurationClass = NSClassFromString(configurationClassName) as? NSObject.Type,
-            let configuration = configurationClass.perform(NSSelectorFromString("fetchCurrentIconAppearanceConfiguration"))?.takeUnretainedValue() as? NSObject
+            RuntimeMethodInspector.hasMethod(
+                className: SkyLightIconAppearanceConfigurationImplementation.runtimeClassName,
+                selector: NSSelectorFromString("fetchCurrentIconAppearanceConfiguration"),
+                matchingTypeEncoding: "@16@0:8",
+                isInstanceMethod: false
+            ),
+            let configurationObject = ObjC.SLSIconAppearanceConfiguration.fetchCurrentIconAppearanceConfiguration.asObject
         else {
             #log(.error, "SkyLight's icon appearance configuration is out of reach; icons use the default style")
             return nil
         }
         guard
-            let iconAppearanceTheme = unsignedValue(of: configuration, selectorName: "iconAppearanceTheme"),
-            let appearanceTheme = unsignedValue(of: configuration, selectorName: "appearanceTheme"),
-            let iconTintColorName = unsignedValue(of: configuration, selectorName: "iconTintColorName")
-        else { return nil }
+            let configuration = SkyLightIconAppearanceConfigurationImplementation(configurationObject),
+            let iconAppearanceTheme = configuration.iconAppearanceTheme,
+            let appearanceTheme = configuration.appearanceTheme,
+            let iconTintColorName = configuration.iconTintColorName
+        else {
+            #log(.error, "SkyLight's icon appearance configuration changed; icons use the default style")
+            return nil
+        }
         return Configuration(
             iconAppearanceTheme: iconAppearanceTheme,
             appearanceTheme: appearanceTheme,
             iconTintColorName: iconTintColorName,
-            otherIconTintColor: colorValue(of: configuration, selectorName: "otherIconTintColor")
+            otherIconTintColor: otherIconTintColor(of: configurationObject)
         )
+    }
+
+    /// `-[SLSIconAppearanceConfiguration otherIconTintColor]`, a `CGColorRef` — a pointer, whose encoding the
+    /// proxy macro does not derive — so it goes through `DynamicObject`, read as an optional raw pointer
+    /// because it is null when no custom colour is set.
+    private static func otherIconTintColor(of configuration: NSObject) -> CGColor? {
+        guard hasMethod(configuration, "otherIconTintColor", typeEncoding: "^{CGColor=}16@0:8") else { return nil }
+        let colorAddress: UnsafeRawPointer?? = ObjC(configuration).otherIconTintColor.asInferred()
+        return colorAddress.flatMap { $0 }.map { Unmanaged<CGColor>.fromOpaque($0).takeUnretainedValue() }
     }
 
     // MARK: - IconServices
@@ -121,20 +137,23 @@ enum StandaloneIconStyle {
         guard let descriptorClass = NSClassFromString("ISImageDescriptor") as? NSObject.Type else { return nil }
         let descriptor = descriptorClass.init()
         guard
-            setInteger(settings.appearance, on: descriptor, selectorName: "setAppearance:", typeEncoding: "v24@0:8q16"),
-            setInteger(settings.appearanceVariant, on: descriptor, selectorName: "setAppearanceVariant:", typeEncoding: "v24@0:8q16")
+            hasMethod(descriptor, "setAppearance:", typeEncoding: "v24@0:8q16"),
+            hasMethod(descriptor, "setAppearanceVariant:", typeEncoding: "v24@0:8q16")
         else {
             #log(.error, "ISImageDescriptor's appearance setters are missing or changed; icons use the default style")
             return nil
         }
-        if settings.drawsBackground {
-            _ = setInteger(1, on: descriptor, selectorName: "setBackground:", typeEncoding: "v24@0:8Q16")
+        ObjC(descriptor).setAppearance(settings.appearance)
+        ObjC(descriptor).setAppearanceVariant(settings.appearanceVariant)
+        if settings.drawsBackground, hasMethod(descriptor, "setBackground:", typeEncoding: "v24@0:8Q16") {
+            // `Q`: an unsigned word, so a `UInt`.
+            ObjC(descriptor).setBackground(UInt(1))
         }
-        if settings.isTinted, let tintColor = makeTintColor(configuration: configuration, isDark: settings.appearance == 1) {
-            let setTintColorSelector = NSSelectorFromString("setTintColor:")
-            if hasMethod(descriptor, setTintColorSelector, typeEncoding: "v24@0:8@16") {
-                descriptor.perform(setTintColorSelector, with: tintColor)
-            }
+        if settings.isTinted,
+           let tintColor = makeTintColor(configuration: configuration, isDark: settings.appearance == 1),
+           hasMethod(descriptor, "setTintColor:", typeEncoding: "v24@0:8@16")
+        {
+            ObjC(descriptor).setTintColor(tintColor)
         }
         return descriptor
     }
@@ -149,65 +168,45 @@ enum StandaloneIconStyle {
         return makeColor(systemColor: systemColor, isDark: isDark)
     }
 
-    /// `-[IFColor initWithSystemColor:appearance:contrast:vibrancy:]`.
+    /// `-[IFColor initWithSystemColor:appearance:contrast:vibrancy:]`, four `q`s, so four `Int`s.
     private static func makeColor(systemColor: Int, isDark: Bool) -> NSObject? {
-        let selector = NSSelectorFromString("initWithSystemColor:appearance:contrast:vibrancy:")
-        guard
-            RuntimeMethodInspector.hasMethod(className: "IFColor", selector: selector, matchingTypeEncoding: "@48@0:8q16q24q32q40", isInstanceMethod: true),
-            let colorClass = NSClassFromString("IFColor") as? NSObject.Type,
-            let initialiserImplementation = class_getMethodImplementation(colorClass, selector),
-            let allocatedColor = colorClass.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue()
-        else { return nil }
-        typealias InitialiserFunction = @convention(c) (AnyObject, Selector, Int, Int, Int, Int) -> Unmanaged<NSObject>?
-        // The initialiser consumes the allocated reference and returns +1.
-        return unsafeBitCast(initialiserImplementation, to: InitialiserFunction.self)(allocatedColor, selector, systemColor, isDark ? 1 : 0, 0, 0)?.takeRetainedValue()
+        guard RuntimeMethodInspector.hasMethod(
+            className: "IFColor",
+            selector: NSSelectorFromString("initWithSystemColor:appearance:contrast:vibrancy:"),
+            matchingTypeEncoding: "@48@0:8q16q24q32q40"
+        ) else { return nil }
+        let appearance: Int = isDark ? 1 : 0
+        let contrast: Int = 0
+        let vibrancy: Int = 0
+        return ObjC.IFColor(systemColor: systemColor, appearance: appearance, contrast: contrast, vibrancy: vibrancy).asObject
     }
 
     /// `-[IFColor initWithCGColor:]`.
     private static func makeColor(wrapping color: CGColor) -> NSObject? {
-        let selector = NSSelectorFromString("initWithCGColor:")
-        guard
-            RuntimeMethodInspector.hasMethod(className: "IFColor", selector: selector, matchingTypeEncoding: "@24@0:8^{CGColor=}16", isInstanceMethod: true),
-            let colorClass = NSClassFromString("IFColor") as? NSObject.Type,
-            let initialiserImplementation = class_getMethodImplementation(colorClass, selector),
-            let allocatedColor = colorClass.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue()
-        else { return nil }
-        typealias InitialiserFunction = @convention(c) (AnyObject, Selector, CGColor) -> Unmanaged<NSObject>?
-        return unsafeBitCast(initialiserImplementation, to: InitialiserFunction.self)(allocatedColor, selector, color)?.takeRetainedValue()
+        guard RuntimeMethodInspector.hasMethod(
+            className: "IFColor",
+            selector: NSSelectorFromString("initWithCGColor:"),
+            matchingTypeEncoding: "@24@0:8^{CGColor=}16"
+        ) else { return nil }
+        return ObjC.IFColor(CGColor: color).asObject
     }
 
     // MARK: - Checked calls
 
-    private static func hasMethod(_ object: NSObject, _ selector: Selector, typeEncoding expectedTypeEncoding: String) -> Bool {
+    /// Whether `object`'s own class has `selectorName` with `expectedTypeEncoding`, frame offsets aside.
+    private static func hasMethod(_ object: NSObject, _ selectorName: String, typeEncoding expectedTypeEncoding: String) -> Bool {
         guard
-            let method = class_getInstanceMethod(object_getClass(object), selector),
-            let typeEncoding = method_getTypeEncoding(method)
+            let objectClass = object_getClass(object),
+            let typeEncoding = RuntimeMethodInspector.typeEncoding(forClass: objectClass, selector: NSSelectorFromString(selectorName))
         else { return false }
-        return ObjCTypeEncodingNormalization.matches(String(cString: typeEncoding), expectedTypeEncoding)
+        return ObjCTypeEncodingNormalization.matches(typeEncoding, expectedTypeEncoding)
     }
+}
 
-    private static func unsignedValue(of object: NSObject, selectorName: String) -> UInt32? {
-        let selector = NSSelectorFromString(selectorName)
-        guard hasMethod(object, selector, typeEncoding: "I16@0:8") else {
-            #log(.error, "-[\(String(cString: object_getClassName(object)), privacy: .public) \(selectorName, privacy: .public)] is missing or changed")
-            return nil
-        }
-        typealias UnsignedFunction = @convention(c) (AnyObject, Selector) -> UInt32
-        return unsafeBitCast(object.method(for: selector), to: UnsignedFunction.self)(object, selector)
-    }
-
-    private static func colorValue(of object: NSObject, selectorName: String) -> CGColor? {
-        let selector = NSSelectorFromString(selectorName)
-        guard hasMethod(object, selector, typeEncoding: "^{CGColor=}16@0:8") else { return nil }
-        typealias ColorFunction = @convention(c) (AnyObject, Selector) -> Unmanaged<CGColor>?
-        return unsafeBitCast(object.method(for: selector), to: ColorFunction.self)(object, selector)?.takeUnretainedValue()
-    }
-
-    private static func setInteger(_ value: Int, on object: NSObject, selectorName: String, typeEncoding: String) -> Bool {
-        let selector = NSSelectorFromString(selectorName)
-        guard hasMethod(object, selector, typeEncoding: typeEncoding) else { return false }
-        typealias SetIntegerFunction = @convention(c) (AnyObject, Selector, Int) -> Void
-        unsafeBitCast(object.method(for: selector), to: SetIntegerFunction.self)(object, selector, value)
-        return true
-    }
+/// SkyLight's icon appearance configuration, as `+fetchCurrentIconAppearanceConfiguration` returns it.
+@RuntimeClassProxy("SLSIconAppearanceConfiguration")
+protocol SkyLightIconAppearanceConfiguration {
+    var iconAppearanceTheme: UInt32? { get }
+    var appearanceTheme: UInt32? { get }
+    var iconTintColorName: UInt32? { get }
 }

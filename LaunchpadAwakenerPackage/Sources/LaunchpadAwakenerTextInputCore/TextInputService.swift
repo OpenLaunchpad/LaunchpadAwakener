@@ -254,7 +254,7 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         reportState(isEditingComplete: false)
         let endedString = isHosting ? fieldEditor.string : nil
         Self.setRemoteViewActivation(false)
-        Self.callMiniViewMethod("_setMiniViewShown:", typeEncoding: "v20@0:8B16", bool: false)
+        AppKitDockTileMiniViewImplementation(NSApp.dockTile)?._setMiniViewShown(false)
         return endedString
     }
 
@@ -301,11 +301,15 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     /// The Dock tile's mini view window, shown and at Launchpad's level, 27. 27.2's Dock no longer tells
     /// AppKit the mini view is shown, so this says it; until then the window cannot become key.
     private func showMiniViewWindow() -> NSWindow? {
+        let miniView = AppKitDockTileMiniViewImplementation(NSApp.dockTile)
+        if miniView == nil {
+            #log(.error, "NSDockTile's mini view methods are missing or changed")
+        }
         if containerView.window == nil {
             NSApp.dockTile.setValue(containerView, forKey: "miniView")
-            Self.callMiniViewMethod("_setMiniViewWindowLevel:", typeEncoding: "v24@0:8q16", integer: 27)
+            miniView?._setMiniViewWindowLevel(27)
         }
-        Self.callMiniViewMethod("_setMiniViewShown:", typeEncoding: "v20@0:8B16", bool: true)
+        miniView?._setMiniViewShown(true)
         guard let window = containerView.window else {
             #log(.error, "The Dock tile made no mini view window")
             return nil
@@ -314,46 +318,37 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         return window
     }
 
-    private static func callMiniViewMethod(_ selectorName: String, typeEncoding: String, integer: Int) {
-        guard let implementation = implementation(of: selectorName, on: NSApp.dockTile, typeEncoding: typeEncoding) else { return }
-        typealias IntegerFunction = @convention(c) (AnyObject, Selector, Int) -> Void
-        unsafeBitCast(implementation, to: IntegerFunction.self)(NSApp.dockTile, NSSelectorFromString(selectorName), integer)
-    }
-
-    private static func callMiniViewMethod(_ selectorName: String, typeEncoding: String, bool: Bool) {
-        guard let implementation = implementation(of: selectorName, on: NSApp.dockTile, typeEncoding: typeEncoding) else { return }
-        typealias BoolFunction = @convention(c) (AnyObject, Selector, Bool) -> Void
-        unsafeBitCast(implementation, to: BoolFunction.self)(NSApp.dockTile, NSSelectorFromString(selectorName), bool)
-    }
-
-    /// The method's implementation once its type encoding is the expected one, frame offsets aside; nil and
-    /// a log otherwise.
-    private static func implementation(of selectorName: String, on receiver: AnyObject, typeEncoding expectedTypeEncoding: String) -> IMP? {
-        guard
-            let method = class_getInstanceMethod(object_getClass(receiver), NSSelectorFromString(selectorName)),
-            let typeEncoding = method_getTypeEncoding(method)
-        else {
-            #log(.error, "No -\(selectorName, privacy: .public) on \(String(describing: type(of: receiver)), privacy: .public)")
-            return nil
-        }
-        guard ObjCTypeEncodingNormalization.matches(String(cString: typeEncoding), expectedTypeEncoding) else {
-            #log(.error, "-\(selectorName, privacy: .public) is \(String(cString: typeEncoding), privacy: .public), not \(expectedTypeEncoding, privacy: .public)")
-            return nil
-        }
-        return method_getImplementation(method)
-    }
-
     /// `window._contextForLayerHosting.contextId`: what a `CALayerHost` in the Dock shows.
+    ///
+    /// `contextId` is read without a check of its own: it takes nothing, `DynamicObject` reads the result
+    /// by its real signature, and `asUInt32` yields nil unless that result is four bytes.
     private static func layerHostingContextIdentifier(of window: NSWindow) -> UInt32 {
         guard
-            implementation(of: "_contextForLayerHosting", on: window, typeEncoding: "@16@0:8") != nil,
-            let context = window.value(forKey: "_contextForLayerHosting") as? NSObject,
-            let contextIdentifier = context.value(forKey: "contextId") as? NSNumber
+            hasMethod(window, "_contextForLayerHosting", typeEncoding: "@16@0:8"),
+            let context = ObjC(window)._contextForLayerHosting.asObject,
+            let contextIdentifier = ObjC(context).contextId.asUInt32
         else {
             #log(.error, "The mini view window has no layer-hosting context")
             return 0
         }
-        return contextIdentifier.uint32Value
+        return contextIdentifier
+    }
+
+    /// Whether `receiver`'s own class has `selectorName` with `expectedTypeEncoding`, frame offsets aside;
+    /// logs what it found when not.
+    private static func hasMethod(_ receiver: AnyObject, _ selectorName: String, typeEncoding expectedTypeEncoding: String) -> Bool {
+        guard
+            let receiverClass = object_getClass(receiver),
+            let typeEncoding = RuntimeMethodInspector.typeEncoding(forClass: receiverClass, selector: NSSelectorFromString(selectorName))
+        else {
+            #log(.error, "No -\(selectorName, privacy: .public) on \(String(describing: type(of: receiver)), privacy: .public)")
+            return false
+        }
+        guard ObjCTypeEncodingNormalization.matches(typeEncoding, expectedTypeEncoding) else {
+            #log(.error, "-\(selectorName, privacy: .public) is \(typeEncoding, privacy: .public), not \(expectedTypeEncoding, privacy: .public)")
+            return false
+        }
+        return true
     }
 
     /// Text services treat the process as the active one while the remote view is active; the ecti service
@@ -375,3 +370,13 @@ private nonisolated(unsafe) let remoteViewActivation: RemoteViewActivationFuncti
     .map { unsafeBitCast($0, to: RemoteViewActivationFunction.self) }
 private nonisolated(unsafe) let remoteViewClientRegistration: RemoteViewClientRegistrationFunction? = dlsym(dlopen(nil, RTLD_NOW), "_TSMRegisterRemoteViewClient")
     .map { unsafeBitCast($0, to: RemoteViewClientRegistrationFunction.self) }
+
+/// The mini view methods of `NSDockTile` that 27.2's Dock no longer calls for an application, declared on
+/// `NSDockTile` itself.
+@RuntimeClassProxy("NSDockTile")
+protocol AppKitDockTileMiniView {
+    /// The window level of the tile's mini view window.
+    func _setMiniViewWindowLevel(_ windowLevel: Int)
+    /// Until this is said, the mini view window cannot become key.
+    func _setMiniViewShown(_ isShown: Bool)
+}

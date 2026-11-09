@@ -71,15 +71,12 @@ package enum QuartzCorePrivate {
 
     /// `+[CAFilter filterWithType:]`, for filters `CALayer.filters` accepts in the render server.
     package static func makeFilter(type filterType: String) -> NSObject? {
-        guard
-            let filterClass = NSClassFromString("CAFilter") as? NSObject.Type,
-            RuntimeMethodInspector.hasMethod(
-                className: "CAFilter",
-                selector: NSSelectorFromString("filterWithType:"),
-                matchingTypeEncoding: "@24@0:8@16",
-                isInstanceMethod: false
-            )
-        else { return nil }
-        return filterClass.perform(NSSelectorFromString("filterWithType:"), with: filterType)?.takeUnretainedValue() as? NSObject
+        guard RuntimeMethodInspector.hasMethod(
+            className: "CAFilter",
+            selector: NSSelectorFromString("filterWithType:"),
+            matchingTypeEncoding: "@24@0:8@16",
+            isInstanceMethod: false
+        ) else { return nil }
+        return ObjC.CAFilter.filterWithType(filterType as NSString).asObject
     }
 }

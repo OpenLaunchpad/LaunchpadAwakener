@@ -89,56 +89,41 @@ final class DockBarVisibility {
 
 /// The Dock's `DockVisibility`, reached through `-[DockBar visibilityController]`.
 ///
-/// Every method used, and the ivar holding the reasons, are checked on the object's own class each time it
-/// is looked up. When any of them is missing or changed, there is no controller and the Dock is left alone.
-/// The signatures are the same from 26.0 to 27.2, and in 15.5.
+/// The methods are called through ``DockBarVisibilityAccess`` and ``DockVisibilityController``, which check
+/// every signature against the running Dock before their first call; the ivar holding the reasons is
+/// checked on the object's own class each time it is looked up. When any of them is missing or changed,
+/// there is no controller and the Dock is left alone. The signatures are the same from 26.0 to 27.2, and
+/// in 15.5.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "LiveDockVisibility")
 @MainActor
 final class LiveDockVisibility: DockVisibilityCalls {
     // MARK: - Signatures
 
-    nonisolated static let visibilityControllerSignature = DockMethodSignature(className: "DockBar", selectorName: "visibilityController", typeEncoding: "@16@0:8")
-    nonisolated static let setOverrideShowTypeSignature = DockMethodSignature(
-        className: "DockVisibility",
-        selectorName: "setOverrideShowType:",
-        typeEncoding: "v24@0:8Q16"
-    )
-    nonisolated static let removeOverrideShowTypeSignature = DockMethodSignature(
-        className: "DockVisibility",
-        selectorName: "removeOverrideShowType:",
-        typeEncoding: "v24@0:8Q16"
-    )
-    nonisolated static let forceDockHiddenSignature = DockMethodSignature(
-        className: "DockVisibility",
-        selectorName: "forceDockHiddenWithReason:",
-        typeEncoding: "v24@0:8@16"
-    )
-    nonisolated static let removeForceDockHiddenSignature = DockMethodSignature(
-        className: "DockVisibility",
-        selectorName: "removeForceDockHiddenWithReason:",
-        typeEncoding: "v24@0:8@16"
-    )
     /// `NSMutableDictionary *_dockForceHiddenReasons`, a count for each reason.
     nonisolated static let forceHiddenReasonsIvarName = "_dockForceHiddenReasons"
     nonisolated static let forceHiddenReasonsIvarTypeEncoding = "@\"NSMutableDictionary\""
 
-    private nonisolated static let controllerMethods = [
-        setOverrideShowTypeSignature,
-        removeOverrideShowTypeSignature,
-        forceDockHiddenSignature,
-        removeForceDockHiddenSignature,
-    ]
+    private nonisolated static let methods: [DockMethodSignature] =
+        DockMethodSignature.signatures(
+            ofClassNamed: DockBarVisibilityAccessImplementation.runtimeClassName,
+            requirements: DockBarVisibilityAccessImplementation.methodRequirements
+        )
+        + DockMethodSignature.signatures(
+            ofClassNamed: DockVisibilityControllerImplementation.runtimeClassName,
+            requirements: DockVisibilityControllerImplementation.methodRequirements
+        )
 
     /// What the running Dock lacks of the methods and the ivar used here, checked by class: empty when
     /// everything matches. Logged once as the payload starts, so a Dock update can be read off the log.
     nonisolated static func missingMembers() -> [String] {
-        var missingMembers = ([visibilityControllerSignature] + controllerMethods).compactMap { signature -> String? in
+        var missingMembers = methods.compactMap { signature -> String? in
             RuntimeMethodInspector.hasMethod(className: signature.className, selector: signature.selector, matchingTypeEncoding: signature.typeEncoding)
                 ? nil
                 : "-[\(signature.className) \(signature.selectorName)]"
         }
-        if forceHiddenReasonsIvar(of: NSClassFromString(forceDockHiddenSignature.className)) == nil {
-            missingMembers.append("\(forceDockHiddenSignature.className).\(forceHiddenReasonsIvarName)")
+        let controllerClassName = DockVisibilityControllerImplementation.runtimeClassName
+        if forceHiddenReasonsIvar(of: NSClassFromString(controllerClassName)) == nil {
+            missingMembers.append("\(controllerClassName).\(forceHiddenReasonsIvarName)")
         }
         return missingMembers
     }
@@ -166,15 +151,12 @@ final class LiveDockVisibility: DockVisibilityCalls {
     static var current: LiveDockVisibility? {
         guard
             let dockBar = DockBarReference.dockBar,
-            let controller = DockEnvironment.checkedObjectValue(of: dockBar, selector: visibilityControllerSignature.selector)
+            let controller = DockBarVisibilityAccessImplementation(dockBar)?.visibilityController,
+            DockVisibilityControllerImplementation(controller) != nil
         else {
-            #log(.error, "The Dock's visibility controller is out of reach; the Dock stays as it is")
+            #log(.error, "The Dock's visibility controller is out of reach or changed; the Dock stays as it is")
             return nil
         }
-        let matchesEveryMethod = controllerMethods.allSatisfy { signature in
-            DockEnvironment.hasMethod(controller, selector: signature.selector, typeEncoding: signature.typeEncoding)
-        }
-        guard matchesEveryMethod else { return nil }
         guard let ivar = forceHiddenReasonsIvar(of: object_getClass(controller)) else {
             #log(.error, "-[\(String(cString: object_getClassName(controller)), privacy: .public) \(forceHiddenReasonsIvarName, privacy: .public)] is missing or changed; the Dock stays as it is")
             return nil
@@ -184,40 +166,48 @@ final class LiveDockVisibility: DockVisibilityCalls {
 
     // MARK: - Calls
 
+    /// The controller, as long as the Dock still has it. Held weakly: the Dock owns it.
+    private var controllerProxy: DockVisibilityControllerImplementation? {
+        controller.flatMap { DockVisibilityControllerImplementation($0) }
+    }
+
     func setOverrideShowType(_ showType: UInt64) {
-        callShowType(Self.setOverrideShowTypeSignature.selector, showType)
+        controllerProxy?.setOverrideShowType(showType)
     }
 
     func removeOverrideShowType(_ showType: UInt64) {
-        callShowType(Self.removeOverrideShowTypeSignature.selector, showType)
+        controllerProxy?.removeOverrideShowType(showType)
     }
 
     func forceDockHidden(reason: String) {
-        callReason(Self.forceDockHiddenSignature.selector, reason)
+        controllerProxy?.forceDockHiddenWithReason(reason as NSString)
     }
 
     func removeForceDockHidden(reason: String) {
-        callReason(Self.removeForceDockHiddenSignature.selector, reason)
+        controllerProxy?.removeForceDockHiddenWithReason(reason as NSString)
     }
 
     func holdsForceHiddenReason(_ reason: String) -> Bool {
         guard let controller, let reasons = object_getIvar(controller, forceHiddenReasonsIvar) as? NSDictionary else { return false }
         return reasons[reason] != nil
     }
+}
 
-    /// Calls a method taking an `unsigned long long`, whose signature was checked when this was made.
-    private func callShowType(_ selector: Selector, _ showType: UInt64) {
-        guard let controller else { return }
-        typealias ShowTypeFunction = @convention(c) (AnyObject, Selector, UInt64) -> Void
-        let implementation = unsafeBitCast(controller.method(for: selector), to: ShowTypeFunction.self)
-        implementation(controller, selector, showType)
-    }
+/// `-[DockBar visibilityController]`, apart from ``DockBarGeometry``: without it only the Dock's visibility is
+/// left alone, while the geometry is needed for the springboard to show at all.
+@RuntimeClassProxy("DockBar")
+protocol DockBarVisibilityAccess {
+    /// A `DockVisibility`.
+    var visibilityController: NSObject? { get }
+}
 
-    /// Calls a method taking an object, whose signature was checked when this was made.
-    private func callReason(_ selector: Selector, _ reason: String) {
-        guard let controller else { return }
-        typealias ReasonFunction = @convention(c) (AnyObject, Selector, NSString) -> Void
-        let implementation = unsafeBitCast(controller.method(for: selector), to: ReasonFunction.self)
-        implementation(controller, selector, reason as NSString)
-    }
+/// The Dock's `DockVisibility`. The signatures are the same from 26.0 to 27.2, and in 15.5.
+@RuntimeClassProxy("DockVisibility")
+protocol DockVisibilityController {
+    func setOverrideShowType(_ showType: UInt64)
+    func removeOverrideShowType(_ showType: UInt64)
+    /// Turns auto-hide on in memory and starts the Dock's own slide.
+    func forceDockHiddenWithReason(_ reason: NSString)
+    /// Raises when the Dock does not hold `reason`, which crashes it.
+    func removeForceDockHiddenWithReason(_ reason: NSString)
 }

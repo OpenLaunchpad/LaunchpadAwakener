@@ -62,7 +62,7 @@ payload、独立版与文本输入辅助进程里调用 Objective-C 私有方法
 ### 测试与验证
 
 - FrameworkToolbox：新加的引用计数测试与宏测试先红后绿，整个包的测试通过后才打 tag。
-- PayloadCoreTests 加一组测试：每个 proxy 与 hook 推出的编码，与现在从 27.2 元数据记下的编码一致，Swift 类型写错在开发机上就会失败。
+- PayloadCoreTests 与 StandaloneCoreTests 各加一组测试：每个 proxy 与 hook 推出的编码，与现在从 27.2 元数据记下的编码一致，Swift 类型写错在开发机上就会失败；另锁定 23 个必查方法的清单。
 - `RunScript.sh` 构建（核对切片）、跑包测试、核对 payload 的 `otool -L`。
 - 部署到 MacBook（27.2）与 26 虚拟机做非交互验证：日志里 23 个方法全部吻合、2 个 hook 装上、离屏自检与改前一致；独立版跑 `--self-check`。不做交互验证。
 
@@ -75,9 +75,9 @@ payload、独立版与文本输入辅助进程里调用 Objective-C 私有方法
 1. **已完成。** FrameworkToolbox：`DynamicObject` 按 ARC 规则判断方法族、正确处理 init，先写失败的引用计数测试；三个宏对接不住的方法族在编译期报错，配宏测试；更新文档；合进 `main` 推送，打 0.17.2 推送。
 2. **已完成。** LaunchpadAwakener 依赖 0.17.2 与 `ObjCRuntimeToolbox-Static`，`HookKit` 的用处换成工具箱后删掉 `HookKit`；构建、测试、核对 payload 的 `otool -L`。
 3. **已完成。** 两个 hook 改 `@RuntimeClassHook`，加编码一致性测试。
-4. 37 处实例方法改 `@RuntimeClassProxy`，23 个方法的核对清单改由 proxy 汇总，加编码一致性测试。
-5. 27 处改 `DynamicObject`，含 7 处 init。
-6. 文档：`CLAUDE.md`、实现说明、`PayloadHooks.swift` 开头的说明。
+4. **已完成。** 37 处实例方法改 `@RuntimeClassProxy`，23 个方法的核对清单改由 proxy 汇总，加编码一致性测试。
+5. **已完成。** 27 处改 `DynamicObject`，含 7 处 init。
+6. **已完成。** 文档：`CLAUDE.md`、实现说明、`PayloadHooks.swift` 开头的说明。
 7. 部署到 MacBook 与 26 虚拟机做非交互验证，独立版跑 `--self-check`。
 
 ### 没有询问就采用的假设
@@ -95,3 +95,9 @@ payload、独立版与文本输入辅助进程里调用 Objective-C 私有方法
 | 2026-11-09 | 依赖 FrameworkToolbox 0.17.2，由 agent 打 tag 并推送 | 用户选定。`.static` 让意外的重复链接直接构建失败，而不是变成 payload 带不走的动态库 |
 | 2026-11-09 | 7 处 alloc + init 先在 FrameworkToolbox 修好 `DynamicObject` 的引用计数，再改用 `DynamicObject` | 用户选定。按 bug 修复处理，同类问题（两个 hook 宏、proxy 宏不认的方法族）一并改为编译期报错 |
 | 2026-11-09 | 用户批准，开始实现 | 先做 FrameworkToolbox 的修复与发版，再做 LaunchpadAwakener |
+| 2026-11-09 | FrameworkToolbox 的修复按 bug 修复处理，没有另写提案 | 规则把显而易见的 bug 修复排除在提案之外；修法、复现测试与同类排查都写在它的提交说明与 `CLAUDE.md` 里 |
+| 2026-11-09 | 同类排查加的编译期报错只针对返回对象的方法族方法，返回 `Void` 的照常可替换 | ARC 的方法族只管返回对象的所有权；`copy:` 这类动作方法若一并报错，就把原本正确的替换也拦掉了 |
+| 2026-11-09 | 第 2、3 步合成一个提交，第 4、5 步也合成一个提交 | 好几个文件里两种写法都有，拆开要先做出一个只为分提交而存在的中间状态 |
+| 2026-11-09 | 可能为空的 CF 指针（`CGImage`、`otherIconTintColor`）经 `DynamicObject` 按 `UnsafeRawPointer??` 取 | 按非可选的 `CGImage` 取，空指针会被当成有效引用 |
+| 2026-11-09 | 辅助进程读 `contextId` 不另加编码核对 | 无参 getter：`DynamicObject` 按真实签名取返回值，`asUInt32` 还核对返回值的大小；原来用 KVC 读，也没有核对。`_contextForLayerHosting` 照旧核对 |
+| 2026-11-09 | 文本输入辅助进程的 `NSDockTile` proxy 没有签名测试 | 这个模块没有测试 target；两个编码由 `Int`、`Bool` 推出，运行时 proxy 自己也会核对。两个方法在 27.2 的 AppKit 里声明在 `NSDockTile` 本身上 |

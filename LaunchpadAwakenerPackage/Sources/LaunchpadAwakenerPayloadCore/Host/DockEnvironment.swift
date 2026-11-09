@@ -1,9 +1,32 @@
 import CoreGraphics
 import Foundation
 import ObjCRuntimeToolbox
-import ObjectiveC
 import OSToolbox
 import LaunchpadAwakenerSpringboardCore
+
+/// What the payload reads from the Dock's `DockBar`. Every one of these is among the methods checked
+/// before any hook is installed.
+@RuntimeClassProxy("DockBar")
+protocol DockBarGeometry {
+    /// Global coordinates with a top-left origin, the space of `CGEvent.location`.
+    var rect: CGRect? { get }
+    /// A `DisplayDescriptor`.
+    var display: NSObject? { get }
+    /// A `DockCore.Environment`.
+    var environment: NSObject? { get }
+    /// The icon size the Dock is set to.
+    var desiredTileSize: Float? { get }
+    /// The tile the Dock settled on: the icon size plus an inset on each side, smaller when the bar had to
+    /// shrink to fit.
+    var tileSize: Float? { get }
+}
+
+/// The display the Dock is on.
+@RuntimeClassProxy("DisplayDescriptor")
+protocol DockDisplayDescriptor {
+    /// The camera housing; empty on a display without one.
+    var notchBounds: CGRect? { get }
+}
 
 /// What the springboard needs to know about the Dock and its display, read from the Dock itself.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "DockEnvironment")
@@ -11,32 +34,15 @@ import LaunchpadAwakenerSpringboardCore
 enum DockEnvironment {
     // MARK: - Signatures
 
-    nonisolated static let dockBarDisplay = DockMethodSignature(className: "DockBar", selectorName: "display", typeEncoding: "@16@0:8")
-    nonisolated static let dockBarEnvironment = DockMethodSignature(className: "DockBar", selectorName: "environment", typeEncoding: "@16@0:8")
-    nonisolated static let displayNotchBounds = DockMethodSignature(
-        className: "DisplayDescriptor",
-        selectorName: "notchBounds",
-        typeEncoding: "{CGRect={CGPoint=dd}{CGSize=dd}}16@0:8"
-    )
-    /// The icon size the Dock is set to.
-    nonisolated static let dockBarDesiredTileSize = DockMethodSignature(className: "DockBar", selectorName: "desiredTileSize", typeEncoding: "f16@0:8")
-    /// The tile the Dock settled on: the icon size plus an inset on each side, smaller when the bar had to shrink to fit.
-    nonisolated static let dockBarTileSize = DockMethodSignature(className: "DockBar", selectorName: "tileSize", typeEncoding: "f16@0:8")
-
-    nonisolated static let requiredMethods: [DockMethodSignature] = [
-        dockBarDisplay,
-        dockBarEnvironment,
-        displayNotchBounds,
-        dockBarDesiredTileSize,
-        dockBarTileSize,
-    ]
-
-    /// Swift classes reached through the environment; checked on the object actually returned, and
-    /// optional: without them icons fall back to the default style.
-    private static let iconAppearanceMonitorSelector = NSSelectorFromString("iconAppearanceMonitor")
-    private static let appearanceSelector = NSSelectorFromString("appearance")
-    private static let iconDescriptionSelector = NSSelectorFromString("iconDescription")
-    private static let styleSelector = NSSelectorFromString("style")
+    nonisolated static let requiredMethods: [DockMethodSignature] =
+        DockMethodSignature.signatures(
+            ofClassNamed: DockBarGeometryImplementation.runtimeClassName,
+            requirements: DockBarGeometryImplementation.methodRequirements
+        )
+        + DockMethodSignature.signatures(
+            ofClassNamed: DockDisplayDescriptorImplementation.runtimeClassName,
+            requirements: DockDisplayDescriptorImplementation.methodRequirements
+        )
 
     // MARK: - Geometry
 
@@ -49,9 +55,11 @@ enum DockEnvironment {
     /// at the default size. 27's glass bar is taller than that (94 points at the default size), so the
     /// springboard sits a little closer to it than 15's did to its Dock.
     static var dockThickness: CGFloat {
-        guard let dockBar = DockBarReference.dockBar else { return SpringboardMetrics.defaultDockThickness }
-        let desiredTileSize = floatValue(of: dockBar, selector: dockBarDesiredTileSize.selector)
-        let tileSize = floatValue(of: dockBar, selector: dockBarTileSize.selector)
+        guard let dockBar = DockBarReference.dockBar.flatMap({ DockBarGeometryImplementation($0) }) else {
+            return SpringboardMetrics.defaultDockThickness
+        }
+        let desiredTileSize = dockBar.desiredTileSize ?? .nan
+        let tileSize = dockBar.tileSize ?? .nan
         guard desiredTileSize.isFinite, tileSize.isFinite, tileSize > 0 else {
             #log(.error, "The Dock's tile size reads \(tileSize, privacy: .public) (set to \(desiredTileSize, privacy: .public)); leaving the default room")
             return SpringboardMetrics.defaultDockThickness
@@ -62,13 +70,10 @@ enum DockEnvironment {
     /// The camera housing's height on the Dock's display; zero without one.
     static var notchHeight: CGFloat {
         guard
-            let dockBar = DockBarReference.dockBar,
-            let display = objectValue(of: dockBar, selector: dockBarDisplay.selector),
-            ObjCTypeEncodingNormalization.matches(typeEncoding(of: display, selector: displayNotchBounds.selector) ?? "", displayNotchBounds.typeEncoding)
+            let display = DockBarReference.dockBar.flatMap({ DockBarGeometryImplementation($0)?.display }),
+            let notchBounds = DockDisplayDescriptorImplementation(display)?.notchBounds
         else { return 0 }
-        typealias RectFunction = @convention(c) (AnyObject, Selector) -> CGRect
-        let implementation = unsafeBitCast(display.method(for: displayNotchBounds.selector), to: RectFunction.self)
-        return implementation(display, displayNotchBounds.selector).height
+        return notchBounds.height
     }
 
     // MARK: - Icon appearance
@@ -83,64 +88,59 @@ enum DockEnvironment {
     }
 
     /// `DockBar.environment.iconAppearanceMonitor.appearance`; nil when any step is missing.
+    ///
+    /// The objects past the environment are Swift classes whose class is whatever the object turns out to
+    /// be, so each member is checked on the object's own class and called through `DynamicObject`.
+    /// Without them icons fall back to the default style.
     static var iconAppearance: IconAppearance? {
         guard
-            let dockBar = DockBarReference.dockBar,
-            let environment = objectValue(of: dockBar, selector: dockBarEnvironment.selector),
-            let monitor = checkedObjectValue(of: environment, selector: iconAppearanceMonitorSelector),
-            let appearance = checkedObjectValue(of: monitor, selector: appearanceSelector),
-            let iconDescriptor = checkedObjectValue(of: appearance, selector: iconDescriptionSelector),
-            typeEncoding(of: appearance, selector: styleSelector).map({ ObjCTypeEncodingNormalization.matches($0, "C16@0:8") }) == true
+            let environment = environmentObject,
+            let monitor = objectValue(of: environment, named: "iconAppearanceMonitor"),
+            let appearance = objectValue(of: monitor, named: "appearance"),
+            let iconDescriptor = objectValue(of: appearance, named: "iconDescription"),
+            let style = checkedMember(of: appearance, named: "style", typeEncoding: "C16@0:8")?.asUInt8
         else {
             #log(.error, "The Dock's icon appearance is out of reach; icons use the default style")
             return nil
         }
-        typealias StyleFunction = @convention(c) (AnyObject, Selector) -> UInt8
-        let styleImplementation = unsafeBitCast(appearance.method(for: styleSelector), to: StyleFunction.self)
-        return IconAppearance(iconDescriptor: iconDescriptor, style: styleImplementation(appearance, styleSelector))
+        return IconAppearance(iconDescriptor: iconDescriptor, style: style)
     }
 
     // MARK: - Calls
 
-    private static func typeEncoding(of object: NSObject, selector: Selector) -> String? {
-        guard let method = class_getInstanceMethod(object_getClass(object), selector), let encoding = method_getTypeEncoding(method) else { return nil }
-        return String(cString: encoding)
-    }
-
     /// `DockBar.environment`, a `DockCore.Environment`; nil when the `DockBar` is out of reach.
     static var environmentObject: NSObject? {
-        DockBarReference.dockBar.flatMap { objectValue(of: $0, selector: dockBarEnvironment.selector) }
+        DockBarReference.dockBar.flatMap { DockBarGeometryImplementation($0)?.environment }
     }
 
-    /// Whether `receiver`'s own class has `selector` with `expectedTypeEncoding`, frame offsets aside.
+    /// Whether `receiver`'s own class has `selector` with `expectedTypeEncoding`, frame offsets aside; logs
+    /// when it does not.
+    ///
+    /// For objects whose class is not known in advance — the Dock's Swift classes reached through other
+    /// objects — where a `@RuntimeClassProxy`, which names one class, does not fit.
     static func hasMethod(_ receiver: NSObject, selector: Selector, typeEncoding expectedTypeEncoding: String) -> Bool {
-        guard let encoding = typeEncoding(of: receiver, selector: selector), ObjCTypeEncodingNormalization.matches(encoding, expectedTypeEncoding) else {
+        guard
+            let receiverClass = object_getClass(receiver),
+            let encoding = RuntimeMethodInspector.typeEncoding(forClass: receiverClass, selector: selector),
+            ObjCTypeEncodingNormalization.matches(encoding, expectedTypeEncoding)
+        else {
             #log(.error, "-[\(String(cString: object_getClassName(receiver)), privacy: .public) \(NSStringFromSelector(selector), privacy: .public)] is missing or changed")
             return false
         }
         return true
     }
 
-    /// Calls a `float`-returning, argument-less method whose signature is already known to match.
-    private static func floatValue(of receiver: NSObject, selector: Selector) -> Float {
-        typealias FloatFunction = @convention(c) (AnyObject, Selector) -> Float
-        let implementation = unsafeBitCast(receiver.method(for: selector), to: FloatFunction.self)
-        return implementation(receiver, selector)
+    /// `receiver.<memberName>`, a member that takes nothing, through `DynamicObject` — once ``hasMethod(_:selector:typeEncoding:)``
+    /// has found it with `typeEncoding` on the receiver's own class.
+    static func checkedMember(of receiver: NSObject, named memberName: String, typeEncoding: String) -> DynamicObject? {
+        guard hasMethod(receiver, selector: NSSelectorFromString(memberName), typeEncoding: typeEncoding) else { return nil }
+        let member: DynamicObject = DynamicObject(receiver)[dynamicMember: memberName]
+        return member
     }
 
-    /// Calls an object-returning, argument-less method whose signature is already known to match.
-    private static func objectValue(of receiver: NSObject, selector: Selector) -> NSObject? {
-        typealias ObjectFunction = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
-        let implementation = unsafeBitCast(receiver.method(for: selector), to: ObjectFunction.self)
-        return implementation(receiver, selector)?.takeUnretainedValue() as? NSObject
-    }
-
-    /// Same, after checking on the receiver's own class that the method takes nothing and returns an object.
-    static func checkedObjectValue(of receiver: NSObject, selector: Selector) -> NSObject? {
-        guard let encoding = typeEncoding(of: receiver, selector: selector), ObjCTypeEncodingNormalization.matches(encoding, "@16@0:8") else {
-            #log(.error, "-[\(String(cString: object_getClassName(receiver)), privacy: .public) \(NSStringFromSelector(selector), privacy: .public)] is missing or changed")
-            return nil
-        }
-        return objectValue(of: receiver, selector: selector)
+    /// An object-returning member that takes nothing, checked as ``checkedMember(of:named:typeEncoding:)``
+    /// checks it.
+    static func objectValue(of receiver: NSObject, named memberName: String) -> NSObject? {
+        checkedMember(of: receiver, named: memberName, typeEncoding: "@16@0:8")?.asObject
     }
 }

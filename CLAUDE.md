@@ -50,7 +50,6 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 | `LaunchpadAwakenerTextInput/` | 文本输入辅助进程的 `main.swift`：嵌在 App 里的 LaunchAgent，替 Launchpad 托管搜索框与改名框，好让输入法能用 |
 | `LaunchpadAwakenerStandalone/` | 独立版 App「Launchpad」的 SwiftUI 外壳：只有 App 结构体与图标 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerShared` | 服务名、版本、路径。**不依赖任何东西** |
-| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerHookKit` | 带签名校验的 Objective-C 方法替换 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppCore` | daemon 生命周期与自愈、进程监视、注入编排、payload 通道的 App 一侧、控制面板要显示的状态、整理 Launchpad 窗口的逻辑 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadInterface` | payload 通道的请求与回报类型。App 与 payload 都链接它，只放请求类型 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerDaemonCore` | 组装特权 XPC 服务端 |
@@ -60,6 +59,8 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerStandaloneCore` | 独立版的宿主：盖住全屏的窗口与事件、壁纸、图标样式、看门狗、设置。链接 AppKit |
 
 模块按「谁链接它」划分。App 不能链接 daemon 的特权依赖，payload 要尽量小 —— 它会被映射进一个并没有请求它的进程。
+
+调私有方法与 hook 都用 FrameworkToolbox 的 ObjCRuntimeToolbox，而且**只用 `ObjCRuntimeToolbox-Static` 这个产物**：payload 在 Dock 里没有 `@rpath` 可找，换成 `.dynamic` 的 `ObjCRuntimeToolbox` 它就加载不了。payload、独立版、文本输入辅助进程各嵌一份。
 
 两个与 Launchpad 有关的模块再按层分目录：
 
@@ -73,6 +74,11 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 | `PayloadCore/Integration/` | hook 声明，以及事件接管 |
 
 调 Dock 内部方法一律经过 `PayloadCore/Host/`：先按类型编码校验，再调用。界面层要 Dock 的东西，一律经宿主接口要，不直接调 `Host/` 里的类型。
+
+私有方法的两种写法：
+
+- **类名固定的实例方法**写成 `@RuntimeClassProxy("类名")` 协议：选择子与编码由 Swift 声明推出，第一次调用前整批核对。Dock 的要把协议的 `methodRequirements` 加进 `DockHostInterface.requiredMethods`（或玻璃、Dock 显隐各自的清单），编码记进 `DockSignatureTests`。可选功能的方法单独成协议，一个不符整个协议就停用。
+- **类方法、init、经别的对象拿到的对象、带 block 的调用**用 `DynamicObject`（`ObjC.类名(…)`），调用前按对象的实际类核对编码。它按原样拷参数的字节、不做类型换算：每个参数都要是编码对应的那个 Swift 类型（`f` 只能传 `Float`，传 `CGFloat` 只会传进半个 double），超过三个字长的结构体（`CGRect`）包进 `NSValue`，block 要声明成 `@convention(block)`。返回 `CGImage`、`CGColor` 这类可能为空的指针时按 `UnsafeRawPointer??` 取。
 
 ## 构建
 
@@ -119,10 +125,10 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 
 ## 加 hook
 
-全部声明在 `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/Integration/PayloadHooks.swift` 的 `descriptors()` 里。
+全部声明在 `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/Integration/PayloadHooks.swift`：每个类一个 `@RuntimeClassHook("类名")` 结构体，替换方法标 `@RuntimeMethodReplacement`，在方法里用 `host` 拿接收者、`callOriginal(…)` 转给 Dock 自己的实现，再把结构体的 `descriptors()` 加进 `PayloadHooks.descriptors()`。
 
-**类型编码必须从活着的宿主进程里读，不能照着反编译结果手写。** 用
-`MethodHookInspector.typeEncoding(forClassNamed:selector:isInstanceMethod:)` 读出来再填进描述符。一个长度恰好对得上但内容错误的编码能通过安装校验，然后在调用时破坏寄存器、让宿主进程崩溃 —— 崩的是别人的进程，用户不会想到是这个工具。
+**类型编码必须从活着的宿主进程里读，不能照着反编译结果猜。** 用
+`RuntimeMethodInspector.typeEncoding(forClassNamed:selector:isInstanceMethod:)` 读出来，把替换方法的 Swift 参数与返回类型写成能推出它的类型（`I` 是 `UInt32`，`f` 是 `Float`，`B` 是 `Bool`），并把编码记进 `DockSignatureTests`。宏从这一个声明推出选择子、编码与 block，安装时再与宿主的实际编码比对：类型写错就整批不装，而不是在调用时破坏寄存器、让宿主进程崩溃 —— 崩的是别人的进程，用户不会想到是这个工具。返回对象的 alloc、copy、mutableCopy、new、init 族方法不能这样替换，宏会在编译期报错。
 
 安装是原子的：任何一个描述符校验失败，整批都不装，payload 保持加载但什么也不做，并留一条日志。**不要为了让 hook 装上而放宽校验** —— 装了一半的宿主进程混合运行着 hook 过和没 hook 过的行为，那是谁都没设计过的状态。
 

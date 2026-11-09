@@ -117,37 +117,24 @@ final class TextInputHelperClient {
     /// payload knows; nil otherwise.
     static func makeLayerHost(showing hosting: Hosting) -> CALayer? {
         guard let layerHostClass else { return nil }
-        let hostLayer = layerHostClass.hostClass.init()
-        layerHostClass.setContextIdentifier(hostLayer, layerHostClass.selector, hosting.contextIdentifier)
+        let hostLayer = layerHostClass.init()
+        guard let layerHost = CoreAnimationLayerHostImplementation(hostLayer) else { return nil }
+        layerHost.setContextId(hosting.contextIdentifier)
         return hostLayer
     }
 
-    /// `CALayerHost` and its `-setContextId:`, once the setter's signature is checked, frame offsets
-    /// aside; looked up once.
-    private struct LayerHostClass {
-        typealias SetContextIdentifierFunction = @convention(c) (AnyObject, Selector, UInt32) -> Void
-        let hostClass: CALayer.Type
-        let selector: Selector
-        let setContextIdentifier: SetContextIdentifierFunction
-    }
-
+    /// `CALayerHost`, once its `-setContextId:` matches; looked up once, and logged once when it does not.
     private static let layerHostClass = findLayerHostClass()
 
-    private static func findLayerHostClass() -> LayerHostClass? {
-        let selector = NSSelectorFromString("setContextId:")
+    private static func findLayerHostClass() -> CALayer.Type? {
         guard
-            let hostClass = NSClassFromString("CALayerHost") as? CALayer.Type,
-            RuntimeMethodInspector.hasMethod(className: "CALayerHost", selector: selector, matchingTypeEncoding: "v20@0:8I16"),
-            let method = class_getInstanceMethod(hostClass, selector)
+            CoreAnimationLayerHostImplementation.isSupported,
+            let hostClass = NSClassFromString(CoreAnimationLayerHostImplementation.runtimeClassName) as? CALayer.Type
         else {
             #log(.error, "-[CALayerHost setContextId:] is missing or changed; the fields are edited here")
             return nil
         }
-        return LayerHostClass(
-            hostClass: hostClass,
-            selector: selector,
-            setContextIdentifier: unsafeBitCast(method_getImplementation(method), to: LayerHostClass.SetContextIdentifierFunction.self)
-        )
+        return hostClass
     }
 
     /// Posts a copy of `event` to the helper, marked with its window, as 15's Dock did; mouse events also
@@ -227,4 +214,11 @@ final class TextInputHelperClient {
         guard let symbol = dlsym(dlopen(nil, RTLD_NOW), "CGEventSetWindowLocation") else { return nil }
         return unsafeBitCast(symbol, to: SetWindowLocationFunction.self)
     }()
+}
+
+/// `CALayerHost`, which shows the layers of a context in another process.
+@RuntimeClassProxy("CALayerHost")
+protocol CoreAnimationLayerHost {
+    /// The context to show, by its identifier: here the layer-hosting context of the helper's window.
+    func setContextId(_ contextIdentifier: UInt32)
 }

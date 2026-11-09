@@ -1,5 +1,5 @@
 import Foundation
-import ObjectiveC
+import ObjCRuntimeToolbox
 import OSToolbox
 
 /// Deletes applications with the Dock's own uninstaller, the one macOS 15's Launchpad used.
@@ -13,15 +13,17 @@ import OSToolbox
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "DockApplicationUninstaller")
 @MainActor
 enum DockApplicationUninstaller {
-    private static let applicationUninstallerSelector = NSSelectorFromString("applicationUninstaller")
     private static let uninstallabilitySelector = NSSelectorFromString("uninstallabilityOfFileAtURL:")
     private static let uninstallSelector = NSSelectorFromString("uninstallBundleAtURL:handler:")
 
     /// `DockBar.environment.applicationUninstaller` with both methods as 27.2 has them; nil otherwise.
+    ///
+    /// Called through `DynamicObject`: the uninstaller is reached through the environment, and
+    /// `uninstallBundleAtURL:handler:` takes a block, whose `@?` the proxy macro cannot derive.
     private static var uninstaller: NSObject? {
         guard
             let environment = DockEnvironment.environmentObject,
-            let uninstaller = DockEnvironment.checkedObjectValue(of: environment, selector: applicationUninstallerSelector),
+            let uninstaller = DockEnvironment.objectValue(of: environment, named: "applicationUninstaller"),
             DockEnvironment.hasMethod(uninstaller, selector: uninstallabilitySelector, typeEncoding: "i24@0:8@16"),
             DockEnvironment.hasMethod(uninstaller, selector: uninstallSelector, typeEncoding: "v32@0:8@16@?24")
         else { return nil }
@@ -38,9 +40,7 @@ enum DockApplicationUninstaller {
     /// showed the close box.
     static func canUninstall(applicationAt bundleURL: URL) -> Bool {
         guard let uninstaller else { return false }
-        typealias UninstallabilityFunction = @convention(c) (AnyObject, Selector, NSURL) -> Int32
-        let implementation = unsafeBitCast(uninstaller.method(for: uninstallabilitySelector), to: UninstallabilityFunction.self)
-        return implementation(uninstaller, uninstallabilitySelector, bundleURL as NSURL) == 1
+        return ObjC(uninstaller).uninstallabilityOfFileAtURL(bundleURL as NSURL).asInt32 == 1
     }
 
     /// Deletes the application; `completion` runs on the main actor with whether it went.
@@ -50,9 +50,9 @@ enum DockApplicationUninstaller {
             return
         }
         #log(.info, "Deleting \(bundleURL.path, privacy: .public)")
-        typealias UninstallFunction = @convention(c) (AnyObject, Selector, NSURL, @escaping @convention(block) (ObjCBool) -> Void) -> Void
-        let implementation = unsafeBitCast(uninstaller.method(for: uninstallSelector), to: UninstallFunction.self)
-        implementation(uninstaller, uninstallSelector, bundleURL as NSURL) { hasUninstalled in
+        // Typed as a block so that DynamicObject passes it as one; a plain Swift closure would not be an
+        // Objective-C object.
+        let handler: @convention(block) (ObjCBool) -> Void = { hasUninstalled in
             // The answer comes on an XPC or a global queue.
             let hasSucceeded = hasUninstalled.boolValue
             DispatchQueue.main.async {
@@ -61,5 +61,6 @@ enum DockApplicationUninstaller {
                 }
             }
         }
+        ObjC(uninstaller).uninstallBundleAtURL(bundleURL as NSURL, handler: handler)
     }
 }

@@ -21,7 +21,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **payload 里不用 AppKit，也不用 `Bundle.module`。** 27.2 的 Dock 不链接 AppKit，字体一律用 Core Text 建，显示器信息用 CoreGraphics 和 Dock 自己的 `DisplayDescriptor`。SwiftPM 生成的 `Bundle.module` 找不到资源时直接 `fatalError`，在注入的框架里就是让 Dock 崩溃，所以 15.5 的 `LaunchPadLayout.plist` 只放在测试资源里，排除名单与默认首页以 Swift 常量随 payload 发布，由测试逐项核对。界面贴图（`ecsb_*`、`ectl_*`）在运行时从 Dock.app 里读，26 与 27 的 Dock.app 都带着这些文件。
 
-**调 Dock 内部方法一律先校验签名。** `DockHostInterface.requiredMethods` 汇总了界面层要调的所有 Dock 方法，任何一个的类型编码与 27.2 元数据不符，就整批不装 hook。经对象拿到的 Swift 类（`IconAppearance` 等）在调用前按对象的实际类校验，失败就降级。两个容易错的地方：`EC*` 类的 `scaleFactor` 都是 `float`（编码 `f`），按 `CGFloat` 传会错位；头文件里的 ivar 偏移是编译期的值，运行时会滑动，要用 `ivar_getOffset`。
+**调 Dock 内部方法一律先校验签名。** 调用与 hook 都经 FrameworkToolbox 的 ObjCRuntimeToolbox：两个 hook 是 `@RuntimeClassHook`，类名固定的实例方法写成 `@RuntimeClassProxy` 协议，选择子与类型编码都由 Swift 声明推出、参数类型经编译器检查；init、类方法、经对象拿到的 Swift 类（`IconAppearance` 等）与带 block 的卸载调用用 `DynamicObject`。`DockHostInterface.requiredMethods` 汇总了界面层要调的 23 个 Dock 方法（各 proxy 的 `methodRequirements` 加上 init 的签名），任何一个的类型编码与 Dock 不符，就整批不装 hook；`DockSignatureTests` 在开发机上把推出的编码与 27.2 元数据核对。经对象拿到的 Swift 类在调用前按对象的实际类校验，失败就降级。三个容易错的地方：`EC*` 类的 `scaleFactor` 都是 `float`（编码 `f`），proxy 里写成 `CGFloat` 编码就对不上，经 `DynamicObject` 传则必须是 `Float`——它按原样拷参数的字节；超过三个字长的参数（`CGRect`）经 `DynamicObject` 传要包进 `NSValue`；头文件里的 ivar 偏移是编译期的值，运行时会滑动，要用 `ivar_getOffset`。
 
 **每页一个 Dock 的 `ECGridLayer`，内容变了就换一个新的。** `ECGridLayer` 只在初始化时问一次条目数，之后没有入口能改；15.5 的 `ECSBGridLayer` 是直接改父类 ivar 来增删图标的。这里选择页内条目一变就重建整页网格，代价可以忽略（一页最多几十个图层）。另外三点：`-[ECGridLayer layout]` 不是 `layoutSublayers`，Core Animation 不会自动调，要宿主调用；数据源被弱引用，由 `SpringboardPageGrid` 持有；`makeLayerForLayer:` 在协议上是可选的，实际必须实现。
 
@@ -180,15 +180,15 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── DockSpringboardHost.swift       # Dock 宿主：把宿主接口接到下面这些类型上
 │   ├── DockSpringboardWindow.swift     # 全屏窗口、27/29 层、键盘焦点
 │   ├── DockBuildProfile.swift          # 构建档案：UUID → 只对该构建成立的事实
-│   ├── DockHostInterface.swift         # 签名清单与校验；WALayerKitWindow、DockBar rect
+│   ├── DockHostInterface.swift         # 签名清单与校验；WALayerKitWindow 的 proxy 与 init
 │   ├── DockBarReference.swift          # 经全局变量拿 DockBar 与 DockGlobals
 │   ├── DockGlassMaterial.swift         # Dock 自己的液态玻璃（Cmd-Tab 切换器那套控制器）
-│   ├── DockEnvironment.swift           # Dock 的方向、厚度、刘海、图标样式
+│   ├── DockEnvironment.swift           # Dock 的方向、厚度、刘海、图标样式；DockBar 与 DisplayDescriptor 的 proxy
 │   ├── DockLayerFactory.swift          # ECGridLayer、ECImageGridLayer、ECTextLayer、ECShadowTextLayer、材质
 │   ├── DockApplicationUninstaller.swift # Dock 的卸载器
 │   ├── SpringboardRemoteTextField.swift # 辅助进程托管的搜索框与改名框：CALayerHost 与事件转发
 │   └── TextInputHelperClient.swift     # 连文本输入辅助进程；给它发键鼠事件
-└── Integration/                        # hook 声明，以及事件接管时记下的当前事件
+└── Integration/                        # hook 声明（@RuntimeClassHook），以及事件接管时记下的当前事件
 ```
 
 ## 核心数据流
@@ -266,7 +266,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 5. 核对签名：用 `ipsw class-dump <Dock> --arch arm64e --re -V` 导出声明，把复刻用到的类（`WALayerKitWindow`、`WAWindow`、`DockBar`、`DisplayDescriptor`、`EC*` 图层、`Spotlight`、`DockAppEventHandler`、玻璃的四个类、`IconAppearance`、`Environment`、卸载器与 `CALayer` 的分类）和同一大版本已登记的构建逐个对照。26.0 到 27.2 里不同的只有复刻没用到的方法。
 6. 找两个全局变量：`-[DockBarSystemDefinedEventHandler handleSystemDefinedEvent:type:]` 处理 Launchpad 键（系统定义事件子类型 9、键码 104）的分支里，向一个全局变量发 `keyFocusController`——那是 `DockBar`；向另一个发 `slowMotionAllowed`——那是 `DockGlobals`。看汇编里 `ADRL` 加 `LDR` 取的地址，26.0 到 27.2 都是这样。这个方法的地址取自第 5 步导出里的注释。
 7. 在 `DockBuildProfile.knownProfiles` 加一条（UUID、系统版本、版本号、两个地址；26 用 `macOS26Profile`，27 用 `macOS27Profile`，二者只差 `DockGlobals` 的类名），把版本加进 `DockBuildProfileTests.supportedReleases`，并在 RE 目录的 README 里记下来源与两个地址的出处。
-8. 部署到同一大版本的测试机，看日志里 `Checked N Dock method(s), M mismatch(es)` 与 `Installed 2 hook(s)`：有不符的，日志会写出新的类型编码，逐个核对后更新签名。
+8. 部署到同一大版本的测试机，看日志里 `Checked N Dock method(s), M mismatch(es)` 与 `Installed 2 hook(s)`：有不符的，日志会写出新的类型编码，逐个核对后改对应 proxy 协议或 hook 方法的 Swift 类型（编码由它推出；init 的签名直接改字符串），并更新 `DockSignatureTests` 里记的编码。
 
 ## 延伸阅读
 

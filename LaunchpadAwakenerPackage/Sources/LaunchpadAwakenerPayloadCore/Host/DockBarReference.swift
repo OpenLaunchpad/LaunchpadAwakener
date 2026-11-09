@@ -43,7 +43,7 @@ enum DockBarReference {
     /// The bar's current rectangle in global coordinates with a top-left origin; nil when the
     /// `DockBar` cannot be found.
     static var currentBarRect: CGRect? {
-        dockBar.map(DockHostInterface.rect(of:))
+        dockBar.flatMap { DockBarGeometryImplementation($0)?.rect }
     }
 
     /// Reads a global of the running Dock, and accepts what it holds only when that turns out to be an

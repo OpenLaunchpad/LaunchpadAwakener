@@ -25,7 +25,7 @@ final class DockSpringboardWindow: SpringboardWindow {
     let backingScaleFactor: CGFloat
     let rootLayer: CALayer
 
-    private let window: NSObject
+    private let window: DockLayerKitWindowImplementation
     private let connectionIdentifier: UInt32
     private let windowIdentifier: UInt32
     private var raisedDockWindowIdentifiers: [UInt32] = []
@@ -37,14 +37,16 @@ final class DockSpringboardWindow: SpringboardWindow {
         guard let connectionIdentifier = SkyLightBridge.mainConnectionIdentifier else { return nil }
         let displayBounds = CGDisplayBounds(displayIdentifier)
         guard
-            let window = DockHostInterface.makeLayerKitWindow(
+            let windowObject = DockHostInterface.makeLayerKitWindow(
                 frame: displayBounds,
                 connectionIdentifier: connectionIdentifier,
                 displayIdentifier: displayIdentifier,
                 tags: Self.windowTags,
                 level: Self.dockWindowLevel
             ),
-            let rootLayer = DockHostInterface.rootLayer(of: window)
+            let window = DockLayerKitWindowImplementation(windowObject),
+            let rootLayer = window.layer,
+            let windowIdentifier = window.wid
         else { return nil }
 
         self.displayIdentifier = displayIdentifier
@@ -53,7 +55,7 @@ final class DockSpringboardWindow: SpringboardWindow {
         self.rootLayer = rootLayer
         self.window = window
         self.connectionIdentifier = connectionIdentifier
-        self.windowIdentifier = DockHostInterface.windowIdentifier(of: window)
+        self.windowIdentifier = windowIdentifier
     }
 
     /// Converts a global point (top-left origin) into the window's coordinates.
@@ -69,7 +71,7 @@ final class DockSpringboardWindow: SpringboardWindow {
             onConnection: connectionIdentifier
         )
         raiseDockWindows()
-        DockHostInterface.order(window, ordering: 1)
+        window.order(1, otherWindow: 0)
         let keyFocusResult = SkyLightBridge.stealKeyFocus(onConnection: connectionIdentifier)
         hasKeyFocus = keyFocusResult == 0
         isOrderedIn = true
@@ -86,7 +88,7 @@ final class DockSpringboardWindow: SpringboardWindow {
 
     func orderOut() {
         guard isOrderedIn else { return }
-        DockHostInterface.order(window, ordering: 0)
+        window.order(0, otherWindow: 0)
         releaseKeyFocus(returningToPreviousApplication: true)
         for raisedDockWindowIdentifier in raisedDockWindowIdentifiers {
             SkyLightBridge.setWindowLevel(
