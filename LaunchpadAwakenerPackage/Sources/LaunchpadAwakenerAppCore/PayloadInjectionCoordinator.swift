@@ -223,6 +223,10 @@ public final class PayloadInjectionCoordinator {
     @ObservationIgnored
     private var quickExitGuard = QuickExitGuard()
 
+    /// Docks Restart Dock has signalled and that have not exited yet. Never injected.
+    @ObservationIgnored
+    private var processIdentifiersBeingRestarted: Set<pid_t> = []
+
     /// Every payload this app can currently reach, sorted by host.
     ///
     /// Populated by injecting and by ``reconnectToResidentPayloads()``, and kept current by
@@ -333,29 +337,58 @@ public final class PayloadInjectionCoordinator {
     ///
     /// The daemon's registry only lists live processes: it watches each one and drops the entry on
     /// exit, so nothing here has to tell a live endpoint from a dead one.
+    ///
+    /// Also run by the first injection attempt that finds it has not happened yet, so that nothing
+    /// injects a Dock before the registry has been asked whether it already holds the payload. The
+    /// process monitor starts before the launch sequence and sees the Dock at once; on the test Mac
+    /// it injected the resident Dock a hundred milliseconds after the reconnection, replacing the
+    /// working channel with one the payload — whose peer starts only once — would never answer.
     public func reconnectToResidentPayloads() async {
+        await residentPayloadReconnection.run { [self] in
+            await readRegistryAndReconnect()
+        }
+    }
+
+    @ObservationIgnored
+    private let residentPayloadReconnection = SingleFlight<Void>()
+
+    /// Whether the registry has been read since launch. Reading it only fails when the daemon is
+    /// unusable, and then the next injection attempt — which makes the daemon usable first — tries
+    /// again.
+    @ObservationIgnored
+    private var hasReadRegistry = false
+
+    private func readRegistryAndReconnect() async {
         let endpoints: [InjectedEndpointInfo]
         do {
             endpoints = try await registry.liveEndpoints()
+            hasReadRegistry = true
         } catch {
             #log(.error, "Could not read the injected-payload registry: \(error.localizedDescription, privacy: .public)")
             return
         }
 
         for endpointInfo in endpoints where channelsByHostProcessIdentifier[endpointInfo.pid] == nil {
-            do {
-                let channel = try await PayloadChannel.reconnect(to: endpointInfo)
-                let status = try await channel.fetchStatus()
+            // Only the payload publishes an entry, and the daemon drops it when the Dock exits: an entry
+            // means the payload is in this Dock, whether or not it answers below. Leaving the Dock off
+            // the record would have the next discovery pass inject it again.
+            injectedProcessIdentifiers.insert(endpointInfo.pid)
 
-                channelsByHostProcessIdentifier[endpointInfo.pid] = channel
+            var channel: PayloadChannel?
+            do {
+                let reconnectedChannel = try await PayloadChannel.reconnect(to: endpointInfo)
+                channel = reconnectedChannel
+                let status = try await reconnectedChannel.fetchStatus()
+
+                channelsByHostProcessIdentifier[endpointInfo.pid] = reconnectedChannel
                 channelOpenedAtByHostProcessIdentifier[endpointInfo.pid] = Date()
                 payloadStatusesByHostProcessIdentifier[endpointInfo.pid] = status
-                injectedProcessIdentifiers.insert(endpointInfo.pid)
 
                 #log(.info, "Reconnected to the payload in \(status.hostProcessName, privacy: .public) (\(endpointInfo.pid, privacy: .public))")
             } catch {
-                // The process is alive but its payload will not talk. Drop the entry rather than
+                // The payload is there but will not talk. Drop the registry entry rather than
                 // retrying it on every launch from here on.
+                await channel?.close()
                 #log(.error, "Payload in \(endpointInfo.pid, privacy: .public) did not answer: \(error.localizedDescription, privacy: .public)")
                 await registry.forget(hostProcessIdentifier: endpointInfo.pid)
             }
@@ -369,6 +402,7 @@ public final class PayloadInjectionCoordinator {
     private func hostDidExit(_ hostProcessIdentifier: pid_t) {
         let reachedLimit = quickExitGuard.recordExit(of: hostProcessIdentifier, at: Date())
         forgetHost(hostProcessIdentifier)
+        processIdentifiersBeingRestarted.remove(hostProcessIdentifier)
 
         guard reachedLimit, isAutomaticInjectionEnabled else { return }
         setAutomaticInjectionEnabled(false)
@@ -425,7 +459,11 @@ public final class PayloadInjectionCoordinator {
             var payloadAnswered = true
             if hostIsAlive, let channel = channelsByHostProcessIdentifier[hostProcessIdentifier] {
                 do {
-                    payloadStatusesByHostProcessIdentifier[hostProcessIdentifier] = try await channel.fetchStatus()
+                    let status = try await channel.fetchStatus()
+                    // The Dock may have been forgotten while the request was out — Restart Dock does
+                    // that — and writing the answer back would bring its row back for one more tick.
+                    guard channelsByHostProcessIdentifier[hostProcessIdentifier] === channel else { continue }
+                    payloadStatusesByHostProcessIdentifier[hostProcessIdentifier] = status
                 } catch {
                     payloadAnswered = false
                 }
@@ -488,14 +526,24 @@ public final class PayloadInjectionCoordinator {
     public func restartTargets() {
         let outgoingProcessIdentifiers = currentTargetProcessIdentifiers()
         prepareForTargetRestart()
+        // Kept out of every injection until they exit. Forgotten a line above, they would otherwise
+        // look uninjected to a discovery pass that saw them a moment ago.
+        processIdentifiersBeingRestarted = outgoingProcessIdentifiers
         // Before the first suspension point, so the buttons are disabled from this frame on.
         isWaitingForTargetRestart = true
 
         for processIdentifier in outgoingProcessIdentifiers {
-            guard kill(processIdentifier, SIGTERM) != 0 else { continue }
-            let reason = String(cString: strerror(errno))
-            lastErrorDescription = "Could not restart the Dock (\(processIdentifier)): \(reason)"
-            #log(.error, "Could not terminate \(processIdentifier, privacy: .public): \(reason, privacy: .public)")
+            switch ProcessTermination.terminate(processIdentifier) {
+            case .terminated, .alreadyGone:
+                continue
+            case .belongsToAnotherUser:
+                // Another user's Dock under fast user switching. It stays in the outgoing set all the
+                // same, so it is never mistaken for this user's replacement Dock.
+                #log(.info, "Left \(processIdentifier, privacy: .public) alone: it belongs to another user")
+            case .failed(let reason):
+                lastErrorDescription = "Could not restart the Dock (\(processIdentifier)): \(reason)"
+                #log(.error, "Could not terminate \(processIdentifier, privacy: .public): \(reason, privacy: .public)")
+            }
         }
 
         Task {
@@ -533,7 +581,12 @@ public final class PayloadInjectionCoordinator {
         timeout: Duration = .seconds(20)
     ) async {
         isWaitingForTargetRestart = true
-        defer { isWaitingForTargetRestart = false }
+        defer {
+            isWaitingForTargetRestart = false
+            // Whatever has exited by now no longer needs keeping out; one that somehow outlived the
+            // wait stays excluded until its exit is seen.
+            processIdentifiersBeingRestarted = processIdentifiersBeingRestarted.filter(ProcessLiveness.isAlive)
+        }
 
         let deadline = ContinuousClock.now.advanced(by: timeout)
 
@@ -670,7 +723,8 @@ public final class PayloadInjectionCoordinator {
         let missedProcessIdentifiers = InjectionSelection.processIdentifiersNeedingInjection(
             running: processIdentifiers,
             alreadyInjected: injectedProcessIdentifiers,
-            beingInjected: processIdentifiersBeingInjected
+            beingInjected: processIdentifiersBeingInjected,
+            beingRestarted: processIdentifiersBeingRestarted
         )
         guard !missedProcessIdentifiers.isEmpty else { return }
 
@@ -701,6 +755,16 @@ public final class PayloadInjectionCoordinator {
             return record(outcome: .failed(description: availability.summary), trigger: trigger)
         }
 
+        // Before deciding what is uninjected: a Dock already holding the payload from an earlier
+        // session is only known once the registry has been read.
+        if !hasReadRegistry {
+            await reconnectToResidentPayloads()
+        }
+
+        // With the monitor off nothing reports a restarted Dock's exit, so a stale entry would keep
+        // a later process that reused its identifier from ever being injected.
+        processIdentifiersBeingRestarted = processIdentifiersBeingRestarted.filter(ProcessLiveness.isAlive)
+
         var newlyInjectedProcessIdentifiers: [pid_t] = []
         var previouslyInjectedProcessIdentifiers: [pid_t] = []
         var failureDescriptions: [String] = []
@@ -711,8 +775,11 @@ public final class PayloadInjectionCoordinator {
                 continue
             }
             // Someone else is already on this one. Not a failure and not "already injected" — the
-            // other attempt owns reporting it.
-            guard !processIdentifiersBeingInjected.contains(processIdentifier) else { continue }
+            // other attempt owns reporting it. A Dock being restarted is about to exit.
+            guard
+                !processIdentifiersBeingInjected.contains(processIdentifier),
+                !processIdentifiersBeingRestarted.contains(processIdentifier)
+            else { continue }
 
             // Claimed here rather than inside `inject` so that the test above and this write are in
             // the same synchronous run: calling an `async` function is itself a suspension point.
@@ -756,19 +823,26 @@ public final class PayloadInjectionCoordinator {
         }
 
         let payloadURL = stagedPayloadExecutableURL
-        switch injectionMethod {
-        case .dynamicLibraryLoad:
-            try await daemonController.send(
-                request: InjectApplicationRequest(pid: processIdentifier, dylibURL: payloadURL)
-            )
-        case .memoryRemap:
-            try await daemonController.send(
-                request: InjectApplicationViaRemapRequest(
-                    pid: processIdentifier,
-                    payloadURL: payloadURL,
-                    entrySymbol: InjectionServiceIdentity.payloadRemapEntrySymbol
+        do {
+            switch injectionMethod {
+            case .dynamicLibraryLoad:
+                try await daemonController.send(
+                    request: InjectApplicationRequest(pid: processIdentifier, dylibURL: payloadURL)
                 )
-            )
+            case .memoryRemap:
+                try await daemonController.send(
+                    request: InjectApplicationViaRemapRequest(
+                        pid: processIdentifier,
+                        payloadURL: payloadURL,
+                        entrySymbol: InjectionServiceIdentity.payloadRemapEntrySymbol
+                    )
+                )
+            }
+        } catch {
+            // Each failed attempt would otherwise leave another listener registered under this
+            // Dock's process identifier, and the automatic retry makes one every 15 seconds.
+            await channel?.close()
+            throw error
         }
 
         injectedProcessIdentifiers.insert(processIdentifier)
@@ -777,11 +851,16 @@ public final class PayloadInjectionCoordinator {
         #log(.info, "Injected into \(processIdentifier, privacy: .public)")
         onInjectionSucceeded?()
 
-        if let channel {
-            channelsByHostProcessIdentifier[processIdentifier] = channel
-            channelOpenedAtByHostProcessIdentifier[processIdentifier] = Date()
-            await adoptStatus(from: channel, hostProcessIdentifier: processIdentifier)
+        guard let channel else { return }
+        // A channel already on record answered the payload's one handshake; the payload will never
+        // connect to this one.
+        guard channelsByHostProcessIdentifier[processIdentifier] == nil else {
+            await channel.close()
+            return
         }
+        channelsByHostProcessIdentifier[processIdentifier] = channel
+        channelOpenedAtByHostProcessIdentifier[processIdentifier] = Date()
+        await adoptStatus(from: channel, hostProcessIdentifier: processIdentifier)
     }
 
     /// Waits for the freshly injected payload to call home, then records what it reports.

@@ -72,11 +72,7 @@ actor PayloadChannel {
     func waitUntilConnected(timeout: Duration = .seconds(5)) async -> Bool {
         guard let peer else { return false }
 
-        let deadline = Task {
-            try? await Task.sleep(for: timeout)
-            return false
-        }
-        let connection = Task {
+        let isConnected = try? await withTimeLimit(timeout) {
             for await state in peer.stateStream {
                 switch state {
                 case .connected:
@@ -89,25 +85,21 @@ actor PayloadChannel {
             }
             return false
         }
-
-        let isConnected = await withTaskGroup(of: Bool.self) { group in
-            group.addTask { await deadline.value }
-            group.addTask { await connection.value }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
-        }
-
-        deadline.cancel()
-        connection.cancel()
-        return isConnected
+        return isConnected ?? false
     }
 
     // MARK: - Requests
 
+    /// How long a status request may take. The payload answers from an actor of its own in
+    /// milliseconds; a Dock that is hung or stopped never answers, and without a limit one such Dock
+    /// would stall the window's whole refresh loop.
+    static let statusTimeLimit = Duration.seconds(2)
+
     func fetchStatus() async throws -> PayloadStatus {
         guard let peer else { throw ChannelError.notConnected }
-        return try await peer.send(PayloadStatusRequest())
+        return try await withTimeLimit(Self.statusTimeLimit) {
+            try await peer.send(PayloadStatusRequest())
+        }
     }
 
     func close() async {

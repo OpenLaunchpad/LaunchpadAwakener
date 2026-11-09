@@ -250,7 +250,20 @@ public final class PrivilegedDaemonController {
     /// The original concern is handled by ``reinstallCooldown`` instead. Deciding *whether* to
     /// repair by classifying the error meant a whole category of breakage had no route back;
     /// deciding *how often* to repair by the clock covers both cases with one rule.
+    ///
+    /// Callers that arrive while a check is under way share its answer (``SingleFlight``): run side by
+    /// side, the first reinstalls the daemon and the others are refused by the cooldown, reporting a
+    /// failure for a daemon that is fine a second later.
     public func ensureDaemonUsable() async -> DaemonAvailability {
+        await availabilityCheck.run { [self] in
+            await checkAndRepairDaemon()
+        }
+    }
+
+    @ObservationIgnored
+    private let availabilityCheck = SingleFlight<DaemonAvailability>()
+
+    private func checkAndRepairDaemon() async -> DaemonAvailability {
         refreshStatus()
 
         guard registrationStatus == .enabled else {

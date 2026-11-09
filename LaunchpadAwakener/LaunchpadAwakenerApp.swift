@@ -139,6 +139,21 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// Runs the launch sequence again when it stopped, each time the app comes to the front.
+    ///
+    /// A launch stops when the daemon is not usable — most often because it still waits for approval
+    /// in System Settings. Coming back from there activates the app, and the sequence then gets as
+    /// far as it now can. Without this the banner kept the old reason ("Awaiting approval") after the
+    /// approval, and with automatic injection off nothing reconnected to a Dock that already held the
+    /// payload.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard case .stopped = launchProgress.phase else { return }
+        // Entered here rather than inside the task, so that a second activation in the meantime sees
+        // a sequence in progress and does not start another.
+        launchProgress.enter(.preparingDaemon)
+        Task { await runLaunchSequence() }
+    }
+
     /// Gets the app to a working state, recording how far it got.
     ///
     /// Every step that cannot proceed is recorded rather than returned from silently: a launch that

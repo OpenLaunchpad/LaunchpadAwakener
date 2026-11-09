@@ -56,13 +56,19 @@ enum HostRefreshDecision: Sendable, Equatable {
 /// The other half of the loop above: whatever this returns gets injected, so anything already
 /// injected has to be excluded here as firmly as it is recorded there.
 enum InjectionSelection {
+    /// - Parameter beingRestarted: Docks that Restart Dock has just signalled. Forgotten before the
+    ///   signal so the window stops describing them, they would otherwise look uninjected to a
+    ///   discovery pass that saw them a moment earlier.
     static func processIdentifiersNeedingInjection(
         running runningProcessIdentifiers: [pid_t],
         alreadyInjected: Set<pid_t>,
-        beingInjected: Set<pid_t>
+        beingInjected: Set<pid_t>,
+        beingRestarted: Set<pid_t> = []
     ) -> [pid_t] {
         runningProcessIdentifiers.filter { processIdentifier in
-            !alreadyInjected.contains(processIdentifier) && !beingInjected.contains(processIdentifier)
+            !alreadyInjected.contains(processIdentifier)
+                && !beingInjected.contains(processIdentifier)
+                && !beingRestarted.contains(processIdentifier)
         }
     }
 }
