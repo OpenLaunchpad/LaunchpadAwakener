@@ -3,6 +3,7 @@
 - [Evolutions/README.md](Evolutions/README.md) —— 提案状态总表
 - [Evolutions/draft-launchpad-replica.md](Evolutions/draft-launchpad-replica.md) —— 在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad（In Progress）
 - [Evolutions/draft-appkit-rewrite.md](Evolutions/draft-appkit-rewrite.md) —— 两个 App 的界面改用 AppKit 与 UIFoundation、AppKitPlus 重写，不再用 SwiftUI（Accepted）
+- [Evolutions/draft-objc-runtime-toolbox.md](Evolutions/draft-objc-runtime-toolbox.md) —— 用 FrameworkToolbox 的 ObjCRuntimeToolbox 改写 hook 与私有调用，删掉 HookKit（Accepted）
 - [Evolutions/0001-input-method-helper.md](Evolutions/0001-input-method-helper.md) —— 用常驻辅助进程给搜索框与改名框接上输入法（Implemented）
 - [Evolutions/0002-standalone-launchpad.md](Evolutions/0002-standalone-launchpad.md) —— 不注入 Dock 的独立版 Launchpad：与注入版共用数据层与界面层（Implemented）
 - [Evolutions/0003-app-control-panel.md](Evolutions/0003-app-control-panel.md) —— 照 DockIconOverride 重做注入版 App 的控制面板：状态横幅、payload 通道、daemon 自愈、重启 Dock、菜单栏 App（Implemented）
