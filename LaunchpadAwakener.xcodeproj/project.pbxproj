@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		1A5C00000000000000000900 /* LaunchpadAwakenerAppCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000800 /* LaunchpadAwakenerAppCore */; };
+		1A5C00000000000000000900 /* LaunchpadAwakenerAppUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000800 /* LaunchpadAwakenerAppUI */; };
 		1A5C00000000000000000901 /* LaunchpadAwakenerDaemonCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000801 /* LaunchpadAwakenerDaemonCore */; };
 		1A5C00000000000000000902 /* LaunchpadAwakenerPayloadCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000802 /* LaunchpadAwakenerPayloadCore */; };
 		1A5C00000000000000000903 /* LaunchpadAwakenerPayload.framework in Embed Payload */ = {isa = PBXBuildFile; fileRef = 1A5C00000000000000000202 /* LaunchpadAwakenerPayload.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -131,7 +131,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A5C00000000000000000900 /* LaunchpadAwakenerAppCore in Frameworks */,
+				1A5C00000000000000000900 /* LaunchpadAwakenerAppUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -232,7 +232,7 @@
 			);
 			name = LaunchpadAwakener;
 			packageProductDependencies = (
-				1A5C00000000000000000800 /* LaunchpadAwakenerAppCore */,
+				1A5C00000000000000000800 /* LaunchpadAwakenerAppUI */,
 			);
 			productName = LaunchpadAwakener;
 			productReference = 1A5C00000000000000000200 /* LaunchpadAwakener.app */;
@@ -858,9 +858,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		1A5C00000000000000000800 /* LaunchpadAwakenerAppCore */ = {
+		1A5C00000000000000000800 /* LaunchpadAwakenerAppUI */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = LaunchpadAwakenerAppCore;
+			productName = LaunchpadAwakenerAppUI;
 		};
 		1A5C00000000000000000801 /* LaunchpadAwakenerDaemonCore */ = {
 			isa = XCSwiftPackageProductDependency;

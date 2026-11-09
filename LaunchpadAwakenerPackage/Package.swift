@@ -22,7 +22,10 @@ let package = Package(
         .macOS(.v15),
     ],
     products: [
-        // Linked by the app target.
+        // Linked by the app target, and the only product it links: the app core comes with it. A second
+        // product on the app target risks Xcode linking the payload framework into the app as well.
+        .library(name: "LaunchpadAwakenerAppUI", targets: ["LaunchpadAwakenerAppUI"]),
+        // The app's logic, for its tests; the app target reaches it through LaunchpadAwakenerAppUI.
         .library(name: "LaunchpadAwakenerAppCore", targets: ["LaunchpadAwakenerAppCore"]),
         // Linked by the privileged daemon target.
         .library(name: "LaunchpadAwakenerDaemonCore", targets: ["LaunchpadAwakenerDaemonCore"]),
@@ -58,6 +61,23 @@ let package = Package(
         // The standalone app's global shortcut: a recorder for its settings and a Carbon hot key, which
         // needs no permission. Only the standalone module links it.
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", from: "3.1.0"),
+        // The two apps' interfaces are AppKit on the same stack as the scaffold's projects. None of
+        // these reaches the payload, the daemon or the text input helper.
+        //
+        // Xibless base classes, the `hierarchy {}` DSL, stacks, and builders for toolbars and menus.
+        // The trait is required: this package links AppKitPlus itself, and without the trait
+        // UIFoundation declares a second `NSEdgeInsets: Equatable`, so `==` turns ambiguous wherever both
+        // are visible. Xcode does not rebuild already-built dependencies when a trait changes: clear
+        // the derived data after changing the trait list.
+        .package(url: "https://github.com/Mx-Iris/UIFoundation", from: "0.44.0", traits: ["AppKitPlus"]),
+        // UIKit's APIs spelled the AppKit way: diffable data sources, cell registrations, content
+        // configurations. A binary framework with no API or ABI stability promised yet, and `from:`
+        // accepts every later 0.x minor, so read the release notes before updating.
+        .package(url: "https://github.com/AppKitSupportProgram/AppKitPlus-Release", from: "0.21.0"),
+        // `observe {}`, `UIBinding` and the AppKit presentation and control bindings. The fork tracks
+        // upstream and adds the AppKit bindings this package uses (table and outline selection).
+        .package(url: "https://github.com/MxIris-Library-Forks/swift-navigation", from: "2.11.101"),
+        .package(url: "https://github.com/SnapKit/SnapKit", .upToNextMajor(from: "6.0.0")),
     ],
     targets: [
         // Names, versions and paths shared by all three binaries. No dependencies on purpose —
@@ -100,6 +120,37 @@ let package = Package(
                 .product(name: "InjectionServiceInterface", package: "swift-helper-service"),
                 .product(name: "FilesServiceInterface", package: "swift-helper-service"),
                 .product(name: "InjectedEndpointRegistryServiceInterface", package: "swift-helper-service"),
+            ]
+        ),
+
+        // AppKit pieces both apps use: the System Settings–style grouped form, windows sized to their
+        // content, and whether a launch is the one at login. Linked by the injected app's interface and
+        // by the standalone app; never by the payload or the daemon.
+        .target(
+            name: "LaunchpadAwakenerSharedUI",
+            dependencies: [
+                .product(name: "UIFoundation", package: "UIFoundation"),
+                .product(name: "UIFoundationToolbox", package: "UIFoundation"),
+                .product(name: "AppKitPlus", package: "AppKitPlus-Release"),
+                .product(name: "AppKitNavigation", package: "swift-navigation"),
+                .product(name: "SnapKit", package: "SnapKit"),
+            ]
+        ),
+
+        // The injected app's interface: its delegate, the control panel, the menu bar item and the
+        // organizer window. What they show and decide comes from the app core; this module only lays it
+        // out and forwards the user's actions.
+        .target(
+            name: "LaunchpadAwakenerAppUI",
+            dependencies: [
+                "LaunchpadAwakenerAppCore",
+                "LaunchpadAwakenerSharedUI",
+                .product(name: "OSToolbox", package: "FrameworkToolbox"),
+                .product(name: "UIFoundation", package: "UIFoundation"),
+                .product(name: "UIFoundationToolbox", package: "UIFoundation"),
+                .product(name: "AppKitPlus", package: "AppKitPlus-Release"),
+                .product(name: "AppKitNavigation", package: "swift-navigation"),
+                .product(name: "SnapKit", package: "SnapKit"),
             ]
         ),
 
@@ -160,14 +211,21 @@ let package = Package(
         ),
 
         // Standalone app side: the springboard's other host — a window of its own over the whole screen,
-        // the replicas of the Dock's layer classes, the wallpaper from its file. Links AppKit.
+        // the replicas of the Dock's layer classes, the wallpaper from its file — and the app around it:
+        // its delegate, main menu and settings window. Links AppKit.
         .target(
             name: "LaunchpadAwakenerStandaloneCore",
             dependencies: [
                 "LaunchpadAwakenerPrivateInterfaces",
                 "LaunchpadAwakenerSpringboardCore",
+                "LaunchpadAwakenerSharedUI",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
+                .product(name: "UIFoundation", package: "UIFoundation"),
+                .product(name: "UIFoundationToolbox", package: "UIFoundation"),
+                .product(name: "AppKitPlus", package: "AppKitPlus-Release"),
+                .product(name: "AppKitNavigation", package: "swift-navigation"),
+                .product(name: "SnapKit", package: "SnapKit"),
             ],
             linkerSettings: linkingPrivateFrameworks(["IconServices", "IconFoundation", "SkyLight"])
         ),
@@ -206,6 +264,13 @@ let package = Package(
         .testTarget(
             name: "LaunchpadAwakenerStandaloneCoreTests",
             dependencies: ["LaunchpadAwakenerStandaloneCore"]
+        ),
+
+        // The shared AppKit pieces' rules: the grouped form's rows and separators, where a window sized
+        // to its content opens, how a launch at login is told apart. Nothing here goes on screen.
+        .testTarget(
+            name: "LaunchpadAwakenerSharedUITests",
+            dependencies: ["LaunchpadAwakenerSharedUI"]
         ),
 
         // The app's decision-making: daemon repair, which targets to inject, when displayed state has

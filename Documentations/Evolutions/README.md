@@ -11,4 +11,4 @@
 | 0005 | [在注入版 App 里整理 Launchpad 的布局](0005-launchpad-organizer.md) | Implemented |
 | 0006 | [用 ObjCRuntimeToolbox 改写 hook 与私有调用](0006-objc-runtime-toolbox.md) | Implemented |
 | draft | [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md) | In Progress |
-| draft | [两个 App 的界面改用 AppKit 重写，不再用 SwiftUI](draft-appkit-rewrite.md) | Accepted |
+| draft | [两个 App 的界面改用 AppKit 重写，不再用 SwiftUI](draft-appkit-rewrite.md) | In Progress |
