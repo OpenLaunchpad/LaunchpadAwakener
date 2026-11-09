@@ -37,6 +37,10 @@ package enum LaunchpadStoreError: Error, Equatable {
     case itemNotFound(LaunchpadItemIdentifier)
     case unexpectedItemType(LaunchpadItemIdentifier, expected: String)
     case missingRoot
+    /// A new folder needs two applications or more, as 15 never had a folder with fewer.
+    case tooFewApplicationsForFolder
+    /// An arrangement must hold exactly the items its page or folder holds now.
+    case arrangementDoesNotMatch(LaunchpadItemIdentifier)
 }
 
 /// The layout database this project owns; the counterpart of macOS 15's `LPStorage`.

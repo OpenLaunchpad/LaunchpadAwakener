@@ -80,6 +80,12 @@ actor PayloadPeer {
         peer.setMessageHandler(PayloadStatusRequest.self) { _ in
             await PayloadPeer.shared.currentStatus()
         }
+        peer.setMessageHandler(LayoutSnapshotRequest.self) { request in
+            await LayoutOrganizerService.reply(to: request)
+        }
+        peer.setMessageHandler(LayoutEditRequest.self) { request in
+            await LayoutOrganizerService.reply(to: request)
+        }
     }
 
     private func currentStatus() -> PayloadStatus {

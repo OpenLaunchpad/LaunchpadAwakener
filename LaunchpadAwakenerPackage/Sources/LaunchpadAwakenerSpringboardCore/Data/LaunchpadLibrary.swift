@@ -70,6 +70,14 @@ package actor LaunchpadLibrary {
     private var pendingReconciliation: Task<Void, Never>?
 
     package private(set) var layout: LaunchpadLayout = .empty
+    /// Goes up by one each time a different layout is published. Item identifiers are only good for the
+    /// layout they came with, so an edit worked out from an older one is turned away.
+    package private(set) var revision = 0
+
+    /// The published layout and its revision, read together.
+    package var publishedLayout: (layout: LaunchpadLayout, revision: Int) {
+        (layout, revision)
+    }
 
     package init(configuration: Configuration, layoutHandler: @escaping @Sendable (LaunchpadLayout) async -> Void) {
         self.configuration = configuration
@@ -203,12 +211,14 @@ package actor LaunchpadLibrary {
         let newLayout = try store.layout().locatingBundles { bundleURL(for: $0) }
         guard newLayout != layout else { return }
         layout = newLayout
+        revision += 1
         #log(.info, "Layout: \(newLayout.pages.count, privacy: .public) page(s), \(newLayout.folders.count, privacy: .public) folder(s), \(newLayout.applications.count, privacy: .public) application(s)")
         await layoutHandler(newLayout)
     }
 }
 
-/// One change made by hand — dragging or renaming — to apply to the stored layout.
+/// One change made by hand — dragging or renaming in the springboard, or in the app's organizer — to
+/// apply to the stored layout.
 package enum LaunchpadEdit: Sendable, Equatable {
     case move(LaunchpadItemIdentifier, toIndex: Int, onPage: LaunchpadItemIdentifier)
     /// `draggedItemIndex` is where the dragged application goes in the new folder: 1 after the target, 0 before.
@@ -219,6 +229,30 @@ package enum LaunchpadEdit: Sendable, Equatable {
     case renameFolder(LaunchpadItemIdentifier, title: String)
     /// The application was deleted from the disk; `folder` is the folder it was in, if any.
     case removeApplication(LaunchpadItemIdentifier, folder: LaunchpadItemIdentifier?)
+    /// To the end of a page of the springboard, in this order, out of any folder.
+    case moveItemsToEndOfPage([LaunchpadItemIdentifier], page: LaunchpadItemIdentifier)
+    /// Onto a new page after the last one, in this order.
+    case moveItemsToNewLastPage([LaunchpadItemIdentifier])
+    /// Applications to the end of a folder, in this order.
+    case moveItemsIntoFolder([LaunchpadItemIdentifier], folder: LaunchpadItemIdentifier)
+    /// A new folder of two applications or more, where the first of them was.
+    case makeFolderContaining([LaunchpadItemIdentifier], title: String)
+    /// The folder's applications take its place, and the folder goes.
+    case dissolveFolder(LaunchpadItemIdentifier)
+    /// The items of a page of the springboard, or the applications of a folder, in a new order.
+    case arrange(LaunchpadItemIdentifier, order: [LaunchpadItemIdentifier])
+}
+
+/// What became of a batch of edits.
+package enum LaunchpadEditBatchResult: Sendable, Equatable {
+    /// All of them were stored, together, and the layout of `revision` published.
+    case applied(revision: Int)
+    /// None was: they were worked out from an older layout than the one of `currentRevision`.
+    case staleRevision(currentRevision: Int)
+    /// None was: one of them failed, and the layout is as it was.
+    case failed(description: String)
+    /// The layout has not been loaded.
+    case unavailable
 }
 
 extension LaunchpadLibrary {
@@ -239,29 +273,72 @@ extension LaunchpadLibrary {
     @discardableResult
     package func apply(_ edit: LaunchpadEdit) async -> Bool {
         guard let store = currentStore else { return false }
-        let itemsPerPage = itemsPerPage
         do {
-            switch edit {
-            case let .move(itemIdentifier, targetIndex, pageIdentifier):
-                try store.moveItem(itemIdentifier, toIndex: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
-            case let .makeFolder(draggedItem, targetItem, title, draggedItemIndex):
-                try store.makeFolder(merging: draggedItem, with: targetItem, title: title, draggedItemIndex: draggedItemIndex, itemsPerPage: itemsPerPage)
-            case let .moveIntoFolder(itemIdentifier, folderIdentifier):
-                try store.moveItem(itemIdentifier, intoFolder: folderIdentifier, itemsPerPage: itemsPerPage)
-            case let .moveOutOfFolder(itemIdentifier, targetIndex, pageIdentifier):
-                try store.moveItem(itemIdentifier, outOfFolderTo: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
-            case let .moveToNewLastPage(itemIdentifier):
-                try store.moveItemToNewLastPage(itemIdentifier, itemsPerPage: itemsPerPage)
-            case let .renameFolder(folderIdentifier, title):
-                try store.renameFolder(folderIdentifier, to: title)
-            case let .removeApplication(itemIdentifier, folderIdentifier):
-                try store.removeApplication(itemIdentifier, fromFolder: folderIdentifier, itemsPerPage: itemsPerPage)
-            }
+            try Self.apply(edit, to: store, itemsPerPage: itemsPerPage)
             try await publishCurrentLayout()
             return true
         } catch {
             logEditFailure(edit, error: error)
             return false
+        }
+    }
+
+    /// Applies `edits` in order, all or none, provided they were worked out from the layout of
+    /// `expectedRevision`; publishes the result once.
+    package func apply(_ edits: [LaunchpadEdit], expectedRevision: Int) async -> LaunchpadEditBatchResult {
+        guard let store = currentStore else { return .unavailable }
+        guard expectedRevision == revision else {
+            #log(.info, "Turned away \(edits.count, privacy: .public) edit(s) worked out from revision \(expectedRevision, privacy: .public); the layout is at \(self.revision, privacy: .public)")
+            return .staleRevision(currentRevision: revision)
+        }
+        do {
+            try store.performTransaction {
+                for edit in edits {
+                    try Self.apply(edit, to: store, itemsPerPage: itemsPerPage)
+                }
+            }
+        } catch {
+            #log(.error, "Could not apply \(edits.count, privacy: .public) edit(s) together: \(String(describing: error), privacy: .public)")
+            return .failed(description: String(describing: error))
+        }
+        do {
+            try await publishCurrentLayout()
+        } catch {
+            #log(.error, "Stored \(edits.count, privacy: .public) edit(s) but could not publish the layout: \(String(describing: error), privacy: .public)")
+            return .failed(description: String(describing: error))
+        }
+        #log(.info, "Applied \(edits.count, privacy: .public) edit(s) together; the layout is at revision \(self.revision, privacy: .public)")
+        return .applied(revision: revision)
+    }
+
+    private static func apply(_ edit: LaunchpadEdit, to store: LaunchpadStore, itemsPerPage: Int) throws {
+        switch edit {
+        case let .move(itemIdentifier, targetIndex, pageIdentifier):
+            try store.moveItem(itemIdentifier, toIndex: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
+        case let .makeFolder(draggedItem, targetItem, title, draggedItemIndex):
+            try store.makeFolder(merging: draggedItem, with: targetItem, title: title, draggedItemIndex: draggedItemIndex, itemsPerPage: itemsPerPage)
+        case let .moveIntoFolder(itemIdentifier, folderIdentifier):
+            try store.moveItem(itemIdentifier, intoFolder: folderIdentifier, itemsPerPage: itemsPerPage)
+        case let .moveOutOfFolder(itemIdentifier, targetIndex, pageIdentifier):
+            try store.moveItem(itemIdentifier, outOfFolderTo: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
+        case let .moveToNewLastPage(itemIdentifier):
+            try store.moveItemToNewLastPage(itemIdentifier, itemsPerPage: itemsPerPage)
+        case let .renameFolder(folderIdentifier, title):
+            try store.renameFolder(folderIdentifier, to: title)
+        case let .removeApplication(itemIdentifier, folderIdentifier):
+            try store.removeApplication(itemIdentifier, fromFolder: folderIdentifier, itemsPerPage: itemsPerPage)
+        case let .moveItemsToEndOfPage(itemIdentifiers, pageIdentifier):
+            try store.moveItems(itemIdentifiers, toEndOfPage: pageIdentifier, itemsPerPage: itemsPerPage)
+        case let .moveItemsToNewLastPage(itemIdentifiers):
+            try store.moveItemsToNewLastPage(itemIdentifiers, itemsPerPage: itemsPerPage)
+        case let .moveItemsIntoFolder(itemIdentifiers, folderIdentifier):
+            try store.moveItems(itemIdentifiers, intoFolder: folderIdentifier, itemsPerPage: itemsPerPage)
+        case let .makeFolderContaining(itemIdentifiers, title):
+            try store.makeFolder(containing: itemIdentifiers, title: title, itemsPerPage: itemsPerPage)
+        case let .dissolveFolder(folderIdentifier):
+            try store.dissolveFolder(folderIdentifier, itemsPerPage: itemsPerPage)
+        case let .arrange(containerIdentifier, orderedItems):
+            try store.arrangeItems(of: containerIdentifier, inOrder: orderedItems, itemsPerPage: itemsPerPage)
         }
     }
 }

@@ -212,10 +212,12 @@ private struct GeneralSection: View {
 
 // MARK: - Launchpad
 
-/// What the Dock does with Apps: the kill switch, and whether this Dock build is one the payload knows.
+/// What the Dock does with Apps: the kill switch, whether this Dock build is one the payload knows, and
+/// the way into organizing the layout.
 private struct LaunchpadSection: View {
     @Environment(PayloadInjectionCoordinator.self) private var injectionCoordinator
     @Environment(KillSwitchController.self) private var killSwitchController
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Section {
@@ -229,6 +231,16 @@ private struct LaunchpadSection: View {
                 StatusIndicator(text: dockBuildDescription, tint: dockBuildTint)
             }
             .help(dockBuildHelp)
+
+            LabeledContent {
+                Button("Organize…") {
+                    openWindow(id: WindowIdentifier.organizer)
+                }
+            } label: {
+                Text("Layout")
+                Text("Move many apps at once, manage folders, group by category.")
+            }
+            .help("Opens a window listing Launchpad's pages and folders. Changes go to the Dock right away and show the next time Launchpad opens.")
         } header: {
             Label("Launchpad", systemImage: "square.grid.3x3.fill")
         }
@@ -641,6 +653,11 @@ struct MenuBarContent: View {
             openWindow(id: WindowIdentifier.main)
         }
         .keyboardShortcut(",")
+
+        Button("Organize Launchpad…") {
+            ApplicationActivationPolicyController.activateForWindowPresentation()
+            openWindow(id: WindowIdentifier.organizer)
+        }
 
         Divider()
 

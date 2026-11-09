@@ -227,6 +227,26 @@ public final class PayloadInjectionCoordinator {
     @ObservationIgnored
     private var processIdentifiersBeingRestarted: Set<pid_t> = []
 
+    /// The channel the organizer edits the Dock's layout through, or why there is none to use.
+    ///
+    /// Only a payload of this app's build answers the layout requests, and only one whose hooks went in
+    /// has a layout library running. There is one Dock per login session, so the first payload is it.
+    func layoutChannelLookup() -> LayoutChannelLookup {
+        guard let payload = residentPayloads.first else {
+            return .unavailable(injectedProcessIdentifiers.isEmpty ? .notInjected : .payloadNotAnswering)
+        }
+        if payload.isStale {
+            return .unavailable(.stalePayload)
+        }
+        guard payload.areHooksInstalled else {
+            return .unavailable(.hooksNotInstalled)
+        }
+        guard let channel = channelsByHostProcessIdentifier[payload.hostProcessIdentifier] else {
+            return .unavailable(.payloadNotAnswering)
+        }
+        return .available(channel)
+    }
+
     /// Every payload this app can currently reach, sorted by host.
     ///
     /// Populated by injecting and by ``reconnectToResidentPayloads()``, and kept current by

@@ -12,7 +12,8 @@
 | 位置 | 是什么 |
 |---|---|
 | `LaunchpadAwakener/LaunchpadAwakenerApp.swift` | `ApplicationDelegate`：持有全部控制器，跑启动流程（检查 daemon → 找已在的 payload → 注入），处理「App 已在运行时再打开」 |
-| `LaunchpadAwakener/MainView.swift` | 窗口：状态横幅，以及常规（开机启动、daemon、输入法辅助进程）、Launchpad、注入、错误四节，每节是一个视图结构体；菜单栏菜单 |
+| `LaunchpadAwakener/MainView.swift` | 窗口：状态横幅，以及常规（开机启动、daemon、输入法辅助进程）、Launchpad（退回开关、Dock 构建、打开整理窗口）、注入、错误四节，每节是一个视图结构体；菜单栏菜单 |
+| `LaunchpadAwakener/OrganizerView.swift` 等 | 整理 Launchpad 的窗口，见[它的实现说明](LaunchpadOrganizer.md) |
 | `AppCore/PayloadInjectionCoordinator.swift` | 暂存、注入、自动再注入、重启 Dock、payload 通道、状态刷新、闪退保护 |
 | `AppCore/PrivilegedDaemonController.swift` | daemon 的登记与连接；`ensureDaemonUsable()` 连不上或版本不对就重装，60 秒冷却 |
 | `AppCore/ControlPanelReadiness.swift` | 横幅说什么：按顺序检查，返回第一个挡路的原因 |

@@ -102,6 +102,26 @@ actor PayloadChannel {
         }
     }
 
+    /// How long the layout may take to come back. A few hundred applications are tens of kilobytes.
+    static let layoutSnapshotTimeLimit = Duration.seconds(5)
+    /// How long a batch of layout edits may take: the library stores them in one transaction, then
+    /// publishes the layout to the springboard.
+    static let layoutEditTimeLimit = Duration.seconds(15)
+
+    func fetchLayout(knownRevision: Int?) async throws -> LayoutSnapshotReply {
+        guard let peer else { throw ChannelError.notConnected }
+        return try await withTimeLimit(Self.layoutSnapshotTimeLimit) {
+            try await peer.send(LayoutSnapshotRequest(knownRevision: knownRevision))
+        }
+    }
+
+    func applyLayoutEdits(_ edits: [LayoutEdit], expectedRevision: Int) async throws -> LayoutEditReply {
+        guard let peer else { throw ChannelError.notConnected }
+        return try await withTimeLimit(Self.layoutEditTimeLimit) {
+            try await peer.send(LayoutEditRequest(expectedRevision: expectedRevision, edits: edits))
+        }
+    }
+
     func close() async {
         await peer?.cancel()
         peer = nil

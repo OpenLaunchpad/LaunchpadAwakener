@@ -210,6 +210,146 @@ extension LaunchpadStore {
         }
     }
 
+    // MARK: - Arranging several items at once
+
+    /// Puts `itemIdentifiers`, in this order, at the end of the root page `pageIdentifier`, taking them out
+    /// of any folder; what does not fit flows on to the next page, in order. A folder left with one
+    /// application or none is dissolved.
+    package func moveItems(_ itemIdentifiers: [LaunchpadItemIdentifier], toEndOfPage pageIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
+        try performTransaction {
+            guard try type(of: pageIdentifier) == .page, try parent(of: pageIdentifier) == rootIdentifier else {
+                throw LaunchpadStoreError.unexpectedItemType(pageIdentifier, expected: "page of the springboard")
+            }
+            try appendItems(Self.withoutRepeats(itemIdentifiers), to: pageIdentifier, itemsPerPage: itemsPerPage)
+        }
+    }
+
+    /// Puts `itemIdentifiers`, in this order, on a new page after the last one.
+    package func moveItemsToNewLastPage(_ itemIdentifiers: [LaunchpadItemIdentifier], itemsPerPage: Int) throws {
+        try performTransaction {
+            let newPage = try appendPage(to: rootIdentifier)
+            try appendItems(Self.withoutRepeats(itemIdentifiers), to: newPage, itemsPerPage: itemsPerPage)
+        }
+    }
+
+    /// Puts the applications `itemIdentifiers`, in this order, at the end of `folderIdentifier`; those
+    /// already in it stay where they are.
+    package func moveItems(_ itemIdentifiers: [LaunchpadItemIdentifier], intoFolder folderIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
+        try performTransaction {
+            for itemIdentifier in Self.withoutRepeats(itemIdentifiers) where try containingFolder(of: itemIdentifier) != folderIdentifier {
+                guard try type(of: itemIdentifier) == .application else {
+                    throw LaunchpadStoreError.unexpectedItemType(itemIdentifier, expected: "application")
+                }
+                try moveItem(itemIdentifier, intoFolder: folderIdentifier, itemsPerPage: itemsPerPage)
+            }
+        }
+    }
+
+    /// Makes a folder titled `title` of the applications `itemIdentifiers`, in this order. It goes where
+    /// the first of them was — or, when that one was in a folder, just after that folder.
+    @discardableResult
+    package func makeFolder(containing itemIdentifiers: [LaunchpadItemIdentifier], title: String, itemsPerPage: Int) throws -> LaunchpadItemIdentifier {
+        try performTransaction {
+            let applications = Self.withoutRepeats(itemIdentifiers)
+            guard applications.count >= 2 else { throw LaunchpadStoreError.tooFewApplicationsForFolder }
+            for application in applications where try type(of: application) != .application {
+                throw LaunchpadStoreError.unexpectedItemType(application, expected: "application")
+            }
+            let firstApplicationFolder = try containingFolder(of: applications[0])
+            let anchor = firstApplicationFolder ?? applications[0]
+            let anchorPage = try parent(of: anchor)
+            let folder = try appendFolder(titled: title, to: anchorPage)
+            var pageChildren = try children(of: anchorPage).filter { $0 != folder.folder }
+            guard let anchorIndex = pageChildren.firstIndex(of: anchor) else { throw LaunchpadStoreError.itemNotFound(anchor) }
+            // In place of the first application, which is about to leave; after the folder it was in.
+            pageChildren.insert(folder.folder, at: firstApplicationFolder == nil ? anchorIndex : anchorIndex + 1)
+            try setChildren(pageChildren, of: anchorPage)
+            for application in applications {
+                try moveItem(application, intoFolder: folder.folder, itemsPerPage: itemsPerPage)
+            }
+            return folder.folder
+        }
+    }
+
+    /// Takes the applications out of `folderIdentifier`, in their order, to where the folder was, and
+    /// removes the folder.
+    package func dissolveFolder(_ folderIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
+        try performTransaction {
+            guard try type(of: folderIdentifier) == .folder else {
+                throw LaunchpadStoreError.unexpectedItemType(folderIdentifier, expected: "folder")
+            }
+            let folderPage = try parent(of: folderIdentifier)
+            let applications = try children(of: folderIdentifier).flatMap { try children(of: $0) }
+            for application in applications {
+                try detach(application)
+            }
+            var pageChildren = try children(of: folderPage)
+            let folderIndex = pageChildren.firstIndex(of: folderIdentifier) ?? pageChildren.count
+            pageChildren.insert(contentsOf: applications, at: folderIndex)
+            try setChildren(pageChildren, of: folderPage)
+            // Tidying up takes away the emptied folder and its pages.
+            try tidyUp(itemsPerPage: itemsPerPage)
+        }
+    }
+
+    /// Puts the items of a root page, or the applications of a folder across its pages, in the order of
+    /// `orderedItems`, which must hold exactly those items.
+    package func arrangeItems(of containerIdentifier: LaunchpadItemIdentifier, inOrder orderedItems: [LaunchpadItemIdentifier], itemsPerPage: Int) throws {
+        try performTransaction {
+            switch try type(of: containerIdentifier) {
+            case .page:
+                guard Self.holdTheSameItems(try children(of: containerIdentifier), orderedItems) else {
+                    throw LaunchpadStoreError.arrangementDoesNotMatch(containerIdentifier)
+                }
+                try setChildren(orderedItems, of: containerIdentifier)
+            case .folder:
+                var folderPages = try children(of: containerIdentifier)
+                guard Self.holdTheSameItems(try folderPages.flatMap { try children(of: $0) }, orderedItems) else {
+                    throw LaunchpadStoreError.arrangementDoesNotMatch(containerIdentifier)
+                }
+                let capacity = max(itemsPerPage, 1)
+                let pageContents = stride(from: 0, to: orderedItems.count, by: capacity).map { start in
+                    Array(orderedItems[start..<min(start + capacity, orderedItems.count)])
+                }
+                while folderPages.count < pageContents.count {
+                    folderPages.append(try appendPage(to: containerIdentifier))
+                }
+                for (contents, folderPage) in zip(pageContents, folderPages) {
+                    try setChildren(contents, of: folderPage)
+                }
+            default:
+                throw LaunchpadStoreError.unexpectedItemType(containerIdentifier, expected: "page or folder")
+            }
+            try tidyUp(itemsPerPage: itemsPerPage)
+        }
+    }
+
+    /// Detaches `itemIdentifiers` and appends them to `pageIdentifier` in one go, so that what spills over
+    /// to the next page keeps their order; then dissolves the folders they leave almost empty.
+    private func appendItems(_ itemIdentifiers: [LaunchpadItemIdentifier], to pageIdentifier: LaunchpadItemIdentifier, itemsPerPage: Int) throws {
+        var sourceFolders: [LaunchpadItemIdentifier] = []
+        for itemIdentifier in itemIdentifiers {
+            if let sourceFolder = try containingFolder(of: itemIdentifier), !sourceFolders.contains(sourceFolder) {
+                sourceFolders.append(sourceFolder)
+            }
+            try detach(itemIdentifier)
+        }
+        try setChildren(try children(of: pageIdentifier) + itemIdentifiers, of: pageIdentifier)
+        try tidyUp(itemsPerPage: itemsPerPage)
+        for sourceFolder in sourceFolders where !itemIdentifiers.contains(sourceFolder) {
+            try dissolveIfAlmostEmpty(sourceFolder, itemsPerPage: itemsPerPage)
+        }
+    }
+
+    private static func withoutRepeats(_ itemIdentifiers: [LaunchpadItemIdentifier]) -> [LaunchpadItemIdentifier] {
+        var seenIdentifiers: Set<LaunchpadItemIdentifier> = []
+        return itemIdentifiers.filter { seenIdentifiers.insert($0).inserted }
+    }
+
+    private static func holdTheSameItems(_ currentItems: [LaunchpadItemIdentifier], _ orderedItems: [LaunchpadItemIdentifier]) -> Bool {
+        currentItems.count == orderedItems.count && Set(currentItems) == Set(orderedItems)
+    }
+
     // MARK: - Helpers
 
     /// Where a detached item waits until the same transaction attaches it again. Never a real parent.

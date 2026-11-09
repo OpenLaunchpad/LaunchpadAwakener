@@ -47,6 +47,18 @@ struct LaunchpadAwakenerApp: App {
         // quitting with the window open would have it restored straight past the suppression.
         .restorationBehavior(.disabled)
 
+        Window("Organize Launchpad", id: WindowIdentifier.organizer) {
+            OrganizerView()
+                .environment(applicationDelegate.organizer)
+                .environment(applicationDelegate.injectionCoordinator)
+                .onAppear { applicationDelegate.activationPolicyController.windowDidAppear() }
+                .onDisappear { applicationDelegate.activationPolicyController.windowDidDisappear() }
+        }
+        .defaultSize(width: 900, height: 620)
+        // Opened from the control panel or the menu bar, never by itself at launch.
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+
         MenuBarExtra {
             MenuBarContent()
                 .environment(applicationDelegate.daemonController)
@@ -61,6 +73,7 @@ struct LaunchpadAwakenerApp: App {
 
 enum WindowIdentifier {
     static let main = "main"
+    static let organizer = "organizer"
 }
 
 /// The menu bar icon, and the one view guaranteed to be alive while no window is open.
@@ -107,6 +120,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     let launchAtLoginController = LaunchAtLoginController()
     let textInputAgentController = TextInputAgentController()
     let killSwitchController = KillSwitchController()
+    let organizer: LaunchpadOrganizer
     let reopenRequest = ApplicationReopenRequest()
     let launchProgress = ApplicationLaunchProgress()
 
@@ -120,6 +134,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             targetMatchingRule: .executablePath("/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock"),
             injectionMethod: .dynamicLibraryLoad
         )
+        self.organizer = LaunchpadOrganizer(injectionCoordinator: injectionCoordinator)
         super.init()
     }
 

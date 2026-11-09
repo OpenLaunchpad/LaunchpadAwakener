@@ -51,7 +51,7 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 | `LaunchpadAwakenerStandalone/` | 独立版 App「Launchpad」的 SwiftUI 外壳：只有 App 结构体与图标 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerShared` | 服务名、版本、路径。**不依赖任何东西** |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerHookKit` | 带签名校验的 Objective-C 方法替换 |
-| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppCore` | daemon 生命周期与自愈、进程监视、注入编排、payload 通道的 App 一侧、控制面板要显示的状态 |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppCore` | daemon 生命周期与自愈、进程监视、注入编排、payload 通道的 App 一侧、控制面板要显示的状态、整理 Launchpad 窗口的逻辑 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadInterface` | payload 通道的请求与回报类型。App 与 payload 都链接它，只放请求类型 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerDaemonCore` | 组装特权 XPC 服务端 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore` | Launchpad 本身：布局库与界面层。经宿主接口 `SpringboardHost` 拿窗口、图层类、壁纸这些，不认识 Dock，不链接 AppKit |
