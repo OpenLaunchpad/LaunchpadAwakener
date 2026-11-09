@@ -101,3 +101,4 @@ payload、独立版与文本输入辅助进程里调用 Objective-C 私有方法
 | 2026-11-09 | 可能为空的 CF 指针（`CGImage`、`otherIconTintColor`）经 `DynamicObject` 按 `UnsafeRawPointer??` 取 | 按非可选的 `CGImage` 取，空指针会被当成有效引用 |
 | 2026-11-09 | 辅助进程读 `contextId` 不另加编码核对 | 无参 getter：`DynamicObject` 按真实签名取返回值，`asUInt32` 还核对返回值的大小；原来用 KVC 读，也没有核对。`_contextForLayerHosting` 照旧核对 |
 | 2026-11-09 | 文本输入辅助进程的 `NSDockTile` proxy 没有签名测试 | 这个模块没有测试 target；两个编码由 `Int`、`Bool` 推出，运行时 proxy 自己也会核对。两个方法在 27.2 的 AppKit 里声明在 `NSDockTile` 本身上 |
+| 2026-11-09 | 实现完成，第 7 步的测试机验证待做 | 包测试与两个 scheme 的构建都通过，payload 的链接清单与改动前一致；MacBook 正被 AppKit 重写那条线做交互测试，部署会打断它，26 虚拟机没有开机。没有合进主检出：主检出里有未提交的 `Package.swift` 与 `Package.resolved` 改动，挡住了快进 |
