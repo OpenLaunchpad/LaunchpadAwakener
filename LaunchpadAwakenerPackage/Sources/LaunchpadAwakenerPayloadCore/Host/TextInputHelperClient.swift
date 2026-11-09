@@ -1,8 +1,7 @@
 import CoreGraphics
 import Foundation
-import ObjCRuntimeToolbox
+import LaunchpadAwakenerPrivateInterfaces
 import LaunchpadAwakenerShared
-import ObjectiveC
 import OSToolbox
 import QuartzCore
 import XPC
@@ -113,28 +112,11 @@ final class TextInputHelperClient {
         }
     }
 
-    /// A `CALayerHost` showing the helper's field, once `-[CALayerHost setContextId:]` is the one this
-    /// payload knows; nil otherwise.
-    static func makeLayerHost(showing hosting: Hosting) -> CALayer? {
-        guard let layerHostClass else { return nil }
-        let hostLayer = layerHostClass.init()
-        guard let layerHost = CoreAnimationLayerHostImplementation(hostLayer) else { return nil }
-        layerHost.setContextId(hosting.contextIdentifier)
+    /// A `CALayerHost` showing the helper's field.
+    static func makeLayerHost(showing hosting: Hosting) -> CALayer {
+        let hostLayer = CALayerHost()
+        hostLayer.contextId = hosting.contextIdentifier
         return hostLayer
-    }
-
-    /// `CALayerHost`, once its `-setContextId:` matches; looked up once, and logged once when it does not.
-    private static let layerHostClass = findLayerHostClass()
-
-    private static func findLayerHostClass() -> CALayer.Type? {
-        guard
-            CoreAnimationLayerHostImplementation.isSupported,
-            let hostClass = NSClassFromString(CoreAnimationLayerHostImplementation.runtimeClassName) as? CALayer.Type
-        else {
-            #log(.error, "-[CALayerHost setContextId:] is missing or changed; the fields are edited here")
-            return nil
-        }
-        return hostClass
     }
 
     /// Posts a copy of `event` to the helper, marked with its window, as 15's Dock did; mouse events also
@@ -214,11 +196,4 @@ final class TextInputHelperClient {
         guard let symbol = dlsym(dlopen(nil, RTLD_NOW), "CGEventSetWindowLocation") else { return nil }
         return unsafeBitCast(symbol, to: SetWindowLocationFunction.self)
     }()
-}
-
-/// `CALayerHost`, which shows the layers of a context in another process.
-@RuntimeClassProxy("CALayerHost")
-protocol CoreAnimationLayerHost {
-    /// The context to show, by its identifier: here the layer-hosting context of the helper's window.
-    func setContextId(_ contextIdentifier: UInt32)
 }

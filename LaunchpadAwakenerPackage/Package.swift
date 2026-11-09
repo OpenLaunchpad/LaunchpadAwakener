@@ -8,6 +8,14 @@ import PackageDescription
 // privileged dependencies and the payload must stay as small as possible — it gets mapped into
 // someone else's process. The springboard itself is one module both of its hosts link: the payload
 // in the Dock and the standalone app.
+
+/// Links private frameworks whose classes `LaunchpadAwakenerPrivateInterfaces` declares. Their stubs are in
+/// the SDK's `System/Library/PrivateFrameworks`, which is not searched by default; the linker resolves the
+/// absolute path below inside the SDK. Every process that links these has the frameworks loaded already.
+func linkingPrivateFrameworks(_ frameworkNames: [String]) -> [LinkerSetting] {
+    [.unsafeFlags(["-F/System/Library/PrivateFrameworks"])] + frameworkNames.map { .linkedFramework($0) }
+}
+
 let package = Package(
     name: "LaunchpadAwakenerPackage",
     platforms: [
@@ -56,6 +64,18 @@ let package = Package(
         // anything heavier would end up inside the payload.
         .target(name: "LaunchpadAwakenerShared"),
 
+        // Declarations of the private Objective-C classes of IconServices, IconFoundation, SkyLight and
+        // QuartzCore that the springboard and its hosts call directly — exported classes, declared as macOS
+        // 26.6.2 and 27.2 implement them. No AppKit, since the payload imports this.
+        .target(name: "LaunchpadAwakenerPrivateInterfaces"),
+
+        // AppKit's private methods the text input helper calls, kept apart so that importing the module
+        // above never brings AppKit into the payload.
+        .target(
+            name: "LaunchpadAwakenerAppKitPrivateInterfaces",
+            dependencies: ["LaunchpadAwakenerPrivateInterfaces"]
+        ),
+
         // What the app and the payload say to each other over their direct XPC channel. Both sides
         // link this, so it holds request types and nothing else.
         .target(
@@ -103,19 +123,15 @@ let package = Package(
         // draws it: the Dock through the payload, or the standalone app. It reaches its host only
         // through `SpringboardHost`, and links neither AppKit nor anything Dock-specific, since the
         // payload carries it into the Dock.
-        //
-        // `ObjCRuntimeToolbox-Static` rather than the `.dynamic` product: the payload has to be
-        // self-contained, with nothing to find through @rpath inside the Dock. Its state is then per
-        // image, which is fine as long as each process embeds one copy — the payload in the Dock, the
-        // standalone app, the text input helper — and every module here takes the same product.
         .target(
             name: "LaunchpadAwakenerSpringboardCore",
             dependencies: [
                 // For the kill switch's path, which the app's window also toggles.
                 "LaunchpadAwakenerShared",
+                "LaunchpadAwakenerPrivateInterfaces",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
-                .product(name: "ObjCRuntimeToolbox-Static", package: "FrameworkToolbox"),
-            ]
+            ],
+            linkerSettings: linkingPrivateFrameworks(["IconServices"])
         ),
 
         // Payload side: what runs inside the host process, around the springboard — the Dock's side of
@@ -123,10 +139,16 @@ let package = Package(
         // mapped into a process that did not ask for it. `HelperPeer` and `HelperClient` are here
         // because the payload publishes an endpoint the app can reach it on; without that the app
         // cannot tell an injected Dock from an uninjected one, or say that the hooks did not go in.
+        //
+        // `ObjCRuntimeToolbox-Static` for the hooks and every call into the Dock's own classes, which no
+        // framework exports: rather than the `.dynamic` product, because the payload has to be
+        // self-contained, with nothing to find through @rpath inside the Dock. Its state is then per image,
+        // which is fine as long as the Dock holds one copy.
         .target(
             name: "LaunchpadAwakenerPayloadCore",
             dependencies: [
                 "LaunchpadAwakenerShared",
+                "LaunchpadAwakenerPrivateInterfaces",
                 "LaunchpadAwakenerSpringboardCore",
                 "LaunchpadAwakenerPayloadInterface",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
@@ -142,11 +164,12 @@ let package = Package(
         .target(
             name: "LaunchpadAwakenerStandaloneCore",
             dependencies: [
+                "LaunchpadAwakenerPrivateInterfaces",
                 "LaunchpadAwakenerSpringboardCore",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
-                .product(name: "ObjCRuntimeToolbox-Static", package: "FrameworkToolbox"),
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
-            ]
+            ],
+            linkerSettings: linkingPrivateFrameworks(["IconServices", "IconFoundation", "SkyLight"])
         ),
 
         // Text input helper: hosts the search and rename fields in a window that never goes on screen, so
@@ -154,9 +177,9 @@ let package = Package(
         .target(
             name: "LaunchpadAwakenerTextInputCore",
             dependencies: [
+                "LaunchpadAwakenerAppKitPrivateInterfaces",
                 "LaunchpadAwakenerShared",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
-                .product(name: "ObjCRuntimeToolbox-Static", package: "FrameworkToolbox"),
             ]
         ),
 

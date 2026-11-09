@@ -1,13 +1,13 @@
 import AppKit
-import ObjCRuntimeToolbox
+import LaunchpadAwakenerPrivateInterfaces
 import LaunchpadAwakenerSpringboardCore
-import ObjectiveC
 import OSToolbox
 
 /// The icon style the Dock would draw its tiles in, worked out without the Dock: SkyLight's icon
 /// appearance configuration, turned into an `ISImageDescriptor` by the Dock's own table
-/// (`/Volumes/RE/Dock/27.2/Notes/ECLayerReuse.md` 3.2, 3.3 "way B" and 5.5). Every private call is
-/// checked against its type encoding first; when one does not match, icons keep the default style.
+/// (`/Volumes/RE/Dock/27.2/Notes/ECLayerReuse.md` 3.2, 3.3 "way B" and 5.5). SkyLight, IconServices and
+/// IconFoundation export the classes used, so they are declared in `LaunchpadAwakenerPrivateInterfaces`
+/// and called directly.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "StandaloneIconStyle")
 @MainActor
 enum StandaloneIconStyle {
@@ -93,120 +93,40 @@ enum StandaloneIconStyle {
     // MARK: - SkyLight
 
     private static func fetchConfiguration() -> Configuration? {
-        guard
-            RuntimeMethodInspector.hasMethod(
-                className: SkyLightIconAppearanceConfigurationImplementation.runtimeClassName,
-                selector: NSSelectorFromString("fetchCurrentIconAppearanceConfiguration"),
-                matchingTypeEncoding: "@16@0:8",
-                isInstanceMethod: false
-            ),
-            let configurationObject = ObjC.SLSIconAppearanceConfiguration.fetchCurrentIconAppearanceConfiguration.asObject
-        else {
-            #log(.error, "SkyLight's icon appearance configuration is out of reach; icons use the default style")
-            return nil
-        }
-        guard
-            let configuration = SkyLightIconAppearanceConfigurationImplementation(configurationObject),
-            let iconAppearanceTheme = configuration.iconAppearanceTheme,
-            let appearanceTheme = configuration.appearanceTheme,
-            let iconTintColorName = configuration.iconTintColorName
-        else {
-            #log(.error, "SkyLight's icon appearance configuration changed; icons use the default style")
+        guard let configuration = SLSIconAppearanceConfiguration.fetchCurrentIconAppearanceConfiguration() else {
+            #log(.error, "SkyLight has no icon appearance configuration; icons use the default style")
             return nil
         }
         return Configuration(
-            iconAppearanceTheme: iconAppearanceTheme,
-            appearanceTheme: appearanceTheme,
-            iconTintColorName: iconTintColorName,
-            otherIconTintColor: otherIconTintColor(of: configurationObject)
+            iconAppearanceTheme: configuration.iconAppearanceTheme,
+            appearanceTheme: configuration.appearanceTheme,
+            iconTintColorName: configuration.iconTintColorName,
+            otherIconTintColor: configuration.otherIconTintColor
         )
-    }
-
-    /// `-[SLSIconAppearanceConfiguration otherIconTintColor]`, a `CGColorRef` — a pointer, whose encoding the
-    /// proxy macro does not derive — so it goes through `DynamicObject`, read as an optional raw pointer
-    /// because it is null when no custom colour is set.
-    private static func otherIconTintColor(of configuration: NSObject) -> CGColor? {
-        guard hasMethod(configuration, "otherIconTintColor", typeEncoding: "^{CGColor=}16@0:8") else { return nil }
-        let colorAddress: UnsafeRawPointer?? = ObjC(configuration).otherIconTintColor.asInferred()
-        return colorAddress.flatMap { $0 }.map { Unmanaged<CGColor>.fromOpaque($0).takeUnretainedValue() }
     }
 
     // MARK: - IconServices
 
     private static func makeDescriptor(settings: DescriptorSettings, configuration: Configuration) -> NSObject? {
-        guard let descriptorClass = NSClassFromString("ISImageDescriptor") as? NSObject.Type else { return nil }
-        let descriptor = descriptorClass.init()
-        guard
-            hasMethod(descriptor, "setAppearance:", typeEncoding: "v24@0:8q16"),
-            hasMethod(descriptor, "setAppearanceVariant:", typeEncoding: "v24@0:8q16")
-        else {
-            #log(.error, "ISImageDescriptor's appearance setters are missing or changed; icons use the default style")
-            return nil
+        let descriptor = ISImageDescriptor()
+        descriptor.appearance = settings.appearance
+        descriptor.appearanceVariant = settings.appearanceVariant
+        if settings.drawsBackground {
+            descriptor.background = 1
         }
-        ObjC(descriptor).setAppearance(settings.appearance)
-        ObjC(descriptor).setAppearanceVariant(settings.appearanceVariant)
-        if settings.drawsBackground, hasMethod(descriptor, "setBackground:", typeEncoding: "v24@0:8Q16") {
-            // `Q`: an unsigned word, so a `UInt`.
-            ObjC(descriptor).setBackground(UInt(1))
-        }
-        if settings.isTinted,
-           let tintColor = makeTintColor(configuration: configuration, isDark: settings.appearance == 1),
-           hasMethod(descriptor, "setTintColor:", typeEncoding: "v24@0:8@16")
-        {
-            ObjC(descriptor).setTintColor(tintColor)
+        if settings.isTinted {
+            descriptor.tintColor = makeTintColor(configuration: configuration, isDark: settings.appearance == 1)
         }
         return descriptor
     }
 
     /// The `IFColor` the Dock tints with: a named tint, the custom one, or the accent colour.
-    private static func makeTintColor(configuration: Configuration, isDark: Bool) -> NSObject? {
+    private static func makeTintColor(configuration: Configuration, isDark: Bool) -> IFColor? {
         if configuration.iconTintColorName == 10, let otherIconTintColor = configuration.otherIconTintColor {
-            return makeColor(wrapping: otherIconTintColor)
+            return IFColor(cgColor: otherIconTintColor)
         }
         let systemColor = systemColor(forTintColorName: configuration.iconTintColorName)
             ?? systemColor(forAccentColor: UserDefaults.standard.object(forKey: "AppleAccentColor") as? Int)
-        return makeColor(systemColor: systemColor, isDark: isDark)
+        return IFColor(systemColor: systemColor, appearance: isDark ? 1 : 0, contrast: 0, vibrancy: 0)
     }
-
-    /// `-[IFColor initWithSystemColor:appearance:contrast:vibrancy:]`, four `q`s, so four `Int`s.
-    private static func makeColor(systemColor: Int, isDark: Bool) -> NSObject? {
-        guard RuntimeMethodInspector.hasMethod(
-            className: "IFColor",
-            selector: NSSelectorFromString("initWithSystemColor:appearance:contrast:vibrancy:"),
-            matchingTypeEncoding: "@48@0:8q16q24q32q40"
-        ) else { return nil }
-        let appearance: Int = isDark ? 1 : 0
-        let contrast: Int = 0
-        let vibrancy: Int = 0
-        return ObjC.IFColor(systemColor: systemColor, appearance: appearance, contrast: contrast, vibrancy: vibrancy).asObject
-    }
-
-    /// `-[IFColor initWithCGColor:]`.
-    private static func makeColor(wrapping color: CGColor) -> NSObject? {
-        guard RuntimeMethodInspector.hasMethod(
-            className: "IFColor",
-            selector: NSSelectorFromString("initWithCGColor:"),
-            matchingTypeEncoding: "@24@0:8^{CGColor=}16"
-        ) else { return nil }
-        return ObjC.IFColor(CGColor: color).asObject
-    }
-
-    // MARK: - Checked calls
-
-    /// Whether `object`'s own class has `selectorName` with `expectedTypeEncoding`, frame offsets aside.
-    private static func hasMethod(_ object: NSObject, _ selectorName: String, typeEncoding expectedTypeEncoding: String) -> Bool {
-        guard
-            let objectClass = object_getClass(object),
-            let typeEncoding = RuntimeMethodInspector.typeEncoding(forClass: objectClass, selector: NSSelectorFromString(selectorName))
-        else { return false }
-        return ObjCTypeEncodingNormalization.matches(typeEncoding, expectedTypeEncoding)
-    }
-}
-
-/// SkyLight's icon appearance configuration, as `+fetchCurrentIconAppearanceConfiguration` returns it.
-@RuntimeClassProxy("SLSIconAppearanceConfiguration")
-protocol SkyLightIconAppearanceConfiguration {
-    var iconAppearanceTheme: UInt32? { get }
-    var appearanceTheme: UInt32? { get }
-    var iconTintColorName: UInt32? { get }
 }

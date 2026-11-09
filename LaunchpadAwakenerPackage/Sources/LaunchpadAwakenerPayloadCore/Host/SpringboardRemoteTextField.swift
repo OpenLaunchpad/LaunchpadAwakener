@@ -66,7 +66,8 @@ final class SpringboardRemoteTextField {
     }
 
     private func didBegin(with newHosting: TextInputHelperClient.Hosting?) {
-        guard !isEnded, let newHosting, let hostLayer = TextInputHelperClient.makeLayerHost(showing: newHosting) else { return }
+        guard !isEnded, let newHosting else { return }
+        let hostLayer = TextInputHelperClient.makeLayerHost(showing: newHosting)
         hosting = newHosting
         hostLayerDidChange?(hostLayer)
         // Typed, or focused, before the helper answered: the hosted field takes over from there.

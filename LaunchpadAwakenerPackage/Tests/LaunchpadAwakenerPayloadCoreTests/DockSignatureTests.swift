@@ -141,13 +141,6 @@ struct DockProxySignatureTests {
         ])
     }
 
-    @Test func layerHost() {
-        #expect(CoreAnimationLayerHostImplementation.runtimeClassName == "CALayerHost")
-        expectRequirements(CoreAnimationLayerHostImplementation.methodRequirements, toMatch: [
-            "setContextId:": "v20@0:8I16",
-        ])
-    }
-
     /// The methods checked before any hook goes in: the 23 the replica calls, each recorded once, so the
     /// log's `Checked 23 Dock method(s)` keeps meaning what the implementation note says it means.
     @Test func requiredMethodsAreTheOnesTheReplicaCalls() {

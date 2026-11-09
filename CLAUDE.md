@@ -50,6 +50,8 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 | `LaunchpadAwakenerTextInput/` | 文本输入辅助进程的 `main.swift`：嵌在 App 里的 LaunchAgent，替 Launchpad 托管搜索框与改名框，好让输入法能用 |
 | `LaunchpadAwakenerStandalone/` | 独立版 App「Launchpad」的 SwiftUI 外壳：只有 App 结构体与图标 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerShared` | 服务名、版本、路径。**不依赖任何东西** |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPrivateInterfaces` | 只有头文件：IconServices、IconFoundation、SkyLight、QuartzCore 导出的私有类的声明，供直接调用。不引入 AppKit |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppKitPrivateInterfaces` | 只有头文件：AppKit 私有方法的声明，只给文本输入辅助进程用 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppCore` | daemon 生命周期与自愈、进程监视、注入编排、payload 通道的 App 一侧、控制面板要显示的状态、整理 Launchpad 窗口的逻辑 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadInterface` | payload 通道的请求与回报类型。App 与 payload 都链接它，只放请求类型 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerDaemonCore` | 组装特权 XPC 服务端 |
@@ -60,7 +62,7 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 
 模块按「谁链接它」划分。App 不能链接 daemon 的特权依赖，payload 要尽量小 —— 它会被映射进一个并没有请求它的进程。
 
-调私有方法与 hook 都用 FrameworkToolbox 的 ObjCRuntimeToolbox，而且**只用 `ObjCRuntimeToolbox-Static` 这个产物**：payload 在 Dock 里没有 `@rpath` 可找，换成 `.dynamic` 的 `ObjCRuntimeToolbox` 它就加载不了。payload、独立版、文本输入辅助进程各嵌一份。
+hook 与 Dock 自己的类（Dock 不导出任何类）用 FrameworkToolbox 的 ObjCRuntimeToolbox，而且**只用 `ObjCRuntimeToolbox-Static` 这个产物**：payload 在 Dock 里没有 `@rpath` 可找，换成 `.dynamic` 的 `ObjCRuntimeToolbox` 它就加载不了。只有 payload 嵌它。
 
 两个与 Launchpad 有关的模块再按层分目录：
 
@@ -75,10 +77,11 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 
 调 Dock 内部方法一律经过 `PayloadCore/Host/`：先按类型编码校验，再调用。界面层要 Dock 的东西，一律经宿主接口要，不直接调 `Host/` 里的类型。
 
-私有方法的两种写法：
+私有方法的三种写法：
 
-- **类名固定的实例方法**写成 `@RuntimeClassProxy("类名")` 协议：选择子与编码由 Swift 声明推出，第一次调用前整批核对。Dock 的要把协议的 `methodRequirements` 加进 `DockHostInterface.requiredMethods`（或玻璃、Dock 显隐各自的清单），编码记进 `DockSignatureTests`。可选功能的方法单独成协议，一个不符整个协议就停用。
-- **类方法、init、经别的对象拿到的对象、带 block 的调用**用 `DynamicObject`（`ObjC.类名(…)`），调用前按对象的实际类核对编码。它按原样拷参数的字节、不做类型换算：每个参数都要是编码对应的那个 Swift 类型（`f` 只能传 `Float`，传 `CGFloat` 只会传进半个 double），超过三个字长的结构体（`CGRect`）包进 `NSValue`，block 要声明成 `@convention(block)`。返回 `CGImage`、`CGColor` 这类可能为空的指针时按 `UnsafeRawPointer??` 取。
+- **系统框架导出的类**（IconServices、IconFoundation、SkyLight、QuartzCore、AppKit）在两个 `PrivateInterfaces` 模块的头文件里声明，直接调用，**运行时不再核对**。所以新加的声明必须先在 26 与 27 上确认方法存在、签名一致（两台测试机上用 `osascript -l JavaScript` 调 `class_getInstanceMethod` 与 `method_getTypeEncoding`，它们没装开发工具也能跑），再在 `SystemPrivateInterfaceTests` 或 `StandaloneIconStyleTests` 里实际调用一次。私有框架经 `Package.swift` 的 `linkingPrivateFrameworks` 链接；类簇照样声明在对外的那个类上（`ISIcon` 的 `+alloc` 给的是 `ISIconFactory`）。
+- **Dock 里类名固定的实例方法**写成 `@RuntimeClassProxy("类名")` 协议：选择子与编码由 Swift 声明推出，第一次调用前整批核对。Dock 的要把协议的 `methodRequirements` 加进 `DockHostInterface.requiredMethods`（或玻璃、Dock 显隐各自的清单），编码记进 `DockSignatureTests`。可选功能的方法单独成协议，一个不符整个协议就停用。
+- **Dock 的类方法、init、经别的对象拿到的对象、带 block 的调用**用 `DynamicObject`（`ObjC.类名(…)`），调用前按对象的实际类核对编码。它按原样拷参数的字节、不做类型换算：每个参数都要是编码对应的那个 Swift 类型（`f` 只能传 `Float`，传 `CGFloat` 只会传进半个 double），超过三个字长的结构体（`CGRect`）包进 `NSValue`，block 要声明成 `@convention(block)`。返回 `CGImage`、`CGColor` 这类可能为空的指针时按 `UnsafeRawPointer??` 取。
 
 ## 构建
 

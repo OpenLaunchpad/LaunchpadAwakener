@@ -35,9 +35,10 @@ payload、独立版与文本输入辅助进程里调用 Objective-C 私有方法
 | 调用 | 写法 | 处数 |
 |------|------|------|
 | `-[DockAppEventHandler handleDockBarEvent:type:]`、`-[Spotlight sendLaunchAppsBrowsing]` | `@RuntimeClassHook` + `@RuntimeMethodReplacement`，`callOriginal` 带类型 | 2 |
-| 类名固定的实例方法：`WALayerKitWindow`、`DockBar`、`DisplayDescriptor`、`DockVisibility`、`ECGridLayer`、`ECImageGridLayer`、`ECShadowTextLayer`、`CALayer` 的 Dock 分类、玻璃的四个类、`CALayerHost`、`SLSIconAppearanceConfiguration`、`NSDockTile` | `@RuntimeClassProxy` | 37 |
-| 类方法（`+[CAFilter filterWithType:]`、`+[SLSIconAppearanceConfiguration fetchCurrentIconAppearanceConfiguration]`、`+[DockGlassMaterialLayerController currentDockMaterialEnvironmentWithColorScheme:]`）；经 Swift 对象链式取值（图标样式、卸载器）；类不固定的 IconServices 对象（图像只是遵循 `ISImage` 协议）；带 block 参数的 `uninstallBundleAtURL:handler:`；返回 `CGColor` 指针的 getter | `DynamicObject`，调用前照旧在对象自己的类上核对编码 | 20 |
-| alloc + init：`WALayerKitWindow`、`ECGridLayer`、`ECImageGridLayer`、玻璃控制器、`ISIcon`、`IFColor` 两个 | `DynamicObject`（0.17.2 修好 init 之后），调用前照旧核对编码；`CGRect` 参数包进 `NSValue` | 7 |
+| 系统框架导出的私有类：IconServices 的 `ISIcon`、`ISImageDescriptor`、`ISImage`，IconFoundation 的 `IFColor`，SkyLight 的 `SLSIconAppearanceConfiguration`，QuartzCore 的 `CAFilter`、`CALayerHost`、`CAContext`，AppKit 的 `NSDockTile`、`NSWindow` 私有方法 | 在 `LaunchpadAwakenerPrivateInterfaces` 与 `LaunchpadAwakenerAppKitPrivateInterfaces` 的头文件里声明，直接调用，运行时不核对 | 23 |
+| Dock 里类名固定的实例方法：`WALayerKitWindow`、`DockBar`、`DisplayDescriptor`、`DockVisibility`、`ECGridLayer`、`ECImageGridLayer`、`ECShadowTextLayer`、`CALayer` 的 Dock 分类、玻璃的四个类 | `@RuntimeClassProxy` | 31 |
+| Dock 的类方法 `+[DockGlassMaterialLayerController currentDockMaterialEnvironmentWithColorScheme:]`；经 Swift 对象链式取值（图标样式、卸载器）；带 block 参数的 `uninstallBundleAtURL:handler:` | `DynamicObject`，调用前照旧在对象自己的类上核对编码 | 8 |
+| Dock 的 alloc + init：`WALayerKitWindow`、`ECGridLayer`、`ECImageGridLayer`、玻璃控制器 | `DynamicObject`（0.17.2 修好 init 之后），调用前照旧核对编码；`CGRect` 参数包进 `NSValue` | 4 |
 | SkyLight、CoreGraphics、HIToolbox 经 `dlsym` 取的 C 函数 | 不变，不归 Objective-C 运行时管 | — |
 
 一个 proxy 协议只放同生共死的方法：proxy 在第一次使用时整批核对，一个不符整个协议停用。可选功能（玻璃、Dock 显隐）的方法单独成协议，即使同属 `DockBar`，缺了也只丢那个功能，和现在一样。
@@ -104,3 +105,4 @@ payload、独立版与文本输入辅助进程里调用 Objective-C 私有方法
 | 2026-11-09 | 实现完成，第 7 步的测试机验证待做 | 包测试与两个 scheme 的构建都通过，payload 的链接清单与改动前一致；MacBook 正被 AppKit 重写那条线做交互测试，部署会打断它，26 虚拟机没有开机。没有合进主检出：主检出里有未提交的 `Package.swift` 与 `Package.resolved` 改动，挡住了快进 |
 | 2026-11-09 | `ISIcon` 的初始化方法改回在 `alloc` 出的对象上核对 | 第一次部署时所有图标都取不到：`ISIcon` 是类簇，`initWithURL:` 在 `+alloc` 给出的 `ISIconFactory` 上，按类名核对找不到。同类排查：另外两处由「在对象上核对」改成按类名核对的（`DockVisibility`、`SLSIconAppearanceConfiguration`）查过，对象就是那个类本身，不受影响 |
 | 2026-11-09 | 测试机验证完成 | MacBook 27.2 与 26.6.2 虚拟机：23 个方法全部吻合、两个 hook 装上、离屏自检与改前一致，图标全部取到；独立版自检解析出图标样式。没有做交互验证 |
+| 2026-11-09 | 系统框架导出的私有类改为按头文件声明、直接调用，运行时不再核对；Dock 自己的类照旧经 proxy 与 `DynamicObject` 核对 | 用户选定，免得这些调用旁边还挂着类型编码字面量。这些类由各自的框架导出、SDK 里有可链接的存根，用到的 23 个方法在 26.6.2 与 27.2 上逐个核对过，存在且编码相同；Dock 不导出任何类，只能在运行时按名字找。代价是将来某个系统改了签名不会被拦下，靠开发机上的冒烟测试与适配新系统时的核对发现。生产代码里的编码字面量从 27 处减到 11 处，全在调 Dock 的地方 |
