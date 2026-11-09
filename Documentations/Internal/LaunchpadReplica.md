@@ -226,6 +226,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 各构建的离线核对（2026-11-08）：26.0 到 27.2 的 24 个正式构建都从 Apple 的完整更新包里取出 Dock，去重后 16 个二进制，逐个核对了复刻用到的类与方法的声明，并在 IDA 里读出两个全局变量；读法先在 27.2 上验证过，得出的正是档案里原有的两个地址。单元测试核对档案恰好覆盖这 24 个版本、地址落在可执行文件里且按指针对齐、`DockGlobals` 的类名与大版本相符。
 - macOS 26 虚拟机上的验证（2026-11-08，26.6.2 25G83，Ultra 上的 VirtualBuddy）：日志认出这个 Dock（`Dock build 2427.6 of macOS 26.6.2`）、23 个方法签名全部吻合、两个 hook 装上；用户打开过界面，能打开、关闭。第一次背景是灰的：自检报 `No wallpaper window on display 1`，原因是 26 的壁纸窗口归 Dock 自己，复刻只认 WindowManager 的；改为按属主进程挑窗口后，自检报 `wallpaper captured, 2982×1804 pixels`。挑窗口的规则用两台机器上实际读到的窗口列表写了回归测试。同一个构建随后部署到 27.2 的 MacBook：认出 27.2 的 Dock、23 个方法签名全部吻合、两个 hook 装上，自检报 `wallpaper captured, 3478×2160 pixels`，改过的 WindowManager 那条路径照常。两台都没有做交互验证。
 - 选中高亮（2026-11-08，MacBook 上，同样的截图与模拟按键）：用户指出搜索结果的选中项是白底；此前搜「日历」的截图里也是一块不透明的浅灰 232。修好后搜「s」，App Store 的高亮是压暗壁纸的深色圆角块，白色标题清楚，与 15 的截图一致；主页上用方向键选中的文件夹也是这样，图标与文件夹方块的样子没有变。拖放目标的方圆与透明、着色图标样式只有单元测试，没有在真机上看。
+- Dock 的显隐（2026-11-09，MacBook 上）：部署后 hook 装上，23 个 Dock 方法签名全部吻合，payload 启动时的日志确认 `DockVisibility` 的四个方法与 `_dockForceHiddenReasons` 都对得上，Dock 没有崩溃。文件夹开合时 Dock 滑走、滑回由用户在真机上亲眼看过。开了自动隐藏时 Dock 露出没有在真机上看过。
 - 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认气泡的样子与真删一个 App。
 
 ## 已知降级
@@ -241,6 +242,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 捏合在用户关掉 Spotlight 的捏合之前不生效；Dock 能否收到捏合事件尚未在真机上确认。26 与 27.0 上捏合不归 Spotlight 进程，而由 Dock 自己的 `Spotlight` 对象跟手打开系统的 Apps（`-[Spotlight fluidGestureStart:]` 一族，27.2 删掉了），不经过 `sendLaunchAppsBrowsing`，复刻拦不到；同样要先在触控板设置里关掉系统的捏合。
 - 点 Dock 上别的图标关闭界面后 0.5 秒内按 Launchpad 键或触发角，这一下会被当作 Apps 图标的请求吞掉。
 - 再次打开的位置不跨 Dock 重启保存（与 15 相同）。
+- Dock 在左右两侧时，满 5 行的文件夹常常不往下多伸那 30 点：15 的公式只在文件夹底边高于 30 点时才伸，侧放 Dock 时底边多半正好是 30。这时文件夹每页的格子比主页的矮 6 点，而界面层按主页的格子算拖动的落点与让位，会偏几点。这是按代码推断的，没有在真机上复现。
+- 文件夹开着时让 Dock 滑走，只在指针不在 Dock 上、Dock 没有键盘焦点时立刻开始，15 与 27.2 的 Dock 都是这样；Dock 藏起来时指针推到屏幕边会不会把它叫回来，没有验证。
 - 只在主显示器上显示。
 - 新装 App 的蓝点：从 Launchpad 以外启动后，要到下次打开 Launchpad 才消失，并且依赖 Spotlight 记下的使用时间；关掉 Spotlight 索引时只有从 Launchpad 启动才会清掉。测试版 App 的黄点与屏幕使用时间的沙漏标记没有做。
 - macOS 26 上没有玻璃背景：26 的 `DockGlassMaterialLayerController` 用的是 `configureUsingConfiguration:` 与 `rebuildLayersWithEnvironment:`，签名核对不过，`springboard-background` 设成 `glass` 也退回带 15 三个滤镜的模糊。
