@@ -271,6 +271,19 @@ private final class OrganizerItemsDataSource: NSTableViewDiffableDataSource<Int,
 /// An application or a folder in the list. Its content comes from a list content configuration.
 final class OrganizerItemCellView: NSTableCellView {
     static let iconSize: CGFloat = 28
+
+    /// The row height SwiftUI's list gave a 28-point icon; a folder's smaller symbol keeps it too.
+    private static let minimumHeight: CGFloat = 38
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        heightAnchor.constraint(greaterThanOrEqualToConstant: Self.minimumHeight).isActive = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 }
 
 /// A row of the list, with a hairline under it that starts where the text does, as the SwiftUI list drew.

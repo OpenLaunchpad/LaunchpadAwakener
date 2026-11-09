@@ -116,7 +116,10 @@ enum OrganizerMenus {
     }
 }
 
-/// Rebuilds a menu from the organizer's state each time it opens.
+/// Rebuilds a toolbar menu from the organizer's state each time it opens.
+///
+/// A menu toolbar item shows its menu as a pull-down, which takes the menu's first item for its title and
+/// never lists it; an empty item goes first so that every real item shows.
 @MainActor
 final class OrganizerMenuUpdater: NSObject, NSMenuDelegate {
     private let makeItems: () -> [NSMenuItem]
@@ -127,6 +130,6 @@ final class OrganizerMenuUpdater: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.autoenablesItems = false
-        menu.items = makeItems()
+        menu.items = [NSMenuItem(title: "", action: nil, keyEquivalent: "")] + makeItems()
     }
 }

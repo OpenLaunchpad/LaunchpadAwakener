@@ -152,10 +152,14 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
         launchpad.show(reason: "launched")
     }
 
-    /// The application menu's Settings… item, with the gear SwiftUI gave it.
+    /// The application menu's Settings… item, with the gear SwiftUI gave it. macOS 27 hides menu item
+    /// images unless asked to show them.
     private func makeSettingsItem() -> NSMenuItem {
         let settingsItem = MainMenu.Application.settings(action: #selector(showSettings(_:)), target: self)
-        settingsItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
+        settingsItem.image = NSImage(systemSymbolName: "gear", accessibilityDescription: nil)
+        if #available(macOS 27.0, *) {
+            settingsItem.preferredImageVisibility = .visible
+        }
         return settingsItem
     }
 

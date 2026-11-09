@@ -15,7 +15,7 @@ final class OrganizerSplitViewController: XiblessSplitViewController {
     @UIBindable private var viewModel: LaunchpadOrganizerViewModel
     private let injectionCoordinator: PayloadInjectionCoordinator
     private var refreshTask: Task<Void, Never>?
-    private var isPresentingConfirmations = false
+    private var isConfirmingDissolve = false
 
     init(viewModel: LaunchpadOrganizerViewModel, injectionCoordinator: PayloadInjectionCoordinator) {
         self.viewModel = viewModel
@@ -44,19 +44,30 @@ final class OrganizerSplitViewController: XiblessSplitViewController {
                 Task { await viewModel.groupByCategory(grouping) }
             }
         }
+        // The confirmation is an alert sheet begun by hand. swift-navigation 2.11.101 begins an alert's window
+        // as a plain sheet, past `beginSheetModal(for:)`, so the alert is never laid out and shows its
+        // nib's placeholders — an empty button, a help button, an unlabelled suppression checkbox.
+        observe { [weak self] in
+            guard let self, let folder = viewModel.folderBeingDissolved else { return }
+            confirmDissolving(folder)
+        }
+    }
+
+    private func confirmDissolving(_ folder: LaunchpadOrganizer.Folder) {
+        guard !isConfirmingDissolve, let window = view.window else { return }
+        isConfirmingDissolve = true
+        FolderDissolveConfirmation.alert(for: folder).beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            isConfirmingDissolve = false
+            viewModel.folderBeingDissolved = nil
+            if response == .alertFirstButtonReturn {
+                Task { [viewModel] in await viewModel.dissolve(folder) }
+            }
+        }
     }
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        // The confirmation is a sheet on the window, which only exists once the view is in one.
-        if !isPresentingConfirmations, let window = view.window {
-            isPresentingConfirmations = true
-            window.sheet(item: $viewModel.folderBeingDissolved) { [viewModel] folder in
-                FolderDissolveConfirmation.alert(for: folder) {
-                    Task { await viewModel.dissolve(folder) }
-                }
-            }
-        }
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {

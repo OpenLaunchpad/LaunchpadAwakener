@@ -30,6 +30,9 @@ public final class FormView: XiblessView {
     public init(sections: [FormSectionView] = []) {
         self.sections = sections
         super.init(frame: .zero)
+        // Sized by Auto Layout: an `NSScrollViewController` only constrains a document view to the visible
+        // width when this is off, and lays one that still uses its frame out at that frame.
+        translatesAutoresizingMaskIntoConstraints = false
 
         sectionStack.orientation = .vertical
         sectionStack.alignment = .leading
@@ -288,6 +291,15 @@ public final class FormRowView: XiblessView {
         }
         hierarchy {
             accessoryView
+        }
+        // A grouped form draws its switches at the mini size, 36 by 16 points.
+        if let toggle = accessoryView as? NSSwitch {
+            toggle.controlSize = .mini
+        }
+        // The accessory keeps its own width on the trailing side and leaves the rest to the text. A stack
+        // view has no intrinsic size; its own hugging priority is what keeps it from stretching.
+        if let stackView = accessoryView as? NSStackView {
+            stackView.setHuggingPriority(.defaultHigh, for: .horizontal)
         }
         accessoryView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         accessoryView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)

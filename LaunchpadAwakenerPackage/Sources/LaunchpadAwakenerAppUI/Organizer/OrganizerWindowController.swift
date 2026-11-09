@@ -124,17 +124,23 @@ final class OrganizerWindowController: ActivationTrackingWindowController {
         self.moveOutItem = moveOutItem
         self.arrangeItem = arrangeItem
 
-        return NSToolbar("OrganizerToolbar", allowsUserCustomization: false) {
+        // New Folder and Move Out of Folder share one capsule, as SwiftUI's toolbar group drew them.
+        let folderItems = NSToolbar.Group(.organizerFolderActions, items: [newFolderItem, moveOutItem])
+
+        let toolbar = NSToolbar("OrganizerToolbar", allowsUserCustomization: false) {
+            // The sidebar button sits at the sidebar's trailing edge, beside the split.
+            NSToolbar.box.flexibleSpace
             NSToolbar.box.toggleSidebar
             NSToolbar.box.sidebarTrackingSeparator
             backItem
             NSToolbar.box.flexibleSpace
             moveToItem
-            newFolderItem
-            moveOutItem
+            folderItems
             arrangeItem
             searchItem
         }
+        toolbar.displayMode = .iconOnly
+        return toolbar
     }
 
     private static func symbol(_ name: String, _ description: String) -> NSImage {
@@ -147,6 +153,7 @@ extension NSToolbarItem.Identifier {
     static let organizerMoveTo = NSToolbarItem.Identifier("organizer.moveTo")
     static let organizerNewFolder = NSToolbarItem.Identifier("organizer.newFolder")
     static let organizerMoveOut = NSToolbarItem.Identifier("organizer.moveOut")
+    static let organizerFolderActions = NSToolbarItem.Identifier("organizer.folderActions")
     static let organizerArrange = NSToolbarItem.Identifier("organizer.arrange")
     static let organizerSearch = NSToolbarItem.Identifier("organizer.search")
 }

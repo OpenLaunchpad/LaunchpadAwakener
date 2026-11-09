@@ -31,8 +31,11 @@ final class OrganizerSidebarViewController: XiblessViewController<XiblessView>, 
             content.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
             count = folder?.applications.count ?? 0
         }
+        // Sidebar symbols take the accent colour, and counts are plain secondary numbers, as in SwiftUI's
+        // sidebar list.
+        content.imageProperties.tintColor = .controlAccentColor
         cell.contentConfiguration = content
-        cell.accessories = [.badge(count: count)]
+        cell.accessories = [.label(text: "\(count)", options: .init(tintColor: .secondaryLabelColor, font: .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)))]
     }
 
     init(viewModel: LaunchpadOrganizerViewModel) {
@@ -43,6 +46,7 @@ final class OrganizerSidebarViewController: XiblessViewController<XiblessView>, 
     override func viewDidLoad() {
         super.viewDidLoad()
         outlineView.style = .sourceList
+        outlineView.rowSizeStyle = .medium
         outlineView.floatsGroupRows = false
         outlineView.allowsEmptySelection = true
         outlineView.registerForDraggedTypes([.organizerItem])

@@ -14,6 +14,10 @@ public enum ApplicationMainMenu {
     ///   - settingsItem: The application menu's Settings… item, for an app that has settings.
     ///   - windowItems: Commands that open the app's windows, listed in the Window menu.
     public static func make(applicationName: String, settingsItem: NSMenuItem? = nil, windowItems: [NSMenuItem] = []) -> NSMenu {
+        // SwiftUI's windows did not tab; without this AppKit adds Show Tab Bar and the tab commands to the
+        // View and Window menus.
+        NSWindow.allowsAutomaticWindowTabbing = false
+
         let viewMenuItem = MainMenu.view {
             MainMenu.View.showToolbar()
             MainMenu.View.customizeToolbar()
@@ -67,18 +71,23 @@ public enum ApplicationMainMenu {
 }
 
 /// Hides the View menu's toolbar items while the key window has no toolbar, and its sidebar item while
-/// nothing can toggle a sidebar, each time the menu opens.
+/// the key window has no sidebar, each time the menu opens.
 @MainActor
 private final class ViewMenuVisibility: NSObject, NSMenuDelegate {
     static let shared = ViewMenuVisibility()
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        let hasToolbar = NSApp.keyWindow?.toolbar != nil
-        let hasSidebar = NSApp.target(forAction: #selector(NSSplitViewController.toggleSidebar(_:))) != nil
+        let keyWindow = NSApp.keyWindow
+        let hasToolbar = keyWindow?.toolbar != nil
+        let canCustomizeToolbar = keyWindow?.toolbar?.allowsUserCustomization ?? false
+        let splitViewController = keyWindow?.contentViewController as? NSSplitViewController
+        let hasSidebar = splitViewController?.splitViewItems.contains { $0.behavior == .sidebar } ?? false
         for item in menu.items {
             switch item.action {
-            case #selector(NSWindow.toggleToolbarShown(_:)), #selector(NSWindow.runToolbarCustomizationPalette(_:)):
+            case #selector(NSWindow.toggleToolbarShown(_:)):
                 item.isHidden = !hasToolbar
+            case #selector(NSWindow.runToolbarCustomizationPalette(_:)):
+                item.isHidden = !canCustomizeToolbar
             case #selector(NSSplitViewController.toggleSidebar(_:)):
                 item.isHidden = !hasSidebar
             default:

@@ -12,6 +12,8 @@ import UIFoundation
 final class ReadinessBannerView: XiblessView {
     private static let symbolPointSize: CGFloat = 28
     private static let symbolColumnWidth: CGFloat = 34
+    /// The height SwiftUI gave the 28-point symbol's frame; it sets the banner's height.
+    private static let symbolColumnHeight: CGFloat = 33
     private static let padding: CGFloat = 12
     private static let spacing: CGFloat = 14
 
@@ -30,6 +32,7 @@ final class ReadinessBannerView: XiblessView {
         cornerRadius = 12
         cornerCurve = .continuous
         borderWidth = 1
+        borderPositions = .all
 
         symbolImageView.imageScaling = .scaleNone
         symbolImageView.imageAlignment = .alignCenter
@@ -78,6 +81,7 @@ final class ReadinessBannerView: XiblessView {
         }
         symbolImageView.snp.makeConstraints { make in
             make.width.equalTo(Self.symbolColumnWidth)
+            make.height.equalTo(Self.symbolColumnHeight)
         }
     }
 

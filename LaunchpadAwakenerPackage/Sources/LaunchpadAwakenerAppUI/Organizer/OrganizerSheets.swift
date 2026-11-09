@@ -171,6 +171,9 @@ final class CategoryGroupingViewController: XiblessViewController<XiblessView> {
 private final class CategoryGroupListView: XiblessView {
     init(groups: [LaunchpadOrganizer.CategoryGroup]) {
         super.init(frame: .zero)
+        // The scroll view controller sizes an Auto Layout document to the visible width; a document left on
+        // its frame stays at its zero frame, and the list shows nothing.
+        translatesAutoresizingMaskIntoConstraints = false
         let rows = groups.enumerated().map { index, group in
             CategoryGroupRowView(group: group, showsSeparator: index < groups.count - 1)
         }
@@ -241,34 +244,18 @@ private final class CategoryGroupRowView: XiblessView {
 
 /// Confirming that a folder is dissolved: its applications take its place on the page.
 enum FolderDissolveConfirmation {
-    enum Action: Equatable {
-        case dissolve
-    }
-
-    static func alertState(for folder: LaunchpadOrganizer.Folder) -> AlertState<Action> {
-        AlertState {
-            TextState(verbatim: "Dissolve “\(folder.title)”?")
-        } actions: {
-            ButtonState(role: .destructive, action: .dissolve) {
-                TextState(verbatim: "Dissolve")
-            }
-            ButtonState(role: .cancel) {
-                TextState(verbatim: "Cancel")
-            }
-        } message: {
-            TextState(verbatim: "Its applications take its place on the page.")
-        }
-    }
-
+    /// An alert asking whether to dissolve `folder`. Its first button dissolves, and Return does not
+    /// press it: Escape and Return both leave the folder alone.
     @MainActor
-    static func alert(for folder: LaunchpadOrganizer.Folder, dissolve: @escaping () -> Void) -> NSAlert {
-        let alert = NSAlert(state: alertState(for: folder)) { action in
-            if action == .dissolve {
-                dissolve()
-            }
-        }
-        // A destructive button is not the default one: Return leaves the folder alone.
-        alert.buttons.first?.keyEquivalent = ""
+    static func alert(for folder: LaunchpadOrganizer.Folder) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Dissolve “\(folder.title)”?"
+        alert.informativeText = "Its applications take its place on the page."
+        let dissolveButton = alert.addButton(withTitle: "Dissolve")
+        dissolveButton.hasDestructiveAction = true
+        dissolveButton.keyEquivalent = ""
+        let cancelButton = alert.addButton(withTitle: "Cancel")
+        cancelButton.keyEquivalent = "\u{1b}"
         return alert
     }
 }
