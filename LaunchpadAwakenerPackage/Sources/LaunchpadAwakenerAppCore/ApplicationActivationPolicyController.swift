@@ -15,11 +15,11 @@ import OSToolbox
 /// `LSUIElement` in the app's Info.plist makes the launched-with-no-window case correct from the
 /// first frame rather than flashing a Dock icon and taking it away again.
 ///
-/// Driven from the window's own `onAppear` / `onDisappear` rather than from
-/// `NSWindow.willCloseNotification`. A closing window is still in `NSApplication.windows` and still
-/// reports `isVisible` when that notification fires, so anything counting windows there has to
-/// either exclude the closing one by identity or wait a run-loop turn and hope. SwiftUI already
-/// knows exactly when the window went away.
+/// Driven by each window controller reporting its own window — once when it is shown, once from
+/// `windowWillClose(_:)` — rather than by counting `NSApplication.windows`. A closing window is still
+/// in `NSApplication.windows` and still reports `isVisible` when `willClose` fires, so anything
+/// counting windows there has to either exclude the closing one by identity or wait a run-loop turn
+/// and hope.
 ///
 /// The menu bar item is what reopens the window, so an app using this must offer one — otherwise
 /// closing the window makes the app unreachable.
@@ -31,7 +31,7 @@ public final class ApplicationActivationPolicyController {
 
     public init() {}
 
-    /// Call from the window's `onAppear`.
+    /// Call when one of the app's windows comes on screen.
     public func windowDidAppear() {
         openWindowCount += 1
         NSApplication.shared.setActivationPolicy(.regular)
@@ -54,7 +54,7 @@ public final class ApplicationActivationPolicyController {
         }
     }
 
-    /// Call from the window's `onDisappear`.
+    /// Call when one of the app's windows closes.
     public func windowDidDisappear() {
         openWindowCount = max(0, openWindowCount - 1)
         guard openWindowCount == 0 else { return }

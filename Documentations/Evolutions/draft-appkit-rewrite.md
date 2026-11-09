@@ -350,7 +350,7 @@ extension LaunchpadOrganizerViewModel {
 4. **共用模块。**（已完成）分组表单、窗口尺寸规则、标准主菜单、登录时启动的判断，加单元测试。
 5. **注入版 App 的控制面板、菜单栏与 delegate。**（已完成；delegate 挪到第 7 步）
 6. **整理窗口。**（已完成）
-7. **注入版 App 的外壳换成 `main.swift`**，删掉三个 SwiftUI 文件。
+7. **注入版 App 的外壳换成 `main.swift`**（已完成），删掉三个 SwiftUI 文件。
 8. **独立版**：设置窗口、主菜单、`main.swift`，删掉两个 SwiftUI 文件。
 9. **测试机验证。** 两台机器上逐张对照截图，调到一致；交互逐项过一遍：三个开关（测后还原）、立即注入、重启 Dock、横幅按钮、菜单栏每一项，整理窗口的每种编辑与拖放（测前备份布局库，测后还原）。MacBook 上打开开机启动后注销，**由用户在 MacBook 上手动登录**（它没开自动登录，ssh 进不了登录窗口），确认控制面板不弹；再退出后从 Finder 打开，确认弹出。独立版：从 Dock 菜单与 ⌘, 打开设置，录一个快捷键再清掉，「Open at Login」测后还原。
 10. **文档。** 更新控制面板、整理窗口、独立版三份实现说明，项目 `CLAUDE.md` 的结构表与构建说明，已裁决清单里「手动打开不弹窗口」那条改判为已修，文档索引。
@@ -381,3 +381,5 @@ extension LaunchpadOrganizerViewModel {
 | 2026-11-09 | 表单的尺寸取自改写前的截图 | 在 MacBook 的截图上量出：分组圆角 12 点，节与节之间 30 点，节标题与分组之间 10 点，行内边距 10 点（一行字的行 36 点高，带一行说明的 52.5 点），分隔线 1 点、缩进 10 点。分组底色取 `tertiarySystemFill`（深色下与截图同为 4.7% 的白），分隔线取系统分隔线色的一半不透明度（与截图同为约 6% 的白）。这些数写进了共用模块的测试。滚动交给 AppKitPlus 的 `NSScrollViewController`，表单本身只负责排列。 |
 | 2026-11-09 | delegate 与外壳切换同一步 | `ApplicationDelegate` 要引用整理窗口，放在第 5 步就得留个空壳才能单独编过；改为第 7 步与 `main.swift` 一起落地。第 5 步只交控制面板与菜单栏。控制器的开关只有 `setEnabled(_:)` 这样的方法、没有可写属性，`UIBinding` 绑不上：界面跟着状态走用 `observe {}`，用户的操作经动作调方法。菜单项的闭包动作用 AppKitPlus 的 `NSAction`。 |
 | 2026-11-09 | 整理窗口的几处取舍 | 侧栏用 AppKitPlus 的大纲 diffable 数据源，子类里覆盖它公开的 `validateDrop` / `acceptDrop` 接受放下；列表用 AppKit 自带的表格 diffable 数据源加子类，放在文件夹行上是放进文件夹，放在两行之间是插到下一行前面，与 SwiftUI 版的规则一致。列表是多选，swift-navigation 的选中绑定只做单选，所以选中在代理回调与 `observe {}` 之间手动同步，用标志位挡回声。解散文件夹的确认用 swift-navigation 的 `AlertState` 生成 `NSAlert`，回车不触发破坏性的「Dissolve」。表格子类覆写 `mouseDown(with:)` 保留 AppKit 原来的点击跟踪，避开 macOS 27 上点击不让表格成为第一响应者、选中行发灰的问题。整理窗口沿用 SwiftUI 存窗口位置用的名字 `organizer`。 |
+| 2026-11-09 | `main.swift` 包在 `MainActor.assumeIsolated` 里 | App target 是 Swift 5 语言模式，`main.swift` 的顶层代码不算主线程隔离，不能直接调 `@MainActor` 的 delegate 构造器；进程从这里起就在主线程，包一层即可。delegate 靠 `withExtendedLifetime` 活到 `NSApplicationMain` 返回，也就是进程结束。 |
+| 2026-11-09 | 进程里的 SwiftUI 来自依赖 | 改写后本仓库的代码不再导入 SwiftUI。App 的 debug dylib 仍链接 SwiftUI.framework：导入 AppKitPlus 时它的 Swift 接口把 SwiftUI 一并自动链接进来，与提案前期调研的判断一致。 |
