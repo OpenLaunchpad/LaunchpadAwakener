@@ -12,9 +12,12 @@ extension NSPasteboard.PasteboardType {
 ///
 /// AppKit drags every selected row when the dragged row is selected, and only that row otherwise — the
 /// same rule as ``LaunchpadOrganizerViewModel/targetItems(forRow:)`` — so each row writes just itself.
+@MainActor
 enum OrganizerPasteboard {
-    static func pasteboardItem(for itemIdentifier: LaunchpadOrganizer.ItemIdentifier) -> NSPasteboardItem {
-        let pasteboardItem = NSPasteboardItem()
+    /// A pasteboard item carrying `itemIdentifier`: `baseItem` with the identifier added — the item the
+    /// list's reorder data source writes for its own drags — or a new one.
+    static func pasteboardItem(for itemIdentifier: LaunchpadOrganizer.ItemIdentifier, addingTo baseItem: NSPasteboardItem? = nil) -> NSPasteboardItem {
+        let pasteboardItem = baseItem ?? NSPasteboardItem()
         pasteboardItem.setString(itemIdentifier.description, forType: .organizerItem)
         return pasteboardItem
     }

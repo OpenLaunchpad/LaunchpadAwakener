@@ -208,36 +208,45 @@ struct LaunchpadOrganizerViewModelTests {
         #expect(viewModel.dropOperation(of: dragged, onto: .row(Self.item(Sample.tools))) == .move(dragged, to: .folder(Self.item(Sample.tools))))
     }
 
-    @Test("dropped on an application's row in the same page, items go before it, in their order")
-    func dropOnApplicationRowReorders() async {
-        let viewModel = await Self.loadedViewModel()
-        let operation = viewModel.dropOperation(of: [Self.item(Sample.beta), Self.item(Sample.tools)], onto: .row(Self.item(Sample.alpha)))
-        #expect(operation == .arrange(.page(Self.item(Sample.pageOne)), inOrder: [Self.item(Sample.tools), Self.item(Sample.beta), Self.item(Sample.alpha)]))
-    }
-
-    @Test("dropped on a row in another page, items move to the page shown")
-    func dropFromElsewhereMoves() async {
-        let viewModel = await Self.loadedViewModel()
-        let dragged: Set = [Self.item(Sample.gamma)]
-        #expect(viewModel.dropOperation(of: dragged, onto: .row(Self.item(Sample.alpha))) == .move(dragged, to: .page(Self.item(Sample.pageOne))))
-    }
-
-    @Test("dropped on the list's empty space, items move to the page or folder shown")
-    func dropOnListBackground() async {
-        let viewModel = await Self.loadedViewModel()
-        viewModel.show(.folder(Self.item(Sample.tools)))
-        let dragged: Set = [Self.item(Sample.gamma)]
-        #expect(viewModel.dropOperation(of: dragged, onto: .listBackground) == .move(dragged, to: .folder(Self.item(Sample.tools))))
-    }
-
-    @Test("a drop is refused onto the dragged row itself, with nothing dragged, and onto search results")
+    @Test("a drop is refused onto the dragged folder's own row, onto an application's row, and with nothing dragged")
     func refusedDrops() async {
         let viewModel = await Self.loadedViewModel()
-        #expect(viewModel.dropOperation(of: [Self.item(Sample.alpha)], onto: .row(Self.item(Sample.alpha))) == nil)
-        #expect(viewModel.dropOperation(of: [], onto: .listBackground) == nil)
+        #expect(viewModel.dropOperation(of: [Self.item(Sample.tools)], onto: .row(Self.item(Sample.tools))) == nil)
+        #expect(viewModel.dropOperation(of: [Self.item(Sample.beta)], onto: .row(Self.item(Sample.alpha))) == nil)
+        #expect(viewModel.dropOperation(of: [], onto: .row(Self.item(Sample.tools))) == nil)
+    }
 
+    // MARK: - Reordering
+
+    @Test("a new order of the page shown arranges the page")
+    func reorderPage() async {
+        let viewModel = await Self.loadedViewModel()
+        let order = [Self.item(Sample.tools), Self.item(Sample.beta), Self.item(Sample.alpha)]
+        #expect(viewModel.canReorder)
+        #expect(viewModel.reorderOperation(to: order) == .arrange(.page(Self.item(Sample.pageOne)), inOrder: order))
+    }
+
+    @Test("a new order of the folder shown arranges the folder")
+    func reorderFolder() async {
+        let viewModel = await Self.loadedViewModel()
+        viewModel.show(.folder(Self.item(Sample.tools)))
+        let order = [Self.item(Sample.saw), Self.item(Sample.hammer)]
+        #expect(viewModel.reorderOperation(to: order) == .arrange(.folder(Self.item(Sample.tools)), inOrder: order))
+    }
+
+    @Test("the order already shown, or an order of other items, arranges nothing")
+    func reorderWithoutChange() async {
+        let viewModel = await Self.loadedViewModel()
+        #expect(viewModel.reorderOperation(to: [Self.item(Sample.alpha), Self.item(Sample.tools), Self.item(Sample.beta)]) == nil)
+        #expect(viewModel.reorderOperation(to: [Self.item(Sample.beta), Self.item(Sample.alpha)]) == nil)
+        #expect(viewModel.reorderOperation(to: [Self.item(Sample.gamma), Self.item(Sample.tools), Self.item(Sample.alpha)]) == nil)
+    }
+
+    @Test("search results are not reordered")
+    func searchResultsAreNotReordered() async {
+        let viewModel = await Self.loadedViewModel()
         viewModel.searchText = "a"
-        #expect(viewModel.dropOperation(of: [Self.item(Sample.gamma)], onto: .row(Self.item(Sample.alpha))) == nil)
-        #expect(viewModel.dropOperation(of: [Self.item(Sample.gamma)], onto: .listBackground) == nil)
+        #expect(!viewModel.canReorder)
+        #expect(viewModel.reorderOperation(to: [Self.item(Sample.beta), Self.item(Sample.alpha)]) == nil)
     }
 }

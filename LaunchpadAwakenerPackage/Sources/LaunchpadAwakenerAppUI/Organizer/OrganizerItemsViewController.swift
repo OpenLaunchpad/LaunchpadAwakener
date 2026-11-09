@@ -7,9 +7,9 @@ import UIFoundation
 
 /// The organizer's list: the selected page's or folder's items, or search results with where each one is.
 ///
-/// Rows can be selected several at a time, dragged onto the sidebar or onto each other, opened with a
-/// double-click or Return, and acted on from their context menu. The list says when there is nothing to
-/// show, and why.
+/// Rows can be selected several at a time, dragged into a new order, onto a folder's row or onto the
+/// sidebar, opened with a double-click or Return, and acted on from their context menu. The list says
+/// when there is nothing to show, and why.
 final class OrganizerItemsViewController: XiblessViewController<XiblessView>, NSTableViewDelegate, NSMenuDelegate {
     typealias Row = LaunchpadOrganizerViewModel.Row
 
@@ -64,8 +64,6 @@ final class OrganizerItemsViewController: XiblessViewController<XiblessView>, NS
             guard let self else { return }
             viewModel.open(viewModel.selectedItems)
         }
-        tableView.registerForDraggedTypes([.organizerItem])
-        tableView.setDraggingSourceOperationMask(.move, forLocal: true)
         tableView.draggingDestinationFeedbackStyle = .regular
         let contextMenu = NSMenu()
         contextMenu.delegate = self
@@ -80,6 +78,17 @@ final class OrganizerItemsViewController: XiblessViewController<XiblessView>, NS
             return tableView.dequeueConfiguredReusableRowView(using: rowRegistration, forRow: row, item: item)
         }
         dataSource.viewModel = viewModel
+        var reorderingHandlers = OrganizerItemsDataSource.ReorderingHandlers()
+        reorderingHandlers.canReorderItem = { [weak viewModel] _ in
+            viewModel?.canReorder ?? false
+        }
+        reorderingHandlers.didReorder = { [weak self] transaction in
+            self?.commitReorder(to: transaction.finalSnapshot.itemIdentifiers.map(\.id))
+        }
+        dataSource.reorderingHandlers = reorderingHandlers
+        // The reorder data source registers its own type; folder rows read the identifiers in this one.
+        tableView.registerForDraggedTypes(tableView.registeredDraggedTypes + [.organizerItem])
+        tableView.setDraggingSourceOperationMask(.move, forLocal: true)
 
         hierarchy {
             scrollView
@@ -126,15 +135,35 @@ final class OrganizerItemsViewController: XiblessViewController<XiblessView>, NS
         snapshot.appendSections([0])
         snapshot.appendItems(rows, toSection: 0)
         dataSource.apply(snapshot, animatingDifferences: false)
-        tableView.enumerateAvailableRowViews { rowView, row in
-            (rowView as? OrganizerItemRowView)?.showsSeparator = row < rows.count - 1
-        }
+        updateSeparators()
 
         let selectedRows = IndexSet(rows.indices.filter { selectedItems.contains(rows[$0].id) })
         guard selectedRows != tableView.selectedRowIndexes else { return }
         isMatchingSelection = true
         tableView.selectRowIndexes(selectedRows, byExtendingSelection: false)
         isMatchingSelection = false
+    }
+
+    /// A hairline under every row but the last; a moved row keeps the one it was configured with.
+    private func updateSeparators() {
+        let rowCount = tableView.numberOfRows
+        tableView.enumerateAvailableRowViews { rowView, row in
+            (rowView as? OrganizerItemRowView)?.showsSeparator = row < rowCount - 1
+        }
+    }
+
+    /// Sends the order the list was dragged into to the Dock. The list shows it already; when the Dock
+    /// refuses it, the layout stays as it was and no refresh brings the list back — the Dock reports the
+    /// layout unchanged — so the list shows the layout again once the edit is over.
+    private func commitReorder(to order: [LaunchpadOrganizer.ItemIdentifier]) {
+        updateSeparators()
+        Task { [weak self] in
+            guard let self else { return }
+            if let operation = viewModel.reorderOperation(to: order) {
+                await viewModel.perform(operation)
+            }
+            show(viewModel.rows, selecting: viewModel.selectedItems)
+        }
     }
 
     /// What covers the list when it has nothing to show: the Dock not answering yet, no layout to organize
@@ -221,50 +250,43 @@ final class OrganizerTableView: NSTableView, @unchecked Sendable {
     }
 }
 
-/// The list's rows, where they are dragged from, and where drops on them go.
+/// The list's rows and their drags. AppKitPlus's reorder data source moves rows within the page or folder
+/// shown; this subclass adds what a reorder is not: a drop onto a folder's row puts the items into the
+/// folder, and every dragged row carries its identifier for the sidebar and the folder rows to read.
 @MainActor
-private final class OrganizerItemsDataSource: NSTableViewDiffableDataSource<Int, LaunchpadOrganizerViewModel.Row> {
+private final class OrganizerItemsDataSource: NSTableViewDiffableReorderableDataSource<Int, LaunchpadOrganizerViewModel.Row> {
     weak var viewModel: LaunchpadOrganizerViewModel?
 
-    @objc func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+    /// The reorder data source writes a row only while the list can be reordered; search results are
+    /// still dragged, onto the sidebar.
+    override func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
         guard let item = itemIdentifier(forRow: row) else { return nil }
-        return OrganizerPasteboard.pasteboardItem(for: item.id)
+        let reorderItem = super.tableView(tableView, pasteboardWriterForRow: row) as? NSPasteboardItem
+        return OrganizerPasteboard.pasteboardItem(for: item.id, addingTo: reorderItem)
     }
 
-    @objc func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
-        // Onto a folder's row the items go into the folder; anywhere else they go between rows, before the
-        // row below the line.
-        if dropOperation == .on, let item = itemIdentifier(forRow: row), case .folder = item.item {
-            return self.dropOperation(info, onto: .row(item.id)) == nil ? [] : .move
+    /// Decided before the reorder targeting, which turns every drop onto a row into a drop above it.
+    override func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+        if folderDropOperation(info, row: row, dropOperation: dropOperation) != nil {
+            return .move
         }
-        if dropOperation == .on {
-            tableView.setDropRow(row, dropOperation: .above)
-        }
-        return self.dropOperation(info, onto: target(above: row)) == nil ? [] : .move
+        return super.tableView(tableView, validateDrop: info, proposedRow: row, proposedDropOperation: dropOperation)
     }
 
-    @objc func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
-        let target: LaunchpadOrganizerViewModel.DropTarget
-        if dropOperation == .on, let item = itemIdentifier(forRow: row) {
-            target = .row(item.id)
-        } else {
-            target = self.target(above: row)
+    override func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+        guard let viewModel, let operation = folderDropOperation(info, row: row, dropOperation: dropOperation) else {
+            return super.tableView(tableView, acceptDrop: info, row: row, dropOperation: dropOperation)
         }
-        guard let viewModel, let operation = self.dropOperation(info, onto: target) else { return false }
         Task {
             await viewModel.perform(operation)
         }
         return true
     }
 
-    /// The row a line above `row` inserts before; past the last row, the list's empty space.
-    private func target(above row: Int) -> LaunchpadOrganizerViewModel.DropTarget {
-        guard let item = itemIdentifier(forRow: row) else { return .listBackground }
-        return .row(item.id)
-    }
-
-    private func dropOperation(_ info: any NSDraggingInfo, onto target: LaunchpadOrganizerViewModel.DropTarget) -> LaunchpadOrganizerViewModel.DropOperation? {
-        viewModel?.dropOperation(of: OrganizerPasteboard.draggedItems(in: info), onto: target)
+    /// Moving the dragged items into the folder whose row the drop is on; nil for any other drop.
+    private func folderDropOperation(_ info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> LaunchpadOrganizerViewModel.DropOperation? {
+        guard dropOperation == .on, let item = itemIdentifier(forRow: row), case .folder = item.item else { return nil }
+        return viewModel?.dropOperation(of: OrganizerPasteboard.draggedItems(in: info), onto: .row(item.id))
     }
 }
 

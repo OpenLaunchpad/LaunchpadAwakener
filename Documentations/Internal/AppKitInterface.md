@@ -66,6 +66,7 @@ LaunchpadAwakenerPackage/Sources/
 - 主菜单用 UIFoundation 自带的 `MainMenu` 拼，没有另写提案里的 `StandardMainMenu`。
 - `ApplicationDelegate` 随第 7 步与外壳一起落地，不在第 5 步；第 3 步没有让 SwiftUI 视图改调新类型，第 7 步直接删掉了它们。
 - 解散文件夹的确认没走 swift-navigation 的 sheet 绑定，原因见上一节。
+- 整理窗口列表里的重排交给 AppKitPlus 的 `NSTableViewDiffableReorderableDataSource`，不经 `dropOperation(of:onto:)`（提案写的是放下一律经它）：落点、整块移动与动画都由它做，AppKitPlus 有的不手写。拖到文件夹行上与拖到侧栏仍经 `dropOperation(of:onto:)`，细节见[整理窗口的实现说明](LaunchpadOrganizer.md)。
 - 控制面板比改写前的 SwiftUI 版高一些（按完整内容定高）；独立版设置窗口高 3 点（快捷键录制框比 SwiftUI 版的高一点）。
 - 注入版的 debug dylib 仍链接 SwiftUI.framework：导入 AppKitPlus 时它的 Swift 接口把 SwiftUI 一并自动链接进来。本仓库的代码里没有 `import SwiftUI`。
 
@@ -74,8 +75,8 @@ LaunchpadAwakenerPackage/Sources/
 - 单元测试：AppCore 的 `ReadinessPresentationTests`、`StatusLineTests`、`LaunchpadOrganizerViewModelTests`；SharedUI 的 `FormViewTests`（行高、节高、隐藏行与分隔线）、`ContentSizedWindowPlacementTests`、`ApplicationMainMenuTests`、`ApplicationLaunchTests`（用构造的 Apple 事件）。
 - 构建：`RunScript.sh` 两个 scheme 都编过，daemon 与 payload 仍是 `x86_64 arm64 arm64e`，App 是 `x86_64 arm64`；旧 package 构建器下 UIFoundation 的编译参数带 `-DAppKitPlus`。
 - 测试 MacBook（27.2）上与改写前的截图逐张对照：控制面板、菜单栏菜单、五个主菜单、整理窗口（侧栏、列表、搜索结果、选中文件夹、Arrange 与 Move To 菜单、改名 sheet、解散确认、按分类归类 sheet）、独立版设置窗口与它的 App 菜单。
-- 测试 MacBook 上的交互：开机启动开着时用 `open` 手动打开 App，控制面板弹出（日志「Launched by the user」）；退回开关开、关与横幅的「Turn Back On」；自动再注入开、关；「Restart Dock」后换了 Dock 进程并自动再注入；关掉窗口后 App 变回 UIElement、没有 Dock 图标，再打开时回到前台并弹出控制面板；从菜单栏菜单打开整理窗口；两次拖放（同一文件夹里重排、拖到侧栏文件夹上移进去），测前备份布局库，测后还原并在整理窗口里核对过。
-- 没做：26 虚拟机上的对照（当时没开机）；登录时启动不弹控制面板只有单元测试覆盖，真机上要注销再登录才能验，这次经用户决定跳过；右键菜单、多选与「New Folder」sheet（发事件的工具没有右键和修饰键）。
+- 测试 MacBook 上的交互：开机启动开着时用 `open` 手动打开 App，控制面板弹出（日志「Launched by the user」）；退回开关开、关与横幅的「Turn Back On」；自动再注入开、关；「Restart Dock」后换了 Dock 进程并自动再注入；关掉窗口后 App 变回 UIElement、没有 Dock 图标，再打开时回到前台并弹出控制面板；从菜单栏菜单打开整理窗口；列表改用可重排数据源后的四种拖放（同一文件夹里重排，录屏里看得到行在滑动；拖到文件夹行上放进去；拖到侧栏的页上；从搜索结果拖到侧栏的文件夹上），测前备份布局库，测后还原并在整理窗口里核对过。
+- 没做：26 虚拟机上的对照（当时没开机）；登录时启动不弹控制面板只有单元测试覆盖，真机上要注销再登录才能验，这次经用户决定跳过；右键菜单、多选与「New Folder」sheet（发事件的工具没有右键和修饰键）；Dock 拒绝重排时列表退回原顺序（造不出 Dock 拒绝的情形）。
 
 ## 已知降级
 

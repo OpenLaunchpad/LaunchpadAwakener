@@ -67,10 +67,9 @@ public final class LaunchpadOrganizerViewModel {
     public enum DropTarget: Hashable, Sendable {
         /// A page or a folder in the sidebar.
         case container(Container)
-        /// A row of the list.
+        /// A row of the list; only a folder's row takes dropped items. A drop between rows reorders the
+        /// list instead, which ``LaunchpadOrganizerViewModel/reorderOperation(to:)`` decides.
         case row(ItemIdentifier)
-        /// The list's empty space below its rows.
-        case listBackground
     }
 
     /// What a drop does.
@@ -346,32 +345,32 @@ public final class LaunchpadOrganizerViewModel {
 
     /// What dropping `draggedItems` on `target` does; nil when the drop is refused.
     ///
-    /// Dropped on a page or a folder in the sidebar, or on the list's empty space, the items move there.
-    /// Dropped on a row, they go into it when it is a folder; else they go before it — reordering when
-    /// everything dragged is already in the page or folder shown, moving there otherwise.
+    /// Dropped on a page or a folder in the sidebar, the items move there; dropped on a folder's row in
+    /// the list, they go into that folder.
     public func dropOperation(of draggedItems: Set<ItemIdentifier>, onto target: DropTarget) -> DropOperation? {
         guard !draggedItems.isEmpty, !organizer.isApplying, let layout else { return nil }
         switch target {
         case .container(let container):
             return .move(draggedItems, to: Self.destination(container))
-        case .listBackground:
-            guard !isSearching, let selectedContainer else { return nil }
-            return .move(draggedItems, to: Self.destination(selectedContainer))
         case .row(let rowItem):
-            guard !draggedItems.contains(rowItem) else { return nil }
-            if layout.folder(rowItem) != nil {
-                return .move(draggedItems, to: .folder(rowItem))
-            }
-            guard !isSearching, let selectedContainer else { return nil }
-            let currentOrder = layout.items(in: selectedContainer).map(\.id)
-            guard draggedItems.isSubset(of: Set(currentOrder)) else {
-                return .move(draggedItems, to: Self.destination(selectedContainer))
-            }
-            var newOrder = currentOrder.filter { !draggedItems.contains($0) }
-            let insertionIndex = newOrder.firstIndex(of: rowItem) ?? newOrder.count
-            newOrder.insert(contentsOf: currentOrder.filter(draggedItems.contains), at: insertionIndex)
-            return .arrange(selectedContainer, inOrder: newOrder)
+            guard !draggedItems.contains(rowItem), layout.folder(rowItem) != nil else { return nil }
+            return .move(draggedItems, to: .folder(rowItem))
         }
+    }
+
+    /// Whether the list's rows can be dragged into a new order: they are the items of a page or a
+    /// folder, not search results, and no edit is on its way to the Dock.
+    public var canReorder: Bool {
+        !isSearching && selectedContainer != nil && layout != nil && !organizer.isApplying
+    }
+
+    /// What putting the items of the page or folder shown in `order` does; nil when the list cannot be
+    /// reordered, when `order` is the one they already have, or when it is not exactly their items.
+    public func reorderOperation(to order: [ItemIdentifier]) -> DropOperation? {
+        guard canReorder, let layout, let selectedContainer else { return nil }
+        let currentOrder = layout.items(in: selectedContainer).map(\.id)
+        guard order != currentOrder, order.count == currentOrder.count, Set(order) == Set(currentOrder) else { return nil }
+        return .arrange(selectedContainer, inOrder: order)
     }
 
     public func perform(_ operation: DropOperation) async {
