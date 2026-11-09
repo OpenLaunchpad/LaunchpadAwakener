@@ -75,7 +75,7 @@ LaunchpadAwakenerPackage/Sources/
 - 构建：`RunScript.sh` 两个 scheme 都编过，daemon 与 payload 仍是 `x86_64 arm64 arm64e`，App 是 `x86_64 arm64`；旧 package 构建器下 UIFoundation 的编译参数带 `-DAppKitPlus`。
 - 测试 MacBook（27.2）上与改写前的截图逐张对照：控制面板、菜单栏菜单、五个主菜单、整理窗口（侧栏、列表、搜索结果、选中文件夹、Arrange 与 Move To 菜单、改名 sheet、解散确认、按分类归类 sheet）、独立版设置窗口与它的 App 菜单。
 - 测试 MacBook 上的交互：开机启动开着时用 `open` 手动打开 App，控制面板弹出（日志「Launched by the user」）；退回开关开、关与横幅的「Turn Back On」；自动再注入开、关；「Restart Dock」后换了 Dock 进程并自动再注入；关掉窗口后 App 变回 UIElement、没有 Dock 图标，再打开时回到前台并弹出控制面板；从菜单栏菜单打开整理窗口；两次拖放（同一文件夹里重排、拖到侧栏文件夹上移进去），测前备份布局库，测后还原并在整理窗口里核对过。
-- 没做：26 虚拟机上的对照（当时没开机）；登录时启动不弹控制面板（要注销再登录）；右键菜单、多选与「New Folder」sheet（发事件的工具没有右键和修饰键）。
+- 没做：26 虚拟机上的对照（当时没开机）；登录时启动不弹控制面板只有单元测试覆盖，真机上要注销再登录才能验，这次经用户决定跳过；右键菜单、多选与「New Folder」sheet（发事件的工具没有右键和修饰键）。
 
 ## 已知降级
 
