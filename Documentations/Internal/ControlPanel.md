@@ -11,9 +11,10 @@
 
 | 位置 | 是什么 |
 |---|---|
-| `LaunchpadAwakener/LaunchpadAwakenerApp.swift` | `ApplicationDelegate`：持有全部控制器，跑启动流程（检查 daemon → 找已在的 payload → 注入），处理「App 已在运行时再打开」 |
-| `LaunchpadAwakener/MainView.swift` | 窗口：状态横幅，以及常规（开机启动、daemon、输入法辅助进程）、Launchpad（退回开关、Dock 构建、打开整理窗口）、注入、错误四节，每节是一个视图结构体；菜单栏菜单 |
-| `LaunchpadAwakener/OrganizerView.swift` 等 | 整理 Launchpad 的窗口，见[它的实现说明](LaunchpadOrganizer.md) |
+| `AppUI/Application/ApplicationDelegate.swift` | `ApplicationDelegate`：持有全部控制器，跑启动流程（检查 daemon → 找已在的 payload → 注入），处理「App 已在运行时再打开」；外壳 `LaunchpadAwakener/main.swift` 只建它并运行 |
+| `AppUI/ControlPanel/`、`AppUI/MenuBar/` | 窗口：状态横幅，以及常规（开机启动、daemon、输入法辅助进程）、Launchpad（退回开关、Dock 构建、打开整理窗口）、注入、错误四节；菜单栏菜单。界面层怎么搭见 [AppKit 界面层的实现说明](AppKitInterface.md) |
+| `AppUI/Organizer/` 等 | 整理 Launchpad 的窗口，见[它的实现说明](LaunchpadOrganizer.md) |
+| `AppCore/ReadinessPresentation.swift`、`StatusLine.swift` | 横幅与两行状态的文字、图标与颜色角色 |
 | `AppCore/PayloadInjectionCoordinator.swift` | 暂存、注入、自动再注入、重启 Dock、payload 通道、状态刷新、闪退保护 |
 | `AppCore/PrivilegedDaemonController.swift` | daemon 的登记与连接；`ensureDaemonUsable()` 连不上或版本不对就重装，60 秒冷却 |
 | `AppCore/ControlPanelReadiness.swift` | 横幅说什么：按顺序检查，返回第一个挡路的原因 |
@@ -39,11 +40,11 @@
 
 **横幅的顺序就是修的顺序。** `ControlPanelReadiness` 依次看：启动是否还在跑、daemon 是否可用、退回开关、有没有注入、hook 装上没有、payload 旧不旧。退回开关排在注入之前：开着它，别的都改变不了 Dock 的行为。「hook 没装上」排在「payload 旧了」之前：Dock 构建不受支持时，重启 Dock 换上新 payload 也一样什么都装不上。注入了但 payload 还没回话，按「可用」算：注入已经发生，没有要修的。
 
-**开机启动只默认打开一次。** 原来开机启动跟着「自动注入」开关一起开关，每次启动都强行打开。现在它是独立的开关，第一次注入成功时，用户没表过态就登记一次，之后以用户为准（`LaunchAtLoginDefault`）。早先版本已经登记过的，原样保留。启动时不弹窗口的条件也随之改成「开机启动已打开」：开机启动关着，这次启动就一定是用户手动开的。
+**开机启动只默认打开一次。** 原来开机启动跟着「自动注入」开关一起开关，每次启动都强行打开。现在它是独立的开关，第一次注入成功时，用户没表过态就登记一次，之后以用户为准（`LaunchAtLoginDefault`）。早先版本已经登记过的，原样保留。启动时不弹窗口的条件后来又改了一次：改用 AppKit 之后，只有登录时的自动启动才不弹，从 Finder 或 Dock 手动打开都弹（读启动时的 Apple 事件，见 [AppKit 界面层的实现说明](AppKitInterface.md)）。
 
-**窗口按内容开，但不超过屏幕的可见区域。** 照 DockIconOverride 写的 `.fixedSize(vertical:)` 让表单坚持完整高度，`.windowResizability(.contentSize)` 又让窗口的最小高度等于它，内容一高过屏幕，窗口就伸到 Dock 后面（测试 MacBook 的可见高度只有 960 点）。现在表单不再 `fixedSize`，它的理想高度仍是内容高度；`defaultWindowPlacement` 按这个高度开窗口，最多到可见区域（已去掉菜单栏和 Dock）减去标题栏的余量，再多就在表单里滚动。说明文字都收进了悬停提示，daemon 与输入法辅助进程各占一行，与横幅重复的提示删了，测试 MacBook 上窗口从高过 960 点降到 617 点（含标题栏）。开发构建打开窗口后会把窗口与可见区域的 frame 写进日志（类别 `ApplicationActivationPolicyController`），不看屏幕也能核对。
+**窗口按内容开，但不超过屏幕的可见区域。** SwiftUI 时期照 DockIconOverride 让表单坚持完整高度，内容一高过屏幕，窗口就伸到 Dock 后面（测试 MacBook 的可见高度只有 960 点）。现在 `ControlPanelWindowController` 第一次打开时按完整内容定高，最多到可见区域（已去掉菜单栏和 Dock）减去标题栏的余量 72 点（`ContentSizedWindowPlacement`），再多就在表单里滚动。说明文字都收进了悬停提示，daemon 与输入法辅助进程各占一行，与横幅重复的提示删了，测试 MacBook 上窗口从高过 960 点降到 617 点（含标题栏）。开发构建打开窗口后会把窗口与可见区域的 frame 写进日志（类别 `ApplicationActivationPolicyController`），不看屏幕也能核对。
 
-**App 只链接 `LaunchpadAwakenerAppCore`。** 通道的回报类型在 `LaunchpadAwakenerPayloadInterface` 里，AppCore 不把它们放进自己的公开接口，而是转成 `ResidentPayload`。App target 再链接一个包产物，Xcode 有可能把 payload 框架也链进 App 里，而 payload 只该注入别的进程。
+**App 只链接一个包产物。** 原来是 `LaunchpadAwakenerAppCore`，改用 AppKit 后是 `LaunchpadAwakenerAppUI`，AppCore 经它间接链接。通道的回报类型在 `LaunchpadAwakenerPayloadInterface` 里，AppCore 不把它们放进自己的公开接口，而是转成 `ResidentPayload`。App target 再链接一个包产物，Xcode 有可能把 payload 框架也链进 App 里，而 payload 只该注入别的进程。
 
 ## 与提案的差异
 

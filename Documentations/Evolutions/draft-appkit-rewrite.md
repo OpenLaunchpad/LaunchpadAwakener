@@ -7,7 +7,7 @@
 - **所属愿景**: 无
 - **关联提案**: [0002 不注入 Dock 的独立版 Launchpad](0002-standalone-launchpad.md)、[0003 照 DockIconOverride 重做注入版 App 的控制面板](0003-app-control-panel.md)、[0005 在注入版 App 里整理 Launchpad 的布局](0005-launchpad-organizer.md)
 - **实现分支 / PR**: `feature/appkit-rewrite`（worktree `.worktrees/LaunchpadAwakener-AppKitRewrite`）
-- **配套文档**: 待定 —— 落地时登记实现说明的链接
+- **配套文档**: [AppKit 界面层的实现说明](../Internal/AppKitInterface.md)；同步更新了[控制面板](../Internal/ControlPanel.md)、[整理窗口](../Internal/LaunchpadOrganizer.md)与[独立版](../Internal/StandaloneLaunchpad.md)的实现说明
 
 ## 摘要
 
@@ -352,8 +352,8 @@ extension LaunchpadOrganizerViewModel {
 6. **整理窗口。**（已完成）
 7. **注入版 App 的外壳换成 `main.swift`**（已完成），删掉三个 SwiftUI 文件。
 8. **独立版**（已完成）：设置窗口、主菜单、`main.swift`，删掉两个 SwiftUI 文件。
-9. **测试机验证。** 两台机器上逐张对照截图，调到一致；交互逐项过一遍：三个开关（测后还原）、立即注入、重启 Dock、横幅按钮、菜单栏每一项，整理窗口的每种编辑与拖放（测前备份布局库，测后还原）。MacBook 上打开开机启动后注销，**由用户在 MacBook 上手动登录**（它没开自动登录，ssh 进不了登录窗口），确认控制面板不弹；再退出后从 Finder 打开，确认弹出。独立版：从 Dock 菜单与 ⌘, 打开设置，录一个快捷键再清掉，「Open at Login」测后还原。
-10. **文档。** 更新控制面板、整理窗口、独立版三份实现说明，项目 `CLAUDE.md` 的结构表与构建说明，已裁决清单里「手动打开不弹窗口」那条改判为已修，文档索引。
+9. **测试机验证。**（MacBook 已完成；26 虚拟机与注销再登录还没做） 两台机器上逐张对照截图，调到一致；交互逐项过一遍：三个开关（测后还原）、立即注入、重启 Dock、横幅按钮、菜单栏每一项，整理窗口的每种编辑与拖放（测前备份布局库，测后还原）。MacBook 上打开开机启动后注销，**由用户在 MacBook 上手动登录**（它没开自动登录，ssh 进不了登录窗口），确认控制面板不弹；再退出后从 Finder 打开，确认弹出。独立版：从 Dock 菜单与 ⌘, 打开设置，录一个快捷键再清掉，「Open at Login」测后还原。
+10. **文档。**（已完成） 更新控制面板、整理窗口、独立版三份实现说明，项目 `CLAUDE.md` 的结构表与构建说明，已裁决清单里「手动打开不弹窗口」那条改判为已修，文档索引。
 
 **收尾时必须判断两件事**（判断结果写进决策日志，不允许沉默跳过）：
 
@@ -386,3 +386,5 @@ extension LaunchpadOrganizerViewModel {
 | 2026-11-09 | 独立版的设置窗口直接打开 | 设置窗口改成 AppKit 的窗口控制器，「Settings…」与 Dock 菜单都直接打开它，不再去 App 菜单里找 ⌘, 那一项模拟执行。录制快捷键用 KeyboardShortcuts 的 `RecorderCocoa`。登录时启动的判断改用共用模块的 `ApplicationLaunch`，删掉独立版私有的一份。构建日志里 x86_64 的一条 `points before section` 链接警告来自 FrameworkToolbox 的目标文件，改写前 `main` 的 payload 构建里就有，与这次无关。 |
 | 2026-11-09 | MacBook 上逐张对照后的修正 | 部署到 MacBook（27.2）与改写前的截图对照，改了这些：表单里的开关用 mini 尺寸（SwiftUI 的分组表单是 36×16 点）；作为附件的 `NSStackView` 设水平抱紧，状态才靠右；横幅要显式打开四边描边，图标列定为 33 点高；整理窗口工具栏只显示图标、「New Folder」与「Move Out of Folder」合成一组、侧栏按钮挪到侧栏右缘；侧栏用 medium 行高、强调色图标、普通数字计数；列表行至少 38 点；关掉窗口标签页（SwiftUI 的窗口不分标签，否则 View 与 Window 菜单会多出标签页命令）；View 菜单在没有侧栏或不能自定义工具栏时隐藏对应项；独立版「Settings…」的齿轮在 macOS 27 上要设 `preferredImageVisibility = .visible` 才显示。 |
 | 2026-11-09 | 三个只在真机上才看得出的坑 | 菜单工具栏项把菜单当下拉菜单用，第一项被当成标题不显示，「Move To」会丢掉「Page 1」、「Arrange」会丢掉「Sort by Name」，所以开头垫一个空项。`NSScrollViewController` 只对关掉自动转换约束的文档视图做 Auto Layout，按分类归类的列表因此是空白，表单则是碰巧被 SnapKit 关掉了，两处都改成显式设置。swift-navigation 2.11.101 在窗口上弹 `NSAlert` 时跳过了 `beginSheetModal(for:)`，alert 没排版、露出 nib 里的占位控件，解散确认改为直接调 `beginSheetModal(for:)`。 |
+| 2026-11-09 | 文档 | 新写 [AppKit 界面层的实现说明](../Internal/AppKitInterface.md)：外壳与模块、表单尺寸、主菜单、登录时启动的判断，以及只在真机上才看得出的三个坑，都是下一任维护者会踩、代码里看不出来的决策。控制面板、整理窗口、独立版三份实现说明改了结构表与过时的 SwiftUI 段落；已裁决清单里「手动打开不弹窗口」改判为已修；项目 `CLAUDE.md` 改了结构表并加了「界面」一节。没有新术语，术语表不动。这是 App，不需要使用指南。 |
+| 2026-11-09 | 实现完成，待用户看过后收尾 | MacBook（27.2）上对照与交互都做完了。还没做：26 虚拟机上的对照（虚拟机没开机），以及注销再登录确认登录时启动不弹控制面板（MacBook 没开自动登录，要用户手动登录）。 |

@@ -44,21 +44,23 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 
 | 目录 | 是什么 |
 |---|---|
-| `LaunchpadAwakener/` | SwiftUI App 外壳：菜单栏 App，窗口是控制面板（见[控制面板实现说明](Documentations/Internal/ControlPanel.md)） |
+| `LaunchpadAwakener/` | App 外壳：`main.swift` 建 `ApplicationDelegate` 并运行。菜单栏 App，窗口是控制面板（见[控制面板实现说明](Documentations/Internal/ControlPanel.md)） |
 | `LaunchpadAwakenerDaemon/` | 特权 daemon 的 `main.swift`，两行 |
 | `LaunchpadAwakenerPayload/` | payload 的 `main.m`，提供两条注入入口 |
 | `LaunchpadAwakenerTextInput/` | 文本输入辅助进程的 `main.swift`：嵌在 App 里的 LaunchAgent，替 Launchpad 托管搜索框与改名框，好让输入法能用 |
-| `LaunchpadAwakenerStandalone/` | 独立版 App「Launchpad」的 SwiftUI 外壳：只有 App 结构体与图标 |
+| `LaunchpadAwakenerStandalone/` | 独立版 App「Launchpad」的外壳：只有 `main.swift` 与图标 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerShared` | 服务名、版本、路径。**不依赖任何东西** |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPrivateInterfaces` | 只有头文件：IconServices、IconFoundation、SkyLight、QuartzCore 导出的私有类的声明，供直接调用。不引入 AppKit |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppKitPrivateInterfaces` | 只有头文件：AppKit 私有方法的声明，只给文本输入辅助进程用 |
-| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppCore` | daemon 生命周期与自愈、进程监视、注入编排、payload 通道的 App 一侧、控制面板要显示的状态、整理 Launchpad 窗口的逻辑 |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppCore` | daemon 生命周期与自愈、进程监视、注入编排、payload 通道的 App 一侧、控制面板要显示的状态与文案、整理 Launchpad 窗口的逻辑与视图模型 |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppUI` | 注入版 App 的 AppKit 界面：delegate、控制面板、菜单栏、整理窗口。App target 只链接这一个产物 |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSharedUI` | 两个 App 共用的 AppKit 部件：分组表单、按内容定高的窗口、主菜单、登录时启动的判断 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadInterface` | payload 通道的请求与回报类型。App 与 payload 都链接它，只放请求类型 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerDaemonCore` | 组装特权 XPC 服务端 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore` | Launchpad 本身：布局库与界面层。经宿主接口 `SpringboardHost` 拿窗口、图层类、壁纸这些，不认识 Dock，不链接 AppKit |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore` | 跑在 Dock 里、围着 Launchpad 的代码：Dock 宿主、hook 声明、入口 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore` | 文本输入辅助进程：XPC 服务、托管的 `NSTextField`。只有它链接 AppKit 的私有部分 |
-| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerStandaloneCore` | 独立版的宿主：盖住全屏的窗口与事件、壁纸、图标样式、看门狗、设置。链接 AppKit |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerStandaloneCore` | 独立版的宿主：盖住全屏的窗口与事件、壁纸、图标样式、看门狗、设置窗口。链接 AppKit |
 
 模块按「谁链接它」划分。App 不能链接 daemon 的特权依赖，payload 要尽量小 —— 它会被映射进一个并没有请求它的进程。
 
@@ -83,6 +85,10 @@ hook 与 Dock 自己的类（Dock 不导出任何类）用 FrameworkToolbox 的 
 - **Dock 里类名固定的类**写成 `@RuntimeClassProxy("类名")` 协议：选择子与编码由 Swift 声明推出，第一次调用前整批核对。实例方法与属性照常写；构造写成 `init?(…)`（第一个标签决定选择子，`init(frame:)` 即 `initWithFrame:`）；类方法写成 `static func`；block 参数写成 `@escaping @convention(block) (…) -> …`。Dock 的要把协议的 `methodRequirements` 加进 `DockHostInterface.requiredMethods`（或玻璃、Dock 显隐各自的清单），编码记进 `DockSignatureTests`（类方法的键前加 `+`）。可选功能的方法单独成协议，一个不符整个协议就停用。
 - **经别的对象拿到、类名随系统版本变的对象**（`DockBar.environment` 交出的那些，环境对象在 26 上叫 `Environment`、27 上叫 `_TtC8DockCore11Environment`）写成 `@RuntimeObjectProxy` 协议：写法相同，按对象自己的类核对，每个类核对一次。它没有类可调，不能写 `init?` 与 `static`。编码同样记进 `DockSignatureTests`。
 - **代码里不写类型编码字面量**，也不用 `DynamicObject`：它按原样拷参数字节、不核对参数类型。宏表达不了的调用，先给 FrameworkToolbox 的 ObjCRuntimeToolbox 补上，再来用。
+
+## 界面
+
+两个 App 的界面都是 AppKit，用 UIFoundation（开 `AppKitPlus` trait）、AppKitPlus、swift-navigation 与 SnapKit，仓库里不写 SwiftUI。写界面之前先读 `uifoundation-widgets`、`appkit-app-modernization`、`swift-navigation-bindings` 三个 skill；界面层的约定和只在真机上才看得出的坑见 [AppKit 界面层实现说明](Documentations/Internal/AppKitInterface.md)。改了 UIFoundation 的 trait 之后，Xcode 不会重编已经编过的依赖，要删掉整个构建目录再编。
 
 ## 构建
 

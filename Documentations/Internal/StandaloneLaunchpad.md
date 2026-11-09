@@ -38,7 +38,7 @@
 
 **看门狗经窗口服务器撤窗口。** 一扇在一切之上、不再响应的全屏窗口会让整台机器没法用。后台线程每秒向主线程打一次招呼，超过 3 秒没回应就调 SkyLight 的 `SLSOrderWindow` 把窗口移出屏幕——这一步不经 AppKit，主线程卡住时也做得到——每次显示最多做一次，并记一条 fault 日志。开发构建 20 秒无输入自动收起、Esc、退回开关这些保险与注入版共用。
 
-**快捷键默认不设，设置从 Dock 图标的菜单进。** 全局快捷键用 [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts)：设置里的录制控件，底下是 Carbon 的 `RegisterEventHotKey`，不需要任何权限；按下时切换显示与收起。15 的「显示 Launchpad」快捷键默认是空的，这里也一样。界面打开时盖住菜单栏，所以除了 App 菜单里的「设置…」，Dock 图标的菜单也放一个「设置…」，先收起界面再打开设置窗口。打开设置窗口的办法是执行 App 菜单里 SwiftUI 生成的那个「设置…」菜单项（`StandaloneSettings.show()`）：从 macOS 14 起，SwiftUI 不再理会顺着响应链发出的 `showSettingsWindow:`，发了什么也不会出现。设置窗口另有「登录时打开」，经 `SMAppService.mainApp` 增删。
+**快捷键默认不设，设置从 Dock 图标的菜单进。** 全局快捷键用 [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts)：设置里的录制控件，底下是 Carbon 的 `RegisterEventHotKey`，不需要任何权限；按下时切换显示与收起。15 的「显示 Launchpad」快捷键默认是空的，这里也一样。界面打开时盖住菜单栏，所以除了 App 菜单里的「设置…」，Dock 图标的菜单也放一个「设置…」，先收起界面再打开设置窗口（`StandaloneSettings.show()`）。设置窗口是 AppKit 的窗口控制器，直接打开；SwiftUI 时期只能去执行 App 菜单里那个「设置…」菜单项，因为 SwiftUI 的设置场景不理会顺着响应链发出的 `showSettingsWindow:`。录制快捷键用 KeyboardShortcuts 的 AppKit 控件 `RecorderCocoa`。设置窗口另有「登录时打开」，经 `SMAppService.mainApp` 增删。
 
 **`--self-check` 让测试机上不看屏幕也能核对。** 开发构建带这个参数启动时不显示界面、不注册登录项，只把宿主找到的 Dock 几何、壁纸来源、图标样式、布局库与窗口写进日志，加上共用的离屏自检，15 秒后退出。
 
@@ -60,9 +60,9 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerStandaloneCore/
 ├── StandaloneIconStyle.swift              # 由 SkyLight 的图标外观配置建 ISImageDescriptor
 ├── StandaloneInputMethod.swift            # 系统输入法：遵循 NSTextInputClient 的内容视图
 ├── StandaloneWatchdog.swift               # 主线程卡住时经窗口服务器撤窗口
-└── StandaloneSettingsView.swift           # 设置窗口：快捷键录制、登录时打开
+└── StandaloneSettings.swift               # 设置窗口：快捷键录制、登录时打开
 
-LaunchpadAwakenerStandalone/LaunchpadApp.swift  # App 外壳：delegate 与设置场景
+LaunchpadAwakenerStandalone/main.swift     # App 外壳：建 delegate 并运行
 ```
 
 ## 与提案的差异

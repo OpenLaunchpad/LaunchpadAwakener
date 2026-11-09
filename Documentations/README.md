@@ -11,6 +11,7 @@
 - [Evolutions/0006-objc-runtime-toolbox.md](Evolutions/0006-objc-runtime-toolbox.md) —— 用 FrameworkToolbox 的 ObjCRuntimeToolbox 改写 hook 与私有调用，删掉 HookKit（Implemented）
 - [Internal/LaunchpadReplica.md](Internal/LaunchpadReplica.md) —— Launchpad 复刻的实现说明：关键决策、模块结构、验证、新 Dock 构建的适配流程
 - [Internal/StandaloneLaunchpad.md](Internal/StandaloneLaunchpad.md) —— 独立版 Launchpad 的实现说明：宿主接口、Dock 图层类的等价实现、验证
+- [Internal/AppKitInterface.md](Internal/AppKitInterface.md) —— 两个 App 的 AppKit 界面层的实现说明：外壳与模块、分组表单的尺寸、主菜单、登录时启动、只在真机上才看得出的坑
 - [Internal/ControlPanel.md](Internal/ControlPanel.md) —— 注入版 App 控制面板的实现说明：payload 通道、旧 payload 的识别、闪退保护、状态横幅的顺序
 - [Internal/LaunchpadOrganizer.md](Internal/LaunchpadOrganizer.md) —— 整理 Launchpad 窗口的实现说明：App 不碰数据库、编辑带版本号、一批编辑一个事务、拖动与分类
 - [Internal/ReviewAdjudications.md](Internal/ReviewAdjudications.md) —— 代码审查的已裁决清单：判为误报或不修的发现与理由
