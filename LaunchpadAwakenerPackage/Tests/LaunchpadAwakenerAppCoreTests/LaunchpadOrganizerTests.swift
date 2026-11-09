@@ -4,9 +4,9 @@ import SwiftyXPC
 import Testing
 @testable import LaunchpadAwakenerAppCore
 
-/// A layout of two pages: page 1 holds Alpha, the folder Tools (Hammer, Saw) and Beta; page 2 holds
-/// Gamma and the folder Media (Music).
-private enum Sample {
+/// A layout of two pages, shared by the organizer and organizer view model tests: page 1 holds Alpha,
+/// the folder Tools (Hammer, Saw) and Beta; page 2 holds Gamma and the folder Media (Music).
+enum Sample {
     static let pageOne: Int64 = 10
     static let pageTwo: Int64 = 20
     static let alpha: Int64 = 11
@@ -114,7 +114,7 @@ struct LaunchpadOrganizerEditsTests {
 }
 
 /// Stands in for the payload channel: answers from a script and records what it was sent.
-private final actor ScriptedLayoutChannel: LayoutChannel {
+final actor ScriptedLayoutChannel: LayoutChannel {
     var snapshotReplies: [LayoutSnapshotReply]
     var editReplies: [LayoutEditReply]
     private(set) var knownRevisions: [Int?] = []

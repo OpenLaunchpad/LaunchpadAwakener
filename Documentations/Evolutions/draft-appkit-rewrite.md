@@ -346,7 +346,7 @@ extension LaunchpadOrganizerViewModel {
 
 1. **截改写前的对照图。**（MacBook 已截；26 虚拟机当时没开机，留到部署 AppKit 版之前补截）部署前先看 MacBook 上跑的是谁的构建。把当前 `main` 的两个 App 部署到 MacBook（27.2）与 26 虚拟机，截控制面板、菜单栏菜单、主菜单、整理窗口（侧栏、列表、搜索、右键菜单、两个 sheet、确认框）、独立版设置窗口与主菜单，并记下两个窗口关掉再开时是否回到上次的位置与大小。图存在仓库以外的临时目录。
 2. **依赖与空模块。**（已完成）加四个库、两个新模块与测试 target，App target 改为只链接 `LaunchpadAwakenerAppUI`（第 7 步之前，SwiftUI 外壳经它拿到 AppCore），这样这一步就用 Xcode 编到了 UIFoundation。确认 trait 在旧 PIF 构建器下生效（`LayerBackedView` 继承自 `NSLayerBackedView`，没有 `NSEdgeInsets` 的 `==` 歧义），不生效就停下来问用户。
-3. **AppCore。** 横幅呈现、两行状态、整理窗口的视图模型，加单元测试；SwiftUI 视图暂时改调它们，行为不变。
+3. **AppCore。**（已完成）横幅呈现、两行状态、整理窗口的视图模型，加单元测试；SwiftUI 视图暂时改调它们，行为不变。
 4. **共用模块。** 分组表单、窗口尺寸规则、标准主菜单、登录时启动的判断，加单元测试。
 5. **注入版 App 的控制面板、菜单栏与 delegate。**
 6. **整理窗口。**
@@ -377,3 +377,4 @@ extension LaunchpadOrganizerViewModel {
 | 2026-11-09 | 旧 PIF 构建器认 trait | 第 2 步实测：`-IDEEnableNewPackagePIFBuilder=NO` 下 UIFoundation 的编译参数带 `-DAppKitPlus`，daemon 与 payload 仍是 `x86_64 arm64 arm64e`，App 是 `x86_64 arm64`，嵌了 AppKitPlus.framework。另加一个只在编译期起作用的检查（`LayerBackedView` 必须是 `NSLayerBackedView` 的子类），trait 丢了就编不过，而不是悄悄换掉基类。风险解除，x86_64 不受影响。 |
 | 2026-11-09 | 主菜单用 UIFoundation 的 `MainMenu` | UIFoundation 自带按 Xcode 模板搭标准主菜单的 `MainMenu`，各项可按标识增删，详细设计里打算自己写的 `StandardMainMenu` 不再需要。两个 App 的菜单项照改写前的截图对齐：没有 File 菜单，Close 在 Window 菜单里，Window 菜单列出两个窗口，Help 菜单只有「<App> Help」。 |
 | 2026-11-09 | 控制面板按完整内容定高 | 改写前的 SwiftUI 版在 MacBook 上开出来是 670 点高（含标题栏），最后一行被截掉、要滚动：`sizeThatFits` 给表单的理想高度比内容矮。代码注释的意图是「按内容开、不超过屏幕可见区域」，AppKit 版照意图按完整内容定高，屏幕放得下时不必滚动。 |
+| 2026-11-09 | 第 3 步不改 SwiftUI 视图 | 横幅呈现、状态行与整理窗口的视图模型都进了 AppCore 并有测试；原来的 SwiftUI 视图第 7 步整个删掉，这期间不改调新类型，省掉一次马上作废的改动。视图模型的编辑都经它转给 `LaunchpadOrganizer`，每次编辑或刷新之后就地修正选中项，不靠观察布局的变化来触发：观察闭包里写被观察的属性会让它不停重跑。整理窗口测试用的样例布局与替身通道改成测试 target 内共用。 |
