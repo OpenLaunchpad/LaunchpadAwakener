@@ -2,9 +2,9 @@
 
 - [Evolutions/README.md](Evolutions/README.md) —— 提案状态总表
 - [Evolutions/draft-launchpad-replica.md](Evolutions/draft-launchpad-replica.md) —— 在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad（In Progress）
-- [Evolutions/draft-app-control-panel.md](Evolutions/draft-app-control-panel.md) —— 照 DockIconOverride 重做注入版 App 的控制面板（In Progress）
 - [Evolutions/0001-input-method-helper.md](Evolutions/0001-input-method-helper.md) —— 用常驻辅助进程给搜索框与改名框接上输入法（Implemented）
 - [Evolutions/0002-standalone-launchpad.md](Evolutions/0002-standalone-launchpad.md) —— 不注入 Dock 的独立版 Launchpad：与注入版共用数据层与界面层（Implemented）
+- [Evolutions/0003-app-control-panel.md](Evolutions/0003-app-control-panel.md) —— 照 DockIconOverride 重做注入版 App 的控制面板：状态横幅、payload 通道、daemon 自愈、重启 Dock、菜单栏 App（Implemented）
 - [Internal/LaunchpadReplica.md](Internal/LaunchpadReplica.md) —— Launchpad 复刻的实现说明：关键决策、模块结构、验证、新 Dock 构建的适配流程
 - [Internal/StandaloneLaunchpad.md](Internal/StandaloneLaunchpad.md) —— 独立版 Launchpad 的实现说明：宿主接口、Dock 图层类的等价实现、验证
 - [Internal/ControlPanel.md](Internal/ControlPanel.md) —— 注入版 App 控制面板的实现说明：payload 通道、旧 payload 的识别、闪退保护、状态横幅的顺序

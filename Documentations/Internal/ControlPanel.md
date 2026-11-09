@@ -1,6 +1,6 @@
 # 注入版 App 的控制面板：实现说明
 
-> 配套提案见 [照 DockIconOverride 重做注入版 App 的控制面板](../Evolutions/draft-app-control-panel.md)。
+> 配套提案见 [照 DockIconOverride 重做注入版 App 的控制面板](../Evolutions/0003-app-control-panel.md)。
 > 本文记录实际落地的实现、与提案的差异，以及没在代码里写明、下一任维护者会踩到的决策。面向维护者。
 
 ## 背景与目标
