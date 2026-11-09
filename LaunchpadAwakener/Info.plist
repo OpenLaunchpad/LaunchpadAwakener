@@ -2,5 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Menu bar utility: no Dock icon unless a window is open. ApplicationActivationPolicyController
+	     switches to .regular while one is, so the window still gets a proper menu bar. Declaring it
+	     here rather than only switching at runtime is what keeps a Dock icon from flashing on launch. -->
+	<key>LSUIElement</key>
+	<true/>
 </dict>
 </plist>

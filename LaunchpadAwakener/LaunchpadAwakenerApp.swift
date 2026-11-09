@@ -1,80 +1,171 @@
 import SwiftUI
+import AppKit
 import LaunchpadAwakenerAppCore
-import LaunchpadAwakenerShared
 
 @main
 struct LaunchpadAwakenerApp: App {
-    @State private var daemonController: PrivilegedDaemonController
-    @State private var injectionCoordinator: PayloadInjectionCoordinator
-
-    /// The window is only needed to set the daemon up; once it is, launching — at login above all —
-    /// stays in the menu bar.
-    private let windowLaunchBehavior: SceneLaunchBehavior
-
-    init() {
-        let daemonController = PrivilegedDaemonController()
-        let injectionCoordinator = PayloadInjectionCoordinator(
-            daemonController: daemonController,
-            targetMatchingRule: .executableName("Dock"),
-            injectionMethod: .dynamicLibraryLoad
-        )
-        self.daemonController = daemonController
-        self.injectionCoordinator = injectionCoordinator
-        self.windowLaunchBehavior = daemonController.isEnabled ? .suppressed : .presented
-
-        Task { @MainActor in
-            await LaunchpadAwakenerApp.startAutomaticInjectionIfPreferred(
-                daemonController: daemonController,
-                injectionCoordinator: injectionCoordinator
-            )
-        }
-    }
+    /// Everything with a lifetime is owned by the delegate, not by this struct.
+    ///
+    /// Launch work hung off the window's `.task` stops being a launch hook the moment the window can
+    /// legitimately not appear — exactly what launching at login does. `applicationDidFinishLaunching`
+    /// fires whether or not anything is on screen.
+    @NSApplicationDelegateAdaptor(ApplicationDelegate.self) private var applicationDelegate
 
     var body: some Scene {
-        Window("LaunchpadAwakener", id: "main") {
+        Window("LaunchpadAwakener", id: WindowIdentifier.main) {
             MainView()
-                .environment(daemonController)
-                .environment(injectionCoordinator)
-                .task {
-                    // The daemon may have been approved since launch.
-                    await LaunchpadAwakenerApp.startAutomaticInjectionIfPreferred(
-                        daemonController: daemonController,
-                        injectionCoordinator: injectionCoordinator
-                    )
-                }
+                .environment(applicationDelegate.daemonController)
+                .environment(applicationDelegate.injectionCoordinator)
+                .environment(applicationDelegate.launchAtLoginController)
+                .environment(applicationDelegate.launchProgress)
+                .environment(applicationDelegate.textInputAgentController)
+                .environment(applicationDelegate.killSwitchController)
+                .onAppear { applicationDelegate.activationPolicyController.windowDidAppear() }
+                .onDisappear { applicationDelegate.activationPolicyController.windowDidDisappear() }
         }
         .windowResizability(.contentSize)
-        .defaultLaunchBehavior(windowLaunchBehavior)
+        // Suppressed only while launching at login is on. With it off this launch cannot have come
+        // from launchd, so the window appears — which is why nothing in this app has to detect where
+        // a launch came from.
+        .defaultLaunchBehavior(applicationDelegate.launchAtLoginController.isEnabled ? .suppressed : .presented)
+        // `.suppressed` only applies "in the absence of any previously restored scenes". Without this,
+        // quitting with the window open would have it restored straight past the suppression.
+        .restorationBehavior(.disabled)
 
-        MenuBarExtra("LaunchpadAwakener", systemImage: "square.grid.3x3") {
+        MenuBarExtra {
             MenuBarContent()
-                .environment(daemonController)
-                .environment(injectionCoordinator)
+                .environment(applicationDelegate.daemonController)
+                .environment(applicationDelegate.injectionCoordinator)
+                .environment(applicationDelegate.launchProgress)
+                .environment(applicationDelegate.killSwitchController)
+        } label: {
+            MenuBarLabel(reopenRequest: applicationDelegate.reopenRequest)
         }
     }
+}
 
-    /// Reconciles the daemon with this build, then — unless automatic injection was switched off —
-    /// injects into the running Dock, follows it across restarts and stays a login item.
-    ///
-    /// A daemon left over from a previous build answers requests with the previous build's behaviour,
-    /// which is why reconciling comes first. Safe to call more than once.
-    @MainActor
-    static func startAutomaticInjectionIfPreferred(
-        daemonController: PrivilegedDaemonController,
-        injectionCoordinator: PayloadInjectionCoordinator
-    ) async {
-        daemonController.refreshStatus()
-        guard daemonController.isEnabled else { return }
+enum WindowIdentifier {
+    static let main = "main"
+}
 
-        switch await daemonController.reconcileVersion() {
-        case .upToDate, .reinstalled:
-            guard injectionCoordinator.prefersAutomaticInjection else { return }
-            injectionCoordinator.startAutomaticInjection()
-            LaunchAtLogin.setEnabled(true)
-            TextInputAgent.registerIfNeeded()
-            await injectionCoordinator.injectIntoRunningTargets()
-        case .staleButNotEnabled, .queryFailed, .reinstallFailed:
-            break
+/// The menu bar icon, and the one view guaranteed to be alive while no window is open.
+///
+/// `openWindow` is a SwiftUI environment value, so something has to be in the view tree to read it.
+/// Once the window closes this label is all that is left, which is why the reopen bridge lives on
+/// the menu bar icon rather than next to the window it opens.
+private struct MenuBarLabel: View {
+    let reopenRequest: ApplicationReopenRequest
+
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Label("LaunchpadAwakener", systemImage: "square.grid.3x3.fill")
+            .onChange(of: reopenRequest.reopenCount) {
+                // An accessory app is not in the activation order, so opening a window without this
+                // puts it behind whatever the user was looking at.
+                ApplicationActivationPolicyController.activateForWindowPresentation()
+                openWindow(id: WindowIdentifier.main)
+            }
+    }
+}
+
+/// Bumped each time the user launches the app while it is already running.
+///
+/// A counter rather than a boolean: two reopens in a row are two separate requests, and a boolean
+/// that is already true would swallow the second one.
+@MainActor
+@Observable
+final class ApplicationReopenRequest {
+    private(set) var reopenCount = 0
+
+    func record() {
+        reopenCount += 1
+    }
+}
+
+/// Owns the app's controllers and its launch sequence.
+@MainActor
+final class ApplicationDelegate: NSObject, NSApplicationDelegate {
+    let daemonController: PrivilegedDaemonController
+    let injectionCoordinator: PayloadInjectionCoordinator
+    let activationPolicyController = ApplicationActivationPolicyController()
+    let launchAtLoginController = LaunchAtLoginController()
+    let textInputAgentController = TextInputAgentController()
+    let killSwitchController = KillSwitchController()
+    let reopenRequest = ApplicationReopenRequest()
+    let launchProgress = ApplicationLaunchProgress()
+
+    override init() {
+        let daemonController = PrivilegedDaemonController()
+        self.daemonController = daemonController
+        self.injectionCoordinator = PayloadInjectionCoordinator(
+            daemonController: daemonController,
+            // The Dock's executable path is fixed, so match on the full path rather than the name —
+            // an unrelated process called "Dock" would otherwise be injected too.
+            targetMatchingRule: .executablePath("/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock"),
+            injectionMethod: .dynamicLibraryLoad
+        )
+        super.init()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // A Dock injected once and not after the next login is a tool that silently stops working,
+        // so the first time the tool works, launching at login is turned on — once, and only if the
+        // user has not decided for themselves.
+        injectionCoordinator.onInjectionSucceeded = { [launchAtLoginController] in
+            launchAtLoginController.applyDefaultIfNeeded()
         }
+
+        // Before anything that can fail. The monitor needs no daemon and no privileges — it reads the
+        // process table — and it is what retries injection for as long as the app runs. Starting it
+        // only once the daemon had been confirmed usable would make the one mechanism that can
+        // recover from a bad launch the one thing a bad launch never reaches.
+        injectionCoordinator.activateAutomaticInjectionIfEnabled()
+
+        // Needs no daemon either: launchd only starts the helper when a payload connects to it.
+        textInputAgentController.registerIfNeeded()
+
+        Task { await runLaunchSequence() }
+    }
+
+    /// Reopens the window when the app is launched again while already running.
+    ///
+    /// With no Dock icon and no open window, opening the app from Finder produces a reopen rather
+    /// than a launch, and SwiftUI has nothing to bring forward. Without this the menu bar item would
+    /// be the only way back in — the state launching at login leaves the app in after every boot.
+    func applicationShouldHandleReopen(_ application: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        guard !hasVisibleWindows else { return true }
+        reopenRequest.record()
+        return true
+    }
+
+    /// Gets the app to a working state, recording how far it got.
+    ///
+    /// Every step that cannot proceed is recorded rather than returned from silently: a launch that
+    /// could not reach the daemon must not produce a window that looks exactly like a healthy one.
+    private func runLaunchSequence() async {
+        launchProgress.enter(.preparingDaemon)
+
+        let availability = await daemonController.ensureDaemonUsable()
+        guard availability.isUsable else {
+            // Not the end of the road: the process monitor is already running, and every injection
+            // it attempts makes the daemon usable first. This says where things stand right now.
+            launchProgress.enter(.stopped(reason: availability.summary))
+            return
+        }
+
+        // Pick up payloads still running from an earlier session before deciding anything else.
+        // Skipping this makes a relaunched app report "not injected" while the payload is right
+        // there, and the obvious response — injecting again — does nothing, because a mapped image
+        // cannot be loaded twice.
+        launchProgress.enter(.reconnectingToPayloads)
+        await injectionCoordinator.reconnectToResidentPayloads()
+
+        if injectionCoordinator.isAutomaticInjectionEnabled {
+            launchProgress.enter(.injecting)
+            await injectionCoordinator.injectIntoRunningTargets()
+        }
+
+        launchProgress.enter(.ready)
     }
 }

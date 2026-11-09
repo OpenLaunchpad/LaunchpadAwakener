@@ -4,6 +4,7 @@ import HelperServer
 import HelperService
 import FilesServiceImplementation
 import InjectionServiceImplementation
+import InjectedEndpointRegistryServiceImplementation
 import LaunchpadAwakenerShared
 
 /// Entry point for the privileged daemon.
@@ -14,6 +15,9 @@ import LaunchpadAwakenerShared
 ///
 /// - `InjectionService` — the `dlopen` and `mach_vm_remap` injection paths.
 /// - `FilesService` — privileged file placement, used to stage the payload.
+/// - `InjectedEndpointRegistryService` — remembers where each injected payload can be reached, so a
+///   relaunched app can find the payloads that are still resident instead of reporting nothing is
+///   injected. The daemon outlives the app, which is why the list has to live here.
 ///
 /// `HelperServer` additionally mounts its own `MainService`, which answers the version query the
 /// app uses to detect a stale daemon, plus a ping and the endpoint registry.
@@ -28,6 +32,7 @@ public enum DaemonMain {
             services: [
                 InjectionService(),
                 FilesService(),
+                InjectedEndpointRegistryService(),
             ]
         )
         await server.activateAndRun()

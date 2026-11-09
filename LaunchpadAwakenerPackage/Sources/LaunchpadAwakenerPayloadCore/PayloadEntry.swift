@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import LaunchpadAwakenerHookKit
+import LaunchpadAwakenerPayloadInterface
 import LaunchpadAwakenerShared
 import LaunchpadAwakenerSpringboardCore
 
@@ -51,7 +52,13 @@ public enum PayloadEntry {
 
         // Before any hook can call into the springboard.
         SpringboardHostSystem.bootstrap(host: DockSpringboardHost())
-        installHooks()
+        let hookInstallation = installHooks()
+
+        // Opened whatever became of the hooks: a payload that installed nothing is exactly what the
+        // app's window most needs to hear about.
+        Task {
+            await PayloadPeer.shared.start(hookInstallation: hookInstallation)
+        }
     }
 
     /// Whether this copy of the payload was loaded into the privileged daemon rather than a target.
@@ -65,23 +72,29 @@ public enum PayloadEntry {
         return executableName == InjectionServiceIdentity.machServiceName
     }
 
-    private static func installHooks() {
+    private static func installHooks() -> HookInstallation {
         let hooks = PayloadHooks.descriptors()
 
         guard !hooks.isEmpty else {
             logger.info("No hooks declared — payload is attached but inert")
-            return
+            // `descriptors()` declares none for exactly these two reasons, and has logged which.
+            guard DockBuildProfile.current != nil else {
+                return .unknownDockBuild(executableUUID: DockBuildProfile.currentExecutableUUID?.uuidString ?? "unreadable")
+            }
+            return .incompatibleDockMethods
         }
 
         do {
             try MethodHookInstaller.installAtomically(hooks)
             logger.info("Installed \(hooks.count, privacy: .public) hook(s)")
             LaunchpadServices.start()
+            return .installed(hookCount: hooks.count)
         } catch {
             // Deliberately terminal-but-harmless: the payload stays loaded and does nothing.
             // Leaving the host untouched is always better than half-hooking it, and the log line
             // below is what tells you an operating system update moved the target out from under you.
             logger.error("Hook installation aborted, host left untouched: \(String(describing: error), privacy: .public)")
+            return .failed(description: String(describing: error))
         }
     }
 }

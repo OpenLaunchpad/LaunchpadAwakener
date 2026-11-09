@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LaunchpadAwakenerShared
 import OSToolbox
 import QuartzCore
 
@@ -15,7 +16,7 @@ package final class SpringboardController {
 
     /// While this file exists, every entry falls back to the system's Apps and a showing springboard
     /// closes on its next event. Creating it over ssh is the way out when the screen is unusable.
-    package nonisolated static let killSwitchPath = "/tmp/LaunchpadAwakener.disabled"
+    package nonisolated static let killSwitchPath = KillSwitchIdentity.path
 
     package nonisolated static var isDisabledByKillSwitch: Bool {
         FileManager.default.fileExists(atPath: killSwitchPath)

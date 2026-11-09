@@ -13,12 +13,13 @@ struct DockBuildProfile: Sendable, Equatable {
     /// `LC_UUID` of the Dock executable's arm64e slice, which identifies the build.
     let executableUUID: UUID
 
-    /// The macOS releases, with their build numbers, that ship this Dock. Only written to the log.
+    /// The macOS releases, with their build numbers, that ship this Dock. Written to the log and
+    /// reported to the app.
     ///
     /// Point releases often ship a byte-identical Dock, so one profile can cover several.
     let systemReleases: [String]
 
-    /// `CFBundleVersion` of Dock.app. Only written to the log.
+    /// `CFBundleVersion` of Dock.app. Written to the log and reported to the app.
     let bundleVersion: String
 
     /// Unslid address of the global that holds the Dock's `DockBar`; nothing exported leads to it.
@@ -210,6 +211,12 @@ struct DockBuildProfile: Sendable, Equatable {
 
     /// The running Dock's profile, or nil when this build is not one of ``knownProfiles``.
     static let current: DockBuildProfile? = resolveCurrentProfile()
+
+    /// `LC_UUID` of the running executable's slice, profiled or not. Nil when it cannot be read.
+    static var currentExecutableUUID: UUID? {
+        // dyld always lists the main executable first.
+        _dyld_get_image_header(0).flatMap(MachOImageInspector.uuid(ofImageWithHeader:))
+    }
 
     /// How far the Dock executable was slid when loaded; added to every address in a profile.
     static var executableSlide: Int {

@@ -31,7 +31,7 @@ public enum InjectionServiceIdentity {
     /// The app compares this against the running daemon and reinstalls on mismatch, which is what
     /// makes "I rebuilt the daemon but the old one is still resident" stop being a debugging
     /// session. Bump it whenever the daemon's request surface changes.
-    public static let daemonVersion = "1.0.0"
+    public static let daemonVersion = "1.1.0"
 
     /// Where the app asks the daemon to place the payload before injecting it.
     ///

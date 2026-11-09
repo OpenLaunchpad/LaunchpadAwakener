@@ -27,6 +27,8 @@ let package = Package(
         // Standalone so it can be reused or tested without dragging in the payload's specifics.
         .library(name: "LaunchpadAwakenerHookKit", targets: ["LaunchpadAwakenerHookKit"]),
         .library(name: "LaunchpadAwakenerShared", targets: ["LaunchpadAwakenerShared"]),
+        // The request types the app and the injected payload speak to each other.
+        .library(name: "LaunchpadAwakenerPayloadInterface", targets: ["LaunchpadAwakenerPayloadInterface"]),
     ],
     dependencies: [
         // Privileged-helper plumbing: SMAppService installation, typed XPC request/response, and the
@@ -54,18 +56,30 @@ let package = Package(
         // Depends on nothing but the Objective-C runtime.
         .target(name: "LaunchpadAwakenerHookKit"),
 
+        // What the app and the payload say to each other over their direct XPC channel. Both sides
+        // link this, so it holds request types and nothing else.
+        .target(
+            name: "LaunchpadAwakenerPayloadInterface",
+            dependencies: [
+                .product(name: "HelperCommunication", package: "swift-helper-service"),
+            ]
+        ),
+
         // App side: daemon lifecycle, target-process monitoring, injection orchestration.
         .target(
             name: "LaunchpadAwakenerAppCore",
             dependencies: [
                 "LaunchpadAwakenerShared",
+                "LaunchpadAwakenerPayloadInterface",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
                 .product(name: "HelperClient", package: "swift-helper-service"),
                 .product(name: "HelperCommunication", package: "swift-helper-service"),
+                .product(name: "HelperPeer", package: "swift-helper-service"),
                 // Interface-only: the app sends these requests but must not link the
                 // implementations, which pull in MachInjector and only make sense as root.
                 .product(name: "InjectionServiceInterface", package: "swift-helper-service"),
                 .product(name: "FilesServiceInterface", package: "swift-helper-service"),
+                .product(name: "InjectedEndpointRegistryServiceInterface", package: "swift-helper-service"),
             ]
         ),
 
@@ -79,6 +93,9 @@ let package = Package(
                 .product(name: "HelperCommunication", package: "swift-helper-service"),
                 .product(name: "InjectionServiceImplementation", package: "swift-helper-service"),
                 .product(name: "FilesServiceImplementation", package: "swift-helper-service"),
+                // Remembers where each injected payload can be reached, so a relaunched app can find
+                // the payloads that are still resident.
+                .product(name: "InjectedEndpointRegistryServiceImplementation", package: "swift-helper-service"),
             ]
         ),
 
@@ -89,6 +106,8 @@ let package = Package(
         .target(
             name: "LaunchpadAwakenerSpringboardCore",
             dependencies: [
+                // For the kill switch's path, which the app's window also toggles.
+                "LaunchpadAwakenerShared",
                 "LaunchpadAwakenerHookKit",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
             ]
@@ -96,14 +115,20 @@ let package = Package(
 
         // Payload side: what runs inside the host process, around the springboard — the Dock's side of
         // the host, the hooks and the entry. Keep this dependency list minimal — every library here is
-        // mapped into a process that did not ask for it.
+        // mapped into a process that did not ask for it. `HelperPeer` and `HelperClient` are here
+        // because the payload publishes an endpoint the app can reach it on; without that the app
+        // cannot tell an injected Dock from an uninjected one, or say that the hooks did not go in.
         .target(
             name: "LaunchpadAwakenerPayloadCore",
             dependencies: [
                 "LaunchpadAwakenerShared",
                 "LaunchpadAwakenerHookKit",
                 "LaunchpadAwakenerSpringboardCore",
+                "LaunchpadAwakenerPayloadInterface",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
+                .product(name: "HelperClient", package: "swift-helper-service"),
+                .product(name: "HelperPeer", package: "swift-helper-service"),
+                .product(name: "InjectedEndpointRegistryServiceInterface", package: "swift-helper-service"),
             ]
         ),
 
@@ -153,6 +178,14 @@ let package = Package(
         .testTarget(
             name: "LaunchpadAwakenerStandaloneCoreTests",
             dependencies: ["LaunchpadAwakenerStandaloneCore"]
+        ),
+
+        // The app's decision-making: daemon repair, which targets to inject, when displayed state has
+        // gone stale, what the window's banner says. The daemon needs root and the payload only means
+        // anything inside the Dock, so neither is exercised here.
+        .testTarget(
+            name: "LaunchpadAwakenerAppCoreTests",
+            dependencies: ["LaunchpadAwakenerAppCore"]
         ),
 
         // The Dock's side: the build profiles. Read from the Dock binaries' facts, never from a live Dock.

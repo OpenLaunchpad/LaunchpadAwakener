@@ -38,6 +38,16 @@ public final class TargetProcessMonitor: @unchecked Sendable {
     /// Called on `callbackQueue` after a tracked target process exits.
     public var onProcessExited: (@Sendable (pid_t) -> Void)?
 
+    /// Called on `callbackQueue` after every discovery pass with *all* matching processes, whether
+    /// newly discovered or not.
+    ///
+    /// ``onProcessStarted`` fires once per process identifier and never again, which is correct for
+    /// "a target appeared" but leaves nothing to act on when the response to that fired and failed.
+    /// A target the app could not inject — because the daemon was not usable yet — is already being
+    /// tracked, so it is never announced a second time and would stay uninjected for as long as it
+    /// runs. This reports the current set on every tick so a caller can retry what did not take.
+    public var onDiscoveryPass: (@Sendable ([pid_t]) -> Void)?
+
     private let callbackQueue: DispatchQueue
     private let synchronizationQueue = DispatchQueue(label: "com.MxIris.LaunchpadAwakener.TargetProcessMonitor")
 
@@ -104,7 +114,9 @@ public final class TargetProcessMonitor: @unchecked Sendable {
 
     /// Runs on `synchronizationQueue`.
     private func discoverMatchingProcesses() {
-        for processIdentifier in currentlyRunningTargetProcessIdentifiers() {
+        let runningProcessIdentifiers = currentlyRunningTargetProcessIdentifiers()
+
+        for processIdentifier in runningProcessIdentifiers {
             guard exitSourcesByProcessIdentifier[processIdentifier] == nil else { continue }
 
             beginTrackingExit(ofProcessIdentifier: processIdentifier)
@@ -112,6 +124,10 @@ public final class TargetProcessMonitor: @unchecked Sendable {
             callbackQueue.async { [onProcessStarted] in
                 onProcessStarted?(processIdentifier)
             }
+        }
+
+        callbackQueue.async { [onDiscoveryPass] in
+            onDiscoveryPass?(runningProcessIdentifiers)
         }
     }
 
