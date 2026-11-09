@@ -124,7 +124,7 @@ fi
 #
 # (Measured: 81 errors, all from that one cause.)
 #
-# Getting an arm64e daemon takes four pieces working together, all of them already in the repo:
+# Getting an arm64e daemon takes five pieces working together, all of them already in the repo:
 #
 #   1. iOSPackagesShouldBuildARM64e = true in LaunchpadAwakener.xcworkspace's shared settings.
 #      This must live in a real .xcworkspace — the one nested inside the .xcodeproj is ignored,
@@ -145,6 +145,18 @@ fi
 #      swift-syntax that FrameworkToolbox's macros would otherwise build from source. Without it,
 #      those macro plugins fail to link against a swift-syntax built for a different slice.
 #
+#   5. -IDEEnableNewPackagePIFBuilder=NO below, which keeps Xcode 27 on its old package PIF
+#      builder. The new one (Xcode 27's default) writes the arm64e package's ARCHS as the literal
+#      `arm64 arm64e arm64e.x1`, where the old one writes `$(inherited) arm64e`. With x86_64 gone
+#      from the package, every target that still compiles x86_64 fails with "Unable to resolve
+#      module dependency" on the first package module it imports. The flag is a stopgap that keeps
+#      the x86_64 slice for Intel Macs, which top out at macOS 26 — macOS 27 runs on Apple silicon
+#      only. It reaches this script and nothing else: a build started from Xcode uses the new
+#      builder and fails the same way. If a later Xcode ignores the flag or drops the old builder,
+#      treat that as x86_64 being retired: delete the flag and set EXCLUDED_ARCHS = x86_64 at the
+#      project level. Both injection paths use arm64 or arm64e only; the standalone app is the one
+#      that loses Intel Macs.
+#
 # And the piece that is easiest to miss: the destination below must be
 # `generic/platform=macOS`, not `platform=macOS`. The latter builds for *this machine* and
 # collapses the build down to the host architecture, which silently discards the arm64e slice no
@@ -159,6 +171,7 @@ XCODEBUILD_LOG_NAME="build" run_piped xcodebuild build \
     -configuration "$CONFIGURATION" \
     -destination 'generic/platform=macOS' \
     -derivedDataPath "$DERIVED_DATA" \
+    -IDEEnableNewPackagePIFBuilder=NO \
     -skipPackagePluginValidation -skipMacroValidation
 
 PRODUCTS_DIR="$DERIVED_DATA/Build/Products/$CONFIGURATION"

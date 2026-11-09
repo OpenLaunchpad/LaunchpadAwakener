@@ -88,10 +88,12 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 
 daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —— 签目标线程 PC 的那条 PAC 指令在 arm64 构建里是空操作。这需要五处配置同时成立，外加一个 `-destination 'generic/platform=macOS'`。
 
-**在 Xcode GUI 里构建要把运行目标切成「Any Mac」**：My Mac 对应 `platform=macOS`（为本机构建），会静默丢掉 arm64e 切片，daemon 随即链接失败；Any Mac 对应 `generic/platform=macOS`，能正常构建。这就是「Xcode 编不过」的全部原因。
+**在 Xcode GUI 里构建要把运行目标切成「Any Mac」**：My Mac 对应 `platform=macOS`（为本机构建），会静默丢掉 arm64e 切片，daemon 随即链接失败；Any Mac 对应 `generic/platform=macOS`，能正常构建。这是「Xcode 编不过」的第一个原因，第二个见下文讲 x86_64 的那一段。
 
 细节全部记在脚手架的
 [BuildingForArm64eTargets.md](https://github.com/Mx-Iris/InjectionScaffold) 里。**动架构相关设置之前先读它** —— 每一处"显而易见"的改法都试过，也都记了失败原因。特别是：`ENABLE_POINTER_AUTHENTICATION` 绝不能提到项目级，否则本地包的 arm64e 切片会替换掉 arm64，macro plugin 随即链接失败。
+
+**x86_64 目前靠 `RunScript.sh` 传的 `-IDEEnableNewPackagePIFBuilder=NO` 保住**。Xcode 27 默认用新的 package 构建器，它把带 arm64e 的本地包写死成只编 `arm64 arm64e arm64e.x1`，凡是还编 x86_64 的 target 都会报 `Unable to resolve module dependency`。这个参数只对脚本生效，在 Xcode 里构建照样报这个错。要在 Xcode 里编，只能本机执行 `defaults write com.apple.dt.Xcode IDEEnableNewPackagePIFBuilder -bool NO`，所有项目都会受影响。x86_64 只是给还停在 macOS 26 的 Intel Mac 留的，macOS 27 已经不支持 Intel。哪天新版 Xcode 不认这个参数了，就当 x86_64 退役：删掉参数，在项目级设 `EXCLUDED_ARCHS = x86_64`。细节在 `RunScript.sh` 注释的第 5 条。
 
 脚本构建完会自动校验切片：
 
