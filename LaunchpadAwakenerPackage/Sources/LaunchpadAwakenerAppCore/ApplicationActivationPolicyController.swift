@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import OSToolbox
 
 /// Keeps the Dock icon tied to whether a window is actually open.
 ///
@@ -22,6 +23,7 @@ import Observation
 ///
 /// The menu bar item is what reopens the window, so an app using this must offer one — otherwise
 /// closing the window makes the app unreachable.
+@Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "ApplicationActivationPolicyController")
 @MainActor
 @Observable
 public final class ApplicationActivationPolicyController {
@@ -34,6 +36,22 @@ public final class ApplicationActivationPolicyController {
         openWindowCount += 1
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate()
+        #if DEBUG
+        // Where the window landed against the screen's visible area, so a window reaching behind the
+        // Dock or the menu bar shows in the log of the test Mac without anyone looking at its screen.
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            Self.logWindowGeometry()
+        }
+        #endif
+    }
+
+    private static func logWindowGeometry() {
+        for window in NSApplication.shared.windows where window.isVisible && window.styleMask.contains(.titled) {
+            let visibleFrame = window.screen?.visibleFrame ?? .zero
+            let fitsVisibleFrame = visibleFrame.contains(window.frame)
+            #log(.info, "Window \(window.title, privacy: .public) frame \(NSStringFromRect(window.frame), privacy: .public), screen visible frame \(NSStringFromRect(visibleFrame), privacy: .public), fits: \(fitsVisibleFrame, privacy: .public)")
+        }
     }
 
     /// Call from the window's `onDisappear`.

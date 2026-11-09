@@ -11,6 +11,10 @@ struct LaunchpadAwakenerApp: App {
     /// fires whether or not anything is on screen.
     @NSApplicationDelegateAdaptor(ApplicationDelegate.self) private var applicationDelegate
 
+    /// Kept free between the window's content and the edges of the screen's visible area: the title
+    /// bar, which the placement's size does not include, and a margin.
+    private static let screenEdgeAllowance: CGFloat = 72
+
     var body: some Scene {
         Window("LaunchpadAwakener", id: WindowIdentifier.main) {
             MainView()
@@ -24,6 +28,17 @@ struct LaunchpadAwakenerApp: App {
                 .onDisappear { applicationDelegate.activationPolicyController.windowDidDisappear() }
         }
         .windowResizability(.contentSize)
+        // Opens as tall as the content and never taller than the screen's visible area, which leaves
+        // out the menu bar and the Dock; a window sized to its content alone reached down behind the
+        // Dock on the test MacBook. Past that height the form scrolls.
+        .defaultWindowPlacement { content, context in
+            let visibleRect = context.defaultDisplay.visibleRect
+            let idealSize = content.sizeThatFits(.unspecified)
+            return WindowPlacement(size: CGSize(
+                width: idealSize.width,
+                height: min(idealSize.height, visibleRect.height - Self.screenEdgeAllowance)
+            ))
+        }
         // Suppressed only while launching at login is on. With it off this launch cannot have come
         // from launchd, so the window appears — which is why nothing in this app has to detect where
         // a launch came from.

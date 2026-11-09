@@ -1,12 +1,12 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 import LaunchpadAwakenerAppCore
 
 struct MainView: View {
     @Environment(PrivilegedDaemonController.self) private var daemonController
     @Environment(PayloadInjectionCoordinator.self) private var injectionCoordinator
     @Environment(LaunchAtLoginController.self) private var launchAtLoginController
-    @Environment(ApplicationLaunchProgress.self) private var launchProgress
     @Environment(TextInputAgentController.self) private var textInputAgentController
     @Environment(KillSwitchController.self) private var killSwitchController
 
@@ -17,30 +17,32 @@ struct MainView: View {
     /// `SMAppService` and file-system reads.
     private static let stateRefreshInterval = Duration.seconds(3)
 
+    /// The width the window is laid out for; its height follows the content, up to the screen.
+    static let width: CGFloat = 520
+
     var body: some View {
         VStack(spacing: 0) {
-            ReadinessBanner(presentation: ReadinessPresentation(currentReadiness), action: bannerAction)
+            ReadinessBannerSection()
                 .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+                .padding(.vertical, 14)
 
             Divider()
 
+            // Not `fixedSize`: a form that insists on its full height cannot be shorter than the
+            // screen when its content is taller, and the window then reached down behind the Dock.
+            // The form's ideal height is still its content's, which is what
+            // `defaultWindowPlacement` opens the window at, capped to the screen; anything past
+            // that scrolls.
             Form {
-                startupSection
-                launchpadSection
-                daemonSection
-                injectionSection
-                errorSection
+                GeneralSection()
+                LaunchpadSection()
+                InjectionSection()
+                ErrorSection()
             }
             .formStyle(.grouped)
-            // A grouped form wraps its content in a scroll view that expands to whatever height it is
-            // handed, so the window would open at some default height with the rest scrolled away.
-            // Fixing the vertical size makes the form report its own height, which
-            // `.windowResizability(.contentSize)` then adopts. Scrolling stays enabled so that on a
-            // short display the bottom is still reachable.
-            .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(width: 560)
+        .frame(width: Self.width)
+        .frame(minHeight: 320)
         .onAppear { refreshEverything() }
         // Everything shown here describes processes this app does not own, and nothing notifies it
         // when they change: the Dock can be restarted from a terminal, the kill switch created over
@@ -61,22 +63,31 @@ struct MainView: View {
         textInputAgentController.refreshStatus()
         killSwitchController.refreshStatus()
     }
+}
 
-    // MARK: - Readiness
+// MARK: - Readiness
 
-    private var currentReadiness: ControlPanelReadiness {
-        ControlPanelReadiness.evaluate(
+/// The banner, with the one-click next step where there is one.
+private struct ReadinessBannerSection: View {
+    @Environment(PrivilegedDaemonController.self) private var daemonController
+    @Environment(PayloadInjectionCoordinator.self) private var injectionCoordinator
+    @Environment(LaunchAtLoginController.self) private var launchAtLoginController
+    @Environment(ApplicationLaunchProgress.self) private var launchProgress
+    @Environment(KillSwitchController.self) private var killSwitchController
+
+    var body: some View {
+        let readiness = ControlPanelReadiness.evaluate(
             launchPhase: launchProgress.phase,
             daemonStatus: daemonController.registrationStatus,
             isKillSwitchEngaged: killSwitchController.isEngaged,
             isInjected: !injectionCoordinator.injectedProcessIdentifiers.isEmpty,
             residentPayloads: injectionCoordinator.residentPayloads
         )
+        ReadinessBanner(presentation: ReadinessPresentation(readiness), action: action(for: readiness))
     }
 
-    /// The one-click next step the banner offers, where there is one.
-    private var bannerAction: ReadinessBanner.Action? {
-        switch currentReadiness {
+    private func action(for readiness: ControlPanelReadiness) -> ReadinessBanner.Action? {
+        switch readiness {
         case .daemonNotInstalled:
             return ReadinessBanner.Action(title: "Install", isEnabled: !daemonController.isPerformingRegistrationChange) {
                 Task { await daemonController.install() }
@@ -101,55 +112,56 @@ struct MainView: View {
             return nil
         }
     }
+}
 
-    // MARK: - Startup
+// MARK: - General
 
-    /// First, because it is the first thing anyone wants after getting the tool working once: not
-    /// having to set it up again after the next restart.
-    private var startupSection: some View {
+/// What has to be in place for the tool to work at all: starting with the Mac, the daemon, the
+/// input method helper. One row each; the explanations are in the help tags.
+private struct GeneralSection: View {
+    @Environment(PrivilegedDaemonController.self) private var daemonController
+    @Environment(LaunchAtLoginController.self) private var launchAtLoginController
+    @Environment(TextInputAgentController.self) private var textInputAgentController
+
+    var body: some View {
         Section {
-            Toggle("Launch at login", isOn: launchAtLoginBinding)
+            Toggle(isOn: launchAtLoginBinding) {
+                Text("Launch at login")
+                Text("Starts with your Mac and stays in the menu bar.")
+            }
+            .help(Self.launchAtLoginHelp)
 
             if launchAtLoginController.isDisabledInSystemSettings {
                 SystemSettingsWarning(
-                    text: "Turned off under System Settings › Login Items. The app cannot switch it back on itself.",
+                    text: "Turned off under System Settings › Login Items.",
                     openLoginItems: launchAtLoginController.openLoginItemsSettings
                 )
             }
 
-            Text("When on, the app starts with your Mac and stays in the menu bar without opening this window, injecting the Dock as it goes. Open the window again from the menu bar icon.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            #if DEBUG
-            // The login item records this build product's path. Nothing warns the user when that
-            // path stops existing — login simply fails to launch anything, silently.
-            Text("Debug build: the login item points at this build's path. Turn it off before deleting the build, or login will try to launch a binary that is no longer there. Debug and release builds share one login item — whichever registered last wins.")
-                .font(.caption)
-                .foregroundStyle(.orange)
-            #endif
-        } header: {
-            Label("Startup", systemImage: "power")
-        }
-    }
-
-    // MARK: - Launchpad
-
-    private var launchpadSection: some View {
-        Section {
-            Toggle(isOn: killSwitchBinding) {
-                Text("Open the system's Apps instead")
-                Text("Every way of opening Apps goes to the system's Apps while this is on. Takes effect at once, and switches itself off when the Mac restarts.")
+            LabeledContent("Privileged daemon") {
+                HStack(spacing: 10) {
+                    StatusIndicator(text: daemonController.statusMessage, tint: Self.tint(of: daemonController.registrationStatus))
+                    if daemonController.isPerformingRegistrationChange {
+                        ProgressView().controlSize(.small)
+                    } else if daemonController.isEnabled {
+                        Button("Uninstall", role: .destructive) {
+                            Task { await daemonController.uninstall() }
+                        }
+                        .controlSize(.small)
+                    } else {
+                        Button("Install") {
+                            Task { await daemonController.install() }
+                        }
+                        .controlSize(.small)
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
             }
-
-            LabeledContent("Dock build") {
-                StatusIndicator(text: dockBuildDescription, tint: dockBuildTint)
-                    .help(dockBuildHelp)
-            }
+            .help("Injects the payload into the Dock, which needs root. System Settings asks you to approve it once, under General › Login Items.")
 
             LabeledContent("Input method helper") {
                 HStack(spacing: 10) {
-                    StatusIndicator(text: textInputAgentController.statusMessage, tint: textInputAgentTint)
+                    StatusIndicator(text: textInputAgentController.statusMessage, tint: Self.tint(of: textInputAgentController.registrationStatus))
                     if textInputAgentController.registrationStatus == .notRegistered {
                         Button("Register") {
                             textInputAgentController.registerIfNeeded()
@@ -158,17 +170,65 @@ struct MainView: View {
                     }
                 }
             }
+            .help("Hosts the search and rename fields so that input methods such as Pinyin work in them.")
 
             if textInputAgentController.isDisabledInSystemSettings {
                 SystemSettingsWarning(
-                    text: "The input method helper is turned off under System Settings › Login Items, so search and rename fields cannot use input methods.",
+                    text: "Search and rename fields cannot use input methods.",
                     openLoginItems: textInputAgentController.openLoginItemsSettings
                 )
             }
+        } header: {
+            Label("General", systemImage: "gearshape.fill")
+        }
+    }
 
-            Text("The input method helper hosts the search and rename fields so that input methods such as Pinyin work in them.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private static var launchAtLoginHelp: String {
+        #if DEBUG
+        // The login item records this build product's path. Nothing warns the user when that path
+        // stops existing — login simply fails to launch anything, silently.
+        "The window stays closed at login; open it from the menu bar icon. Debug build: the login item points at this build's path, and debug and release builds share one login item — whichever registered last wins."
+        #else
+        "The window stays closed at login; open it from the menu bar icon."
+        #endif
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { launchAtLoginController.isEnabled },
+            set: { launchAtLoginController.setEnabled($0) }
+        )
+    }
+
+    static func tint(of status: SMAppService.Status) -> Color {
+        switch status {
+        case .enabled: return .green
+        case .requiresApproval: return .orange
+        case .notFound: return .red
+        default: return .secondary
+        }
+    }
+}
+
+// MARK: - Launchpad
+
+/// What the Dock does with Apps: the kill switch, and whether this Dock build is one the payload knows.
+private struct LaunchpadSection: View {
+    @Environment(PayloadInjectionCoordinator.self) private var injectionCoordinator
+    @Environment(KillSwitchController.self) private var killSwitchController
+
+    var body: some View {
+        Section {
+            Toggle(isOn: killSwitchBinding) {
+                Text("Open the system's Apps instead")
+                Text("Switches itself off when the Mac restarts.")
+            }
+            .help("Every way of opening Apps goes to the system's Apps while this is on. Takes effect at once.")
+
+            LabeledContent("Dock build") {
+                StatusIndicator(text: dockBuildDescription, tint: dockBuildTint)
+            }
+            .help(dockBuildHelp)
         } header: {
             Label("Launchpad", systemImage: "square.grid.3x3.fill")
         }
@@ -181,7 +241,7 @@ struct MainView: View {
 
     private var dockBuildDescription: String {
         guard let payload = reportingPayload else {
-            return "Reported once the Dock is injected"
+            return "Known once the Dock is injected"
         }
         switch payload.hookState {
         case .installed where payload.areHooksInstalled:
@@ -192,7 +252,7 @@ struct MainView: View {
         case .unknownDockBuild:
             return "Unknown build — not supported"
         case .incompatibleDockMethods:
-            return "Known build, but its methods do not match"
+            return "Methods do not match"
         case .failed:
             return "Hooks failed to install"
         }
@@ -204,7 +264,9 @@ struct MainView: View {
     }
 
     private var dockBuildHelp: String {
-        guard let payload = reportingPayload else { return "" }
+        guard let payload = reportingPayload else {
+            return "The payload reports the Dock build once it is in the Dock."
+        }
         var lines: [String] = []
         if let dockBundleVersion = payload.dockBundleVersion {
             lines.append("Dock \(dockBundleVersion)")
@@ -223,77 +285,37 @@ struct MainView: View {
         return lines.joined(separator: "\n")
     }
 
-    private var textInputAgentTint: Color {
-        switch textInputAgentController.registrationStatus {
-        case .enabled: return .green
-        case .requiresApproval: return .orange
-        case .notFound: return .red
-        default: return .secondary
-        }
+    private var killSwitchBinding: Binding<Bool> {
+        Binding(
+            get: { killSwitchController.isEngaged },
+            set: { killSwitchController.setEngaged($0) }
+        )
     }
+}
 
-    // MARK: - Daemon
+// MARK: - Injection
 
-    private var daemonSection: some View {
+private struct InjectionSection: View {
+    @Environment(PrivilegedDaemonController.self) private var daemonController
+    @Environment(PayloadInjectionCoordinator.self) private var injectionCoordinator
+
+    var body: some View {
         Section {
-            LabeledContent("Status") {
-                StatusIndicator(text: daemonController.statusMessage, tint: daemonStatusTint)
+            LabeledContent("Dock") {
+                StatusIndicator(text: injectionDescription, tint: injectionTint)
             }
+            .help(payloadHelp)
 
-            HStack {
-                Button("Install") {
-                    Task { await daemonController.install() }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(daemonController.isEnabled || daemonController.isPerformingRegistrationChange)
-
-                Button("Uninstall") {
-                    Task { await daemonController.uninstall() }
-                }
-                .tint(.red)
-                .disabled(!daemonController.isEnabled || daemonController.isPerformingRegistrationChange)
-
-                if daemonController.isPerformingRegistrationChange {
-                    ProgressView().controlSize(.small)
-                }
+            Toggle(isOn: automaticInjectionBinding) {
+                Text("Re-inject automatically")
+                // The button below re-injects on its own, so what is left is a Dock that goes away
+                // without this app asking: crashed, killed from a terminal, or replaced at login.
+                Text(injectionCoordinator.isAutomaticInjectionEnabled
+                     ? "After the Dock restarts on its own."
+                     : "Off: a Dock that restarts on its own comes back with the system's Apps.")
+                    .foregroundStyle(injectionCoordinator.isAutomaticInjectionEnabled ? Color.secondary : Color.orange)
             }
-
-            Text("The daemon injects the payload into the Dock, which needs root. System Settings asks you to approve it once, under General › Login Items.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } header: {
-            Label("Privileged Daemon", systemImage: "lock.shield.fill")
-        }
-    }
-
-    private var daemonStatusTint: Color {
-        switch daemonController.registrationStatus {
-        case .enabled: return .green
-        case .requiresApproval: return .orange
-        case .notFound: return .red
-        default: return .secondary
-        }
-    }
-
-    // MARK: - Injection
-
-    private var injectionSection: some View {
-        Section {
-            LabeledContent("Injected") {
-                StatusIndicator(text: injectedDescription, tint: isInjected ? .green : .orange)
-            }
-
-            // What the payload says about itself, rather than what this app remembers doing. The
-            // difference matters after a relaunch, when the app remembers nothing.
-            ForEach(injectionCoordinator.residentPayloads) { payload in
-                LabeledContent("Payload in \(payload.hostProcessName)") {
-                    StatusIndicator(text: describe(payload), tint: tint(of: payload))
-                        .help("Payload image \(payload.imageUUID.uuidString)")
-                }
-            }
-
-            Toggle("Re-inject automatically after the Dock restarts", isOn: automaticInjectionBinding)
-                .disabled(!daemonController.isEnabled)
+            .disabled(!daemonController.isEnabled)
 
             HStack {
                 Button("Inject Now") {
@@ -306,110 +328,63 @@ struct MainView: View {
                     injectionCoordinator.restartTargets()
                 }
                 .disabled(injectionCoordinator.isBusy)
+                .help("Only needed after installing a new build: the payload already in the Dock cannot be replaced while it runs. The new Dock is injected right away.")
 
                 if injectionCoordinator.isBusy {
                     ProgressView().controlSize(.small)
                 }
 
+                Spacer(minLength: 8)
+
+                // Injection can legitimately do nothing — no Dock running, or already injected — and
+                // a button that silently does nothing looks broken; the row above says the rest.
                 if injectionCoordinator.isWaitingForTargetRestart {
-                    Text("Waiting for the Dock to come back…")
+                    Text("Waiting for the Dock…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                } else if let report = injectionCoordinator.lastInjectionReport, report.isFailure {
+                    Label(report.summary, systemImage: "xmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(report.summary)
                 }
             }
-
-            // Injection can legitimately do nothing — no Dock running, or already injected. Saying so
-            // is what separates a normal no-op from a broken button.
-            if let report = injectionCoordinator.lastInjectionReport {
-                Label(report.summary, systemImage: report.isFailure ? "xmark.circle.fill" : "checkmark.circle.fill")
-                    .font(.callout)
-                    .foregroundStyle(report.isFailure ? Color.red : Color.green)
-                    .textSelection(.enabled)
-            }
-
-            // A payload cannot be unloaded, so re-injecting a rebuilt one does nothing at all. Saying
-            // so is the only way out of concluding that the change itself did not work.
-            if injectionCoordinator.hasStalePayload {
-                CalloutLabel(
-                    text: "The Dock still runs an older build of the payload. Restart the Dock to load this one — re-injecting will not replace it.",
-                    systemImage: "clock.badge.exclamationmark.fill"
-                )
-            }
-
-            // The button re-injects on its own, so what is left is a Dock that goes away without this
-            // app asking: crashed, killed from a terminal, or replaced by logging back in.
-            if !injectionCoordinator.isAutomaticInjectionEnabled {
-                CalloutLabel(
-                    text: "With this off, a Dock that restarts on its own — crashed, killed from a terminal, or after logging back in — comes back with the system's Apps. Restarting it from here still re-injects.",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-            }
-
-            Text("Restarting the Dock is only needed after installing a new build of LaunchpadAwakener: the payload already in the Dock cannot be replaced while it runs.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         } header: {
             Label("Dock Injection", systemImage: "arrow.down.circle.fill")
         }
     }
 
-    private var isInjected: Bool { !injectionCoordinator.injectedProcessIdentifiers.isEmpty }
-
-    private var injectedDescription: String {
+    /// One line for the Dock: which process, and what its payload says about itself.
+    private var injectionDescription: String {
         let processIdentifiers = injectionCoordinator.injectedProcessIdentifiers.sorted()
-        guard !processIdentifiers.isEmpty else { return "No" }
-        return "Yes — \(processIdentifiers.map(String.init).joined(separator: ", "))"
-    }
-
-    private func describe(_ payload: PayloadInjectionCoordinator.ResidentPayload) -> String {
-        let buildDescription = payload.isStale ? "older build" : "current build"
-        switch payload.hookState {
-        case .installed(let hookCount) where hookCount > 0:
-            return "\(buildDescription) · \(hookCount) hook\(hookCount == 1 ? "" : "s")"
-        case .installed, .unknownDockBuild, .incompatibleDockMethods, .failed:
-            return "\(buildDescription) · attached but inert — no hooks installed"
+        guard let processIdentifier = processIdentifiers.first else { return "Not injected" }
+        guard let payload = injectionCoordinator.residentPayloads.first(where: { $0.hostProcessIdentifier == processIdentifier }) else {
+            // Injected, but the payload has not answered — still connecting, or its channel dropped.
+            return "Injected · process \(processIdentifier)"
         }
+        let buildDescription = payload.isStale ? "older build" : "current build"
+        guard case .installed(let hookCount) = payload.hookState, hookCount > 0 else {
+            return "Process \(processIdentifier) · \(buildDescription) · no hooks"
+        }
+        return "Process \(processIdentifier) · \(buildDescription) · \(hookCount) hook\(hookCount == 1 ? "" : "s")"
     }
 
-    private func tint(of payload: PayloadInjectionCoordinator.ResidentPayload) -> Color {
+    private var injectionTint: Color {
+        guard let processIdentifier = injectionCoordinator.injectedProcessIdentifiers.min() else { return .orange }
+        guard let payload = injectionCoordinator.residentPayloads.first(where: { $0.hostProcessIdentifier == processIdentifier }) else {
+            return .green
+        }
         guard payload.areHooksInstalled else { return .red }
         return payload.isStale ? .orange : .green
     }
 
-    // MARK: - Errors
-
-    /// Every outstanding error, not just the first one found.
-    ///
-    /// Showing one and swallowing the rest hides exactly the case worth seeing: two things failing at
-    /// once, where fixing the visible half changes nothing and there is no sign of the other.
-    private var errorSection: some View {
-        Group {
-            let errorDescriptions = [
-                ("Startup", launchAtLoginController.lastErrorDescription),
-                ("Injection", injectionCoordinator.lastErrorDescription),
-                ("Input method helper", textInputAgentController.lastErrorDescription),
-                ("Kill switch", killSwitchController.lastErrorDescription),
-            ].compactMap { label, description in description.map { (label: label, description: $0) } }
-
-            if !errorDescriptions.isEmpty {
-                Section {
-                    ForEach(errorDescriptions, id: \.label) { errorDescription in
-                        LabeledContent(errorDescription.label) {
-                            Text(errorDescription.description)
-                                .foregroundStyle(.red)
-                                .textSelection(.enabled)
-                                .multilineTextAlignment(.trailing)
-                        }
-                    }
-                } header: {
-                    Label("Last Error", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                }
-            }
-        }
+    private var payloadHelp: String {
+        injectionCoordinator.residentPayloads
+            .map { "\($0.hostProcessName) \($0.hostProcessIdentifier): payload image \($0.imageUUID.uuidString)" }
+            .joined(separator: "\n")
     }
-
-    // MARK: - Bindings
 
     private var automaticInjectionBinding: Binding<Bool> {
         Binding(
@@ -417,19 +392,43 @@ struct MainView: View {
             set: { injectionCoordinator.setAutomaticInjectionEnabled($0) }
         )
     }
+}
 
-    private var launchAtLoginBinding: Binding<Bool> {
-        Binding(
-            get: { launchAtLoginController.isEnabled },
-            set: { launchAtLoginController.setEnabled($0) }
-        )
-    }
+// MARK: - Errors
 
-    private var killSwitchBinding: Binding<Bool> {
-        Binding(
-            get: { killSwitchController.isEngaged },
-            set: { killSwitchController.setEngaged($0) }
-        )
+/// Every outstanding error, not just the first one found.
+///
+/// Showing one and swallowing the rest hides exactly the case worth seeing: two things failing at
+/// once, where fixing the visible half changes nothing and there is no sign of the other.
+private struct ErrorSection: View {
+    @Environment(PayloadInjectionCoordinator.self) private var injectionCoordinator
+    @Environment(LaunchAtLoginController.self) private var launchAtLoginController
+    @Environment(TextInputAgentController.self) private var textInputAgentController
+    @Environment(KillSwitchController.self) private var killSwitchController
+
+    var body: some View {
+        let errorDescriptions = [
+            ("Startup", launchAtLoginController.lastErrorDescription),
+            ("Injection", injectionCoordinator.lastErrorDescription),
+            ("Input method helper", textInputAgentController.lastErrorDescription),
+            ("Kill switch", killSwitchController.lastErrorDescription),
+        ].compactMap { label, description in description.map { (label: label, description: $0) } }
+
+        if !errorDescriptions.isEmpty {
+            Section {
+                ForEach(errorDescriptions, id: \.label) { errorDescription in
+                    LabeledContent(errorDescription.label) {
+                        Text(errorDescription.description)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+            } header: {
+                Label("Last Error", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+            }
+        }
     }
 }
 
@@ -470,7 +469,7 @@ struct ReadinessPresentation {
         case .killSwitchEngaged:
             self.init(
                 title: "Paused",
-                nextStep: "The Dock opens the system's Apps until “Open the system's Apps instead” is switched off.",
+                nextStep: "The Dock opens the system's Apps until Launchpad is turned back on.",
                 systemImageName: "pause.circle.fill",
                 tint: .indigo
             )
@@ -509,7 +508,7 @@ struct ReadinessPresentation {
         case .stalePayload:
             self.init(
                 title: "Restart the Dock to update",
-                nextStep: "The Dock still runs an older build of the payload. Re-injecting does not replace it; restarting the Dock does.",
+                nextStep: "The Dock still runs an older build of the payload; re-injecting does not replace it.",
                 systemImageName: "clock.badge.exclamationmark.fill",
                 tint: .orange
             )
@@ -570,7 +569,7 @@ private struct ReadinessBanner: View {
                     .disabled(!action.isEnabled)
             }
         }
-        .padding(14)
+        .padding(12)
         .background(presentation.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
@@ -597,20 +596,9 @@ private struct StatusIndicator: View {
                 .frame(width: 8, height: 8)
             Text(text)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
-    }
-}
-
-/// An orange line explaining something the user should know before relying on the switch above it.
-private struct CalloutLabel: View {
-    let text: String
-    let systemImage: String
-
-    var body: some View {
-        Label(text, systemImage: systemImage)
-            .font(.callout)
-            .foregroundStyle(.orange)
-            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -621,9 +609,13 @@ private struct SystemSettingsWarning: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            CalloutLabel(text: text, systemImage: "exclamationmark.triangle.fill")
+            Label(text, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             Button("Open Login Items", action: openLoginItems)
+                .controlSize(.small)
         }
     }
 }
