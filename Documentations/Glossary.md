@@ -50,15 +50,33 @@
 
 ### Kill switch（退回开关）
 
-文件 `/tmp/LaunchpadAwakener.disabled`。它存在时，所有「打开 Apps」的入口退回系统的 Apps，正在显示的界面在下一个事件时收起。界面失控、屏幕不能用时，经 ssh 创建它是出路。
+文件 `/tmp/LaunchpadAwakener.disabled`（路径常量 `KillSwitchIdentity.path`）。它存在时，所有「打开 Apps」的入口退回系统的 Apps，正在显示的界面在下一个事件时收起。界面失控、屏幕不能用时，经 ssh 创建它是出路；平时在注入版 App 的窗口与菜单栏里叫「Open the system's Apps instead」。在 `/tmp` 里，重启后自动消失。
 
-- **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardController.swift`、项目 `CLAUDE.md`
+- **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardController.swift`、`LaunchpadAwakenerAppCore/KillSwitchController.swift`、项目 `CLAUDE.md`
+
+### Payload channel（payload 通道）
+
+注入版 App 与 Dock 里的 payload 之间的直连 XPC 通道。payload 监听，App 连过去问状态：payload 镜像的 UUID、hook 装上没有、Dock 构建。payload 把自己的端点登记进 daemon 的注册表，所以 App 重开后能找回已经注入的 Dock。通道断了只说明 App 能说的少了，不说明 Dock 没注入。
+
+- **主要出现在**：`LaunchpadAwakenerAppCore/PayloadChannel.swift`、`LaunchpadAwakenerPayloadCore/Integration/PayloadPeer.swift`、`LaunchpadAwakenerPayloadInterface/PayloadRequests.swift`、[控制面板实现说明](Internal/ControlPanel.md)
+
+### Quick-exit guard（闪退保护）
+
+注入后 15 秒内退出的 Dock 算作被 payload 弄崩的，连续三次就关掉自动注入，免得每个新起的 Dock 都被注入、再崩一次。用户在 App 里点「重启 Dock」退出的那个不算。
+
+- **主要出现在**：`LaunchpadAwakenerAppCore/QuickExitGuard.swift`、[控制面板实现说明](Internal/ControlPanel.md)「关键设计决策」
 
 ### Replica layers（等价图层）
 
 独立版用来代替 Dock 的 `ECGridLayer`、`ECImageGridLayer`、`ECTextLayer`、`ECShadowTextLayer` 与选中材质的纯 Core Animation 实现，照 Dock 的二进制逐条写成，在 Dock 里逐像素对照过。没有选定宿主时（单元测试）也用它们。注入版仍用 Dock 自己的类。
 
 - **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardReplicaLayers.swift`、[独立版实现说明](Internal/StandaloneLaunchpad.md)「关键设计决策」
+
+### Resident payload（常驻 payload）
+
+已经在 Dock 里、并经 [payload 通道](#payload-channelpayload-通道)回过话的 payload。payload 是映射进 Dock 的镜像，卸不掉，所以重新编译后要重启 Dock 才能换上新的；镜像 UUID 不是 App 包里那份的任何一个切片时，窗口把它标成「older build」。
+
+- **主要出现在**：`PayloadInjectionCoordinator.ResidentPayload`、[控制面板实现说明](Internal/ControlPanel.md)「关键设计决策」
 
 ### Self-check（离屏自检）
 
