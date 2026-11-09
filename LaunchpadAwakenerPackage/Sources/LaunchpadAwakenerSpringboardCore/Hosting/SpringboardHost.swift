@@ -50,6 +50,10 @@ package protocol SpringboardHost: AnyObject, Sendable {
     /// Whether a click at `globalPoint` — top-left origin, as `CGEvent.location` — belongs to a Dock drawn
     /// above the springboard.
     func isOnDock(_ globalPoint: CGPoint) -> Bool
+    /// Keeps the Dock on screen or slides it away, as macOS 15 did while the springboard showed. Called
+    /// with the whole state wanted, again whenever it may have changed; a host asks the Dock only for what
+    /// changed. Does nothing where the Dock is out of reach or covered by the springboard's window.
+    func setDockVisibility(_ visibility: SpringboardDockVisibility)
 }
 
 /// The host this process chose.
@@ -149,6 +153,36 @@ package struct SpringboardDockGeometry: Sendable, Equatable {
 
     /// A Dock at the bottom at its default size, on a display without a camera housing.
     package static let standard = SpringboardDockGeometry(orientation: .bottom, thickness: SpringboardMetrics.defaultDockThickness, notchHeight: 0)
+}
+
+/// Where macOS 15 wanted the Dock while the springboard showed.
+///
+/// Opening the springboard kept the Dock on screen, even a Dock set to hide itself
+/// (`-[LPSpringboard setVisible:slow:forGaming:reason:]`, 15.5 `0x1000B0434`, set the Dock's show override).
+/// An open folder slid it away, from the moment the panel started to open to the moment it started to
+/// close (`-[Springboard groupShownForItem:atIndex:]` `0x100093500` and `groupHiddenForItem:`
+/// `0x1000935A4`): a five-row folder's panel reaches down to where the Dock was. As the springboard started
+/// to go, the Dock came back with the exit animation (`0x10009173C`), and the override was let go once that
+/// animation had ended (`0x1000B079C`).
+package enum SpringboardDockVisibility: Sendable, Equatable {
+    /// As the user set it up: the springboard is away.
+    case unchanged
+    /// On screen, even if set to hide itself: the springboard shows its pages, or is going.
+    case keptVisible
+    /// Slid away: a folder is open.
+    case hidden
+
+    /// - Parameters:
+    ///   - isShowing: The springboard is on screen and taking input.
+    ///   - isHiding: The springboard's exit animation is playing.
+    ///   - isFolderOpen: The showing springboard has a folder open that is not closing.
+    package init(isShowing: Bool, isHiding: Bool, isFolderOpen: Bool) {
+        if isShowing {
+            self = isFolderOpen ? .hidden : .keptVisible
+        } else {
+            self = isHiding ? .keptVisible : .unchanged
+        }
+    }
 }
 
 /// The icon style the Dock draws its own tiles in (`IconAppearance`).
@@ -343,4 +377,6 @@ final class DetachedSpringboardHost: SpringboardHost {
     func isOnDock(_ globalPoint: CGPoint) -> Bool {
         false
     }
+
+    func setDockVisibility(_ visibility: SpringboardDockVisibility) {}
 }

@@ -71,11 +71,23 @@ final class SpringboardInterface {
     /// Set once the springboard starts to go: no field is hosted again.
     private var isGoing = false
 
-    private(set) var folderPanel: SpringboardFolderPanel?
+    private(set) var folderPanel: SpringboardFolderPanel? {
+        didSet { reportFolderOpenness() }
+    }
     /// True while a folder opens or closes; input and layout changes wait.
     private(set) var isAnimatingFolder = false
     /// True from the moment a folder starts to close until its panel is gone.
-    private var isClosingFolder = false
+    private var isClosingFolder = false {
+        didSet { reportFolderOpenness() }
+    }
+    /// Whether a folder is open: from the moment its panel starts to open until the moment it starts to
+    /// close. macOS 15 kept the Dock out of the way for exactly that long; see ``SpringboardDockVisibility``.
+    var isFolderOpen: Bool {
+        folderPanel != nil && !isClosingFolder
+    }
+    /// Called whenever ``isFolderOpen`` changes; set by the controller, which tells the host.
+    var folderOpennessDidChange: (@MainActor () -> Void)?
+    private var reportedFolderOpenness = false
     /// The open folder's name while it is being renamed, with the selection.
     private var renaming: SpringboardFieldEditor?
     /// The latest stored layout, waiting until nothing it would disturb is moving.
@@ -474,6 +486,12 @@ final class SpringboardInterface {
     }
 
     // MARK: - Folders
+
+    private func reportFolderOpenness() {
+        guard isFolderOpen != reportedFolderOpenness else { return }
+        reportedFolderOpenness = isFolderOpen
+        folderOpennessDidChange?()
+    }
 
     func openFolder(_ folder: LaunchpadFolder, from folderItemLayer: SpringboardItemLayer, completion: (@MainActor () -> Void)? = nil) {
         guard folderPanel == nil, !isAnimatingFolder else { return }

@@ -3,7 +3,7 @@
 - **状态**: In Progress
 - **作者**: JH
 - **创建日期**: 2026-11-05
-- **最后更新**: 2026-11-08
+- **最后更新**: 2026-11-09
 - **所属愿景**: 无
 - **关联提案**: 无
 - **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；拖动搜索结果在 `feature/drag-to-dock` 上实现、已合进 `main`，分支已删除（拖到 Dock 暂停，没有代码）；输入法见提案 0001；选中高亮的修复在 `fix/search-selection-highlight` 上实现、已合进 `main`，分支已删除；验证用原型在分支 `experiment/injection-prototype`
@@ -303,3 +303,4 @@ final class SpringboardController {
 | 2026-11-08 | 图标里的高亮照 15 穿过抖动层与壁纸混合：抖动层不成组混合，图标图片另放在一个成组混合的容器里 | 用户指出搜索结果的选中项是白底，15 是压暗的壁纸。逆向确认画高亮的 `setMaterialControl:appearance:` 在 15.5 与 27.2 里相同（灰 232/255 加变暗混合），差别在 15 把 `jitterLayer` 的 `allowsGroupBlending` 关掉了，复刻漏了这一项，混合只在抖动层里进行，灰色原样画了出来；拖放目标的方圆也因此成了不透明浅灰。图片另包一层，是为了让透明与着色样式下图标的混合保持原样，Dock 自己的图标格子也把图片单独放在一层里 |
 | 2026-11-08 | 拖动搜索结果、输入法（提案 0001，Implemented）与选中高亮的修复收尾，第 6 批第 6 步完成 | 用户看过后收尾。第 5 步里的拖到 Dock 仍暂停，第 7 步的捏合仍待用户在真机上试，所以本提案仍是 In Progress |
 | 2026-11-08 | 另起提案[不注入 Dock 的独立版 Launchpad](0002-standalone-launchpad.md)：布局库与界面层拆进共用模块 `LaunchpadAwakenerSpringboardCore`，本提案的注入版经 Dock 宿主使用它；排除名单加上独立版，它与 27 的 `Apps.app` 作为启动器即使装着也不进布局 | 拆分只搬代码、不改行为：在 MacBook（27.2）上回归，23 个 Dock 方法签名全部吻合、两个 hook 装上、离屏自检与拆分前一致；26 虚拟机上还没回归 |
+| 2026-11-09 | 照 15 补上 Dock 的显隐。Launchpad 开着时给 Dock 设显示覆盖，开了自动隐藏的 Dock 也露出来。文件夹面板开始打开时，Dock 借自己的自动隐藏滑走；面板开始关闭、或 Launchpad 开始退场时滑回；显示覆盖等退场动画结束才撤。只改注入版，独立版的窗口本来就盖着 Dock | 用户发现 5 行的文件夹面板压进了 Dock，又在 15.5 虚拟机里截图确认：原版打开文件夹时 Dock 是收起来的。面板几何本来与 15 一致，底边落在给 Dock 留的那条线上；15 靠收起 Dock 腾出这块地方，27 的玻璃 Dock 又比 15 的高，所以只差这一步。逆向确认 15.5 用 `-[DockVisibility setOverrideShowType:]`、`forceDockHiddenWithReason:` 与对应的撤销方法做这件事，签名在 26.0 到 27.2 都没变（`/Volumes/RE/Dock/27.2/Notes/DockVisibilityAndFloor.md`）。撤销 Dock 没登记过的原因会让 Dock 崩溃，所以只在拿过的对象上撤，撤前确认原因还在。显示覆盖是用户选择一并补上的 |

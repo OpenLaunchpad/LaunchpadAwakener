@@ -75,6 +75,10 @@ final class DockSpringboardHost: SpringboardHost {
     func isOnDock(_ globalPoint: CGPoint) -> Bool {
         DockBarReference.currentBarRect?.contains(globalPoint) ?? false
     }
+
+    func setDockVisibility(_ visibility: SpringboardDockVisibility) {
+        DockBarVisibility.shared.apply(visibility)
+    }
 }
 
 /// The Dock's own `EC*` layer classes, through ``DockLayerFactory``.

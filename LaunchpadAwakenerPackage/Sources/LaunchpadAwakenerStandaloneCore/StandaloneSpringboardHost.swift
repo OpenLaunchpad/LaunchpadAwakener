@@ -70,4 +70,8 @@ final class StandaloneSpringboardHost: SpringboardHost {
     func isOnDock(_ globalPoint: CGPoint) -> Bool {
         false
     }
+
+    /// The window covers the Dock the whole time the springboard shows, so there is nothing to keep on
+    /// screen or slide away; a folder's panel already has the Dock's room to itself, as in 15.
+    func setDockVisibility(_ visibility: SpringboardDockVisibility) {}
 }

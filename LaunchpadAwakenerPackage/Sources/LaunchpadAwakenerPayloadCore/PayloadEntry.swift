@@ -87,6 +87,12 @@ public enum PayloadEntry {
         do {
             try MethodHookInstaller.installAtomically(hooks)
             logger.info("Installed \(hooks.count, privacy: .public) hook(s)")
+            let missingVisibilityMembers = LiveDockVisibility.missingMembers()
+            if missingVisibilityMembers.isEmpty {
+                logger.info("The Dock's visibility controller matches: the Dock is kept on screen, and slides away for an open folder")
+            } else {
+                logger.error("The Dock's visibility controller lacks \(missingVisibilityMembers.joined(separator: ", "), privacy: .public); the Dock is left as it is")
+            }
             LaunchpadServices.start()
             return .installed(hookCount: hooks.count)
         } catch {

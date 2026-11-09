@@ -80,10 +80,13 @@ package final class SpringboardController {
     /// Shows the springboard; `animated` false leaves it fully transparent for a pinch to reveal.
     package func show(reason: String, animated: Bool = true) {
         guard !isVisible else { return }
-        finishHiding()
+        // The Dock is told once the new springboard is up: letting it go here only to hold it again a
+        // moment later would start it sliding.
+        finishHiding(updatingDockVisibility: false)
         let displayIdentifier = CGMainDisplayID()
         guard let newWindow = SpringboardHostSystem.host.makeWindow(onDisplay: displayIdentifier) else {
             #log(.error, "Could not create the springboard window")
+            updateDockVisibility()
             return
         }
         SpringboardIconProvider.shared.refreshIconStyle()
@@ -109,8 +112,12 @@ package final class SpringboardController {
         newInterface.setVisibility(0)
         window = newWindow
         interface = newInterface
+        newInterface.folderOpennessDidChange = { [weak self] in
+            self?.updateDockVisibility()
+        }
         SpringboardHostSystem.host.inputMethod?.client = newInterface
         newWindow.orderIn()
+        updateDockVisibility()
         if animated {
             newInterface.animateEntrance(duration: SpringboardPreferences.showAnimationDuration)
         }
@@ -140,6 +147,9 @@ package final class SpringboardController {
         guard let currentWindow = window, let currentInterface = interface else { return }
         window = nil
         interface = nil
+        // A folder the preparation takes away must not reach the Dock half-way through: the Dock is told
+        // once, below, when the exit animation starts.
+        currentInterface.folderOpennessDidChange = nil
         idleGeneration += 1
         stopPinch()
         currentInterface.prepareForHiding()
@@ -151,6 +161,8 @@ package final class SpringboardController {
         currentWindow.releaseKeyFocus(returningToPreviousApplication: returningToPreviousApplication)
         hidingWindow = currentWindow
         hidingInterface = currentInterface
+        // A Dock slid away for an open folder comes back with the exit animation.
+        updateDockVisibility()
         if animated {
             currentInterface.animateExit(duration: SpringboardPreferences.hideAnimationDuration) { [weak self] in
                 guard let self, self.hidingWindow === currentWindow else { return }
@@ -162,13 +174,27 @@ package final class SpringboardController {
         #log(.info, "Hidden (\(reason, privacy: .public)) on \(self.lastPosition.description, privacy: .public)")
     }
 
-    /// Removes a springboard that is fading out, now.
-    private func finishHiding() {
+    /// Removes a springboard that is fading out, now, and gives the Dock back its own behaviour.
+    private func finishHiding(updatingDockVisibility: Bool = true) {
         guard let hidingWindow else { return }
         hidingWindow.orderOut()
         hidingInterface?.tearDown()
         self.hidingWindow = nil
         hidingInterface = nil
+        if updatingDockVisibility {
+            self.updateDockVisibility()
+        }
+    }
+
+    /// Tells the host where the Dock should be now; see ``SpringboardDockVisibility``.
+    private func updateDockVisibility() {
+        SpringboardHostSystem.host.setDockVisibility(
+            SpringboardDockVisibility(
+                isShowing: window != nil,
+                isHiding: hidingWindow != nil,
+                isFolderOpen: interface?.isFolderOpen ?? false
+            )
+        )
     }
 
     /// Takes a new layout from the library — after an edit, or after applications came or went — and

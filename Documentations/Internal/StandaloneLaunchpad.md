@@ -22,7 +22,7 @@
 
 这些图层不碰 `CATransaction`：动不动画由调用方当前的事务决定，与 Dock 的类一样。开发构建的离屏自检在 Dock 里把同一页网格、同一组缩略图、选中材质和同一行标题用两套各做一遍，逐项比对并写进日志（`SpringboardReplicaComparison`）；注入版仍然只用 Dock 自己的类。
 
-**窗口盖住一切，事件交给与注入版相同的控制器。** 无边框 `NSWindow`，层级 27（15 的 Launchpad 窗口所在，高于菜单栏的 24 与 Dock 的 20），在所有空间与全屏 App 之上都能出现（`.canJoinAllSpaces`、`.fullScreenAuxiliary`）。内容视图是层托管视图，根图层整个交给界面，与 Dock 的 `WALayerKitWindow` 一样。窗口覆写 `sendEvent(_:)`，把每个事件的 `cgEvent` 转成 `SpringboardInputEvent` 交给 `SpringboardController.handle(_:)`，没被拿走的才照常派发；所以按键、点击、滚动、翻页的规则与注入版一字不差。Dock 被盖住，宿主的 `isOnDock` 恒为否。
+**窗口盖住一切，事件交给与注入版相同的控制器。** 无边框 `NSWindow`，层级 27（15 的 Launchpad 窗口所在，高于菜单栏的 24 与 Dock 的 20），在所有空间与全屏 App 之上都能出现（`.canJoinAllSpaces`、`.fullScreenAuxiliary`）。内容视图是层托管视图，根图层整个交给界面，与 Dock 的 `WALayerKitWindow` 一样。窗口覆写 `sendEvent(_:)`，把每个事件的 `cgEvent` 转成 `SpringboardInputEvent` 交给 `SpringboardController.handle(_:)`，没被拿走的才照常派发；所以按键、点击、滚动、翻页的规则与注入版一字不差。Dock 被盖住，宿主的 `isOnDock` 恒为否。宿主也不改 Dock 的显隐：注入版照 15 在文件夹开着时让 Dock 滑走，这里的窗口本来就把 Dock 那块地方让给了面板。
 
 **焦点：打开时激活自己，退场一开始就把自己藏起来交还。** `orderIn` 先 `NSApp.activate()` 再 `makeKeyAndOrderFront`；从别的 App 按快捷键打开时，这一刻 App 还没激活、窗口不是 key，等激活完成 AppKit 会让它成为 key、内容视图仍是第一响应者，不用另外处理。`releaseKeyFocus` 调 `NSApp.hide(nil)`：与 Command-H 一样，系统随即激活之前那个 App，这正是 15「退场一开始就交还输入」的效果；窗口设了 `canHide = false`，不随 App 藏起来，留到退场动画结束才撤下。起初用的是 `NSApp.deactivate()`，在 27 上它不交出激活——退场时这扇窗口还在最前面，App 照样是前台，菜单栏还是它的；下次显示前先 `unhideWithoutActivation()`。两种收起不交还：从界面里打开了 App（那个 App 自己拿焦点，再交给之前的 App 会抢它的），以及打开设置（焦点留给设置窗口），宿主接口为此给 `releaseKeyFocus` 加了 `returningToPreviousApplication`，注入版不看它。代价是设置窗口开着时收起界面，设置窗口会随 App 一起藏起来，下次打开 App 时再出现。App 失去激活（Cmd-Tab、点到别处）就收起；点 Dock 图标走 `applicationShouldHandleReopen` 打开；登录时由「打开时登录」启动的那一次不打开，等第一次点图标（看打开事件的 `keyAELaunchedAsLogInItem`）。
 
