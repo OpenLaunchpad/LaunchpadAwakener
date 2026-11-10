@@ -87,3 +87,4 @@ SwiftyXPC 已经在依赖图里，App 与 daemon、App 与 payload 两条通道�
 | 2026-11-10 | 用户批准，开始实现 | 实现放在 `feature/text-input-swift-xpc` |
 | 2026-11-10 | 服务类型不标 `@available(macOS 26.0, *)`，只在设签名要求处判断版本，低于 26 拒绝所有连接 | `@Loggable` 给生成的成员写死了 macOS 11 的 `@available`，类上标更高的版本就编不过；判断收在一处，效果相同 |
 | 2026-11-10 | 实现完成，待部署到测试机验证、用户看过后收尾 | 开发机上全部单元测试通过（新增 19 个），`RunScript.sh` 构建通过、三个切片都在，辅助进程只多链接了系统的 `libswiftXPC.dylib` |
+| 2026-11-10 | 部署到测试机留到回家后在 Ultra 上直连做 | 从公司那台部署要经 Mac mini 转发，转发约 10 分钟就断，断在半途会弄坏 MacBook 上的 App |
