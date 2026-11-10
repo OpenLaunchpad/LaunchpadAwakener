@@ -7,9 +7,10 @@ import OSToolbox
 /// which are never edited at once — following macOS 15's `-[ECTIHelperDelegate _handleSetupMessage:forPeer:]`
 /// and `_handleSetupMiniViewMessage:forPeer:`.
 ///
-/// The field lives in the Dock tile's mini view window, which never goes on screen but can be key. The
-/// payload shows that window's layer-hosting context in the Dock and posts the Dock's keys and clicks to
-/// this process; this service reports the text back. The requests come through ``TextInputPeerListener``.
+/// The field lives in the Dock tile's mini view window, which can be key and is kept transparent on screen
+/// (``makeInvisibleOnScreen(_:)``). The payload shows that window's layer-hosting context in the Dock and
+/// posts the Dock's keys and clicks to this process; this service reports the text back. The requests come
+/// through ``TextInputPeerListener``.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "TextInputService")
 @MainActor
 final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
@@ -237,8 +238,18 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
             #log(.error, "The Dock tile made no mini view window")
             return nil
         }
+        Self.makeInvisibleOnScreen(window)
         window.delegate = self
         return window
+    }
+
+    /// Once the mini view is shown, AppKit leaves its window on screen at the level it was given, 27, though
+    /// only the Dock's `CALayerHost` is meant to show the field. What the window draws there is not the
+    /// springboard's: a window that came on screen after Launchpad's own sat over it, so the caret stayed
+    /// over an open folder instead of fading with the pages, and the last search stayed over other
+    /// applications once the springboard had gone. Fully transparent, it shows nothing.
+    static func makeInvisibleOnScreen(_ window: NSWindow) {
+        window.alphaValue = 0
     }
 
     /// `window._contextForLayerHosting.contextId`: what a `CALayerHost` in the Dock shows.

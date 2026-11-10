@@ -80,7 +80,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 - **启动**：它放在 `Contents/Library/LoginItems/`，App 启动时用 `SMAppService.agent` 注册，不用用户批准。launchd 在 payload 连它的 Mach 服务时才拉起它。它只接受 Dock 的连接（见下文「几处细节」）。
 - **通道**：系统 XPC 框架的 Swift 接口（提案 [文本输入通道改用系统的 Swift XPC 接口](../Evolutions/0008-text-input-swift-xpc.md)）。payload 一侧是 `XPCSession`，辅助进程一侧是 `XPCListener`，都在主队列上收发；消息是 `LaunchpadAwakenerShared` 里的 `Codable` 类型：payload 发 `TextInputRequest`（`begin`、`setString`、`setFocus`、`end`，`begin` 回 `TextInputHosting`，`end` 回 `TextInputEnding`），辅助进程发 `TextInputChange`。消息按发送的先后处理。辅助进程一退出 session 就作废，payload 丢掉它，下一次 `begin` 再建一个，launchd 随之重新拉起辅助进程。
-- **托管**：它在 Dock 图块的 mini view 窗口里放一个 `NSTextField`，那扇窗口不上屏，却能成为 key 窗口。payload 用 `CALayerHost` 显示这扇窗口的图层托管上下文。
+- **托管**：它在 Dock 图块的 mini view 窗口里放一个 `NSTextField`，那扇窗口能成为 key 窗口。payload 用 `CALayerHost` 显示这扇窗口的图层托管上下文；窗口本身虽在屏上，却是完全透明的（见下文「与 15 不同的地方」）。
 - **转发**：payload 把这些事件复制一份，标上辅助进程的窗口编号与窗口内位置，用 `CGEventPostToPid` 发过去：
   - 搜索框该收的键；正在组字时是所有键；
   - 改名时的所有键；
@@ -91,6 +91,10 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 - 27.2 的 Dock 不再告诉 AppKit「mini view 已显示」，辅助进程要自己调 `_setMiniViewShown:`，否则窗口成不了 key，按键进不去。
 - 窗口层级要设成 27，候选窗才出现在 Launchpad 上方。
+- mini view 窗口显示过一次，AppKit 就把它一直留在屏上：第 27 层，正好在框的位置，界面收起后也不撤。辅助进程把它设成完全透明（`alphaValue` 为 0），屏上只剩 payload 显示的那一份。不透明时有两处露馅：
+  - 它比 Launchpad 的窗口晚上屏时（辅助进程刚被拉起后的第一次打开），压在界面上面。点进搜索框再点开文件夹，光标不随主界面淡出，停在文件夹上方。
+  - 界面靠点空白处或启动 App 收起后，搜索框里的字留在别的 App 上方，到下次打开才清掉。
+  - 15 的这扇窗口不上屏。15 打开文件夹也不改搜索框焦点，光标随主界面一起淡出，关上文件夹后照旧闪；复刻照此不动焦点。
 - 辅助进程只托管一个框，搜索框与改名框轮流用：开始改名时搜索框交出去，改完再接回来。每次换框都先结束上一段编辑，字段编辑器才会按新框的对齐方式重建，否则改名框会沿用搜索框的靠左。
 - 组字时本地的占位文字「搜索」让开，不与组字中的文字叠在一起。
 - 连不上辅助进程、它中途退出时，退回上文的本地编辑；下次打开时 launchd 会重新拉起它。
@@ -235,6 +239,11 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 改用 ObjCRuntimeToolbox（2026-11-09，MacBook 27.2 与 26.6.2 虚拟机上，非交互）：两台都认出 Dock、23 个方法签名全部吻合、两个 hook 经 `RuntimeMethodHook` 装上、`DockVisibility` 对得上；离屏自检的网格、缩略图、卸载器（27.2 上 145 个里 39 个可删）、壁纸与 27.2 上的玻璃都与改前一致，图标 205 个（27.2）与 97 个（26）全部取到；独立版的自检解析出图标样式，207 个图标全部取到。第一次部署时所有图标都取不到：`ISIcon` 是类簇，`+alloc` 给的是 `ISIconFactory`，`initWithURL:` 在它上面，改成按类名 `ISIcon` 核对就找不到。随后系统框架导出的私有类改为按头文件直接调用（见上文「调 Dock 内部方法一律先校验签名」），声明前在两台测试机上逐个核对过方法与编码，`SystemPrivateInterfaceTests` 在开发机上渲染一个图标锁住它。没有做交互验证，文本输入辅助进程里调 `NSDockTile` 私有方法的那几处只在开发机上编译过。
 - 去掉手写类型编码（2026-11-09，同样两台、非交互）：构造、类方法、卸载的 block 参数改由 `@RuntimeClassProxy` 推出，经环境对象拿到的对象改用 `@RuntimeObjectProxy`（FrameworkToolbox 0.18.0）。两台都是 23 个方法全部吻合、两个 hook 装上；26.6.2 的环境对象类名是 `Environment`，27.2 是 `_TtC8DockCore11Environment`，两边都核对通过、图标样式照常取到；卸载器在 27.2 上仍是 145 个里 39 个可删，在 26.6.2 上找得到、0 个可删（虚拟机里没有 App Store 应用）；网格、图标（205 个与 97 个）、壁纸与 27.2 上的玻璃都与改前一致，独立版自检照旧。真正删除应用要交互，没有验证；回调闭包改标 `@Sendable`，让它在 XPC 队列上被调用时不被当成主 actor 的闭包。
 - 重复条目（2026-11-09，开发机上，只读）：拿用户真实布局库的一份拷贝，用新规则在开发机上对账一遍：删掉的正好是 9 个过期条目（5 个原地换了 bundle ID 的 App 的旧条目，4 个已删除、靠同 ID 的别的副本留着的旧版本），新加了另外两个 Xcode 与 IDA 9.2 到 9.5；对账后 233 个条目都指向 bundle ID 相符的 App，没有两个条目指向同一份。没有在 Dock 里跑过。
+- 搜索框光标露在打开的文件夹上方（2026-11-10，MacBook 上，经用户同意截图与模拟点击）：
+  - 窗口列表显示，辅助进程的 mini view 窗口一直在屏上：第 27 层、不透明，就在搜索框文字区。
+  - 复现：结束辅助进程，再第一次打开界面，点进搜索框、点开文件夹，连拍 6 张里 5 张看得到光标，与用户在 Ultra 上的截图一致。之后的打开里，Launchpad 的窗口压在它上面，看不出来。
+  - 搜「q」后点空白处收起，「q」留在桌面上方。
+  - 修复（窗口设成完全透明）只有单元测试，没有在实机上看过：MacBook 被拿去装 macOS 15 了。
 - 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认气泡的样子与真删一个 App。
 
 ## 已知降级
