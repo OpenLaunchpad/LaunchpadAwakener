@@ -1,6 +1,6 @@
 # Draft - 文本输入通道改用系统的 Swift XPC 接口
 
-- **状态**: Accepted
+- **状态**: In Progress
 - **创建日期**: 2026-11-10
 - **最后更新**: 2026-11-10
 - **实现分支**: `feature/text-input-swift-xpc`
@@ -59,7 +59,7 @@ payload 与文本输入辅助进程之间的通道（[0001](0001-input-method-he
 
 ### 落地步骤
 
-1. ⬜ **消息类型**：在 `LaunchpadAwakenerShared` 加 `Codable` 消息与回复类型，新建 `LaunchpadAwakenerTextInputCoreTests`，用匿名监听测往返与顺序。旧的字符串常量暂时保留，两端照旧能编。
+1. ✅ **消息类型**：在 `LaunchpadAwakenerShared` 加 `Codable` 消息与回复类型，新建 `LaunchpadAwakenerTextInputCoreTests`，用匿名监听测往返与顺序。旧的字符串常量暂时保留，两端照旧能编。
 2. ⬜ **辅助进程**：`TextInputService` 改用 `XPCListener` 与每个 session 上的签名要求，接替 Dock 的规则抽成能单测的类型并补测试；签名要求拒绝测试进程的测试也在这一步。
 3. ⬜ **payload**：`TextInputHelperClient` 改用 `XPCSession`，删掉 `MessageKey` 与 `Request` 常量。
 4. ⬜ **文档与验证**：更新 `CLAUDE.md` 与实现说明，跑全部单元测试与 `RunScript.sh` 构建；部署到测试机看日志。
