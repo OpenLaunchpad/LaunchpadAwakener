@@ -13,3 +13,4 @@
 | 0007 | [两个 App 的界面改用 AppKit 重写，不再用 SwiftUI](0007-appkit-rewrite.md) | Implemented |
 | draft | [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md) | In Progress |
 | draft | [文本输入通道改用系统的 Swift XPC 接口](draft-text-input-swift-xpc.md) | In Progress |
+| draft | [在控制面板里显示输入法辅助进程，并自动换掉旧版本](draft-text-input-helper-status.md) | Accepted |
