@@ -1,6 +1,6 @@
 # Draft - SIP 没关时引导用户改用独立版，并一键安装
 
-- **状态**: Accepted
+- **状态**: In Progress
 - **创建日期**: 2026-11-10
 - **最后更新**: 2026-11-10
 - **实现分支**: `feature/system-integrity-protection-guide`
@@ -27,7 +27,7 @@
 
 落地步骤（每步各自构建、测试通过）：
 
-1. SIP 判断：`SystemIntegrityProtectionConfiguration` 与它的单元测试。
+1. ✅ SIP 判断：`SystemIntegrityProtectionConfiguration` 与它的单元测试。
 2. 独立版的安装：找到包里的 `Launchpad.zip`、识别已装的独立版、解压到目标目录、打开，以及单元测试。
 3. 横幅与启动流程：就绪判断的新原因与两个按钮、SIP 没关时跳过注入相关的启动步骤、表单隐藏注入各节、开发构建的启动参数。
 4. 工程：注入版依赖独立版 target，构建时把它压进 `Contents/Resources/Launchpad.zip`；`RunScript.sh` 构建后核对包里有它。
