@@ -11,6 +11,7 @@
 - [Evolutions/0007-appkit-rewrite.md](Evolutions/0007-appkit-rewrite.md) —— 两个 App 的界面改用 AppKit 与 UIFoundation、AppKitPlus 重写，不再用 SwiftUI（Implemented）
 - [Evolutions/0008-text-input-swift-xpc.md](Evolutions/0008-text-input-swift-xpc.md) —— 文本输入通道改用系统的 Swift XPC 接口：`XPCSession`、`XPCListener` 与共用的 `Codable` 消息（Implemented）
 - [Evolutions/0009-text-input-helper-status.md](Evolutions/0009-text-input-helper-status.md) —— 在控制面板里显示输入法辅助进程的运行状态与版本，加「重启」，App 启动时自动换掉旧版本（Implemented）
+- [Evolutions/draft-system-integrity-protection-guide.md](Evolutions/draft-system-integrity-protection-guide.md) —— SIP 没关时引导用户改用独立版，并一键安装（Accepted）
 - [Internal/LaunchpadReplica.md](Internal/LaunchpadReplica.md) —— Launchpad 复刻的实现说明：关键决策、模块结构、验证、新 Dock 构建的适配流程
 - [Internal/StandaloneLaunchpad.md](Internal/StandaloneLaunchpad.md) —— 独立版 Launchpad 的实现说明：宿主接口、Dock 图层类的等价实现、验证
 - [Internal/AppKitInterface.md](Internal/AppKitInterface.md) —— 两个 App 的 AppKit 界面层的实现说明：外壳与模块、分组表单的尺寸、主菜单、登录时启动、只在真机上才看得出的坑
