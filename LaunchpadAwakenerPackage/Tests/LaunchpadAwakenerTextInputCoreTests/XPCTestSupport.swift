@@ -20,7 +20,8 @@ final class Recorder<Element: Sendable>: Sendable {
 func sendExpectingReply<Message: Encodable, Reply: Decodable & Sendable>(
     _ message: Message,
     over session: XPCSession,
-    as replyType: Reply.Type = Reply.self
+    as replyType: Reply.Type = Reply.self,
+    isolation: isolated (any Actor)? = #isolation
 ) async throws -> Reply {
     try await withCheckedThrowingContinuation { continuation in
         do {

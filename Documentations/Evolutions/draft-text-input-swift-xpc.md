@@ -35,7 +35,7 @@ payload 与文本输入辅助进程之间的通道（[0001](0001-input-method-he
 
 ### 两端
 
-- **辅助进程**：`XPCListener(service:targetQueue: .main, incomingSessionHandler:)` 监听原来的 Mach 服务名。每个接进来的 session 在激活前设好签名要求与主队列，交给一个 `XPCPeerHandler`。「先发来一条合法消息才接替旧连接」不变：处理者收到的消息来自另一个 session 时，取消旧的、换成新的。当前 Dock 的 session 取消时结束托管；不是当前 Dock 的 session 因签名不符被取消时记一条拒绝日志。
+- **辅助进程**：连接管理放在不碰 AppKit 的 `TextInputPeerListener`，`TextInputService` 只管托管的文本框。它用 `XPCListener(service:targetQueue: .main, incomingSessionHandler:)` 监听原来的 Mach 服务名，每个接进来的 session 在激活前设好签名要求与主队列，交给一个 `XPCPeerHandler`。测试里用同一个类型匿名监听、不设签名要求（`PeerPolicy.anyPeer`）。「先发来一条合法消息才接替旧连接」不变：处理者收到的消息来自另一个 session 时，取消旧的、换成新的。当前 Dock 的 session 取消时结束托管；不是当前 Dock 的 session 因签名不符被取消时记一条拒绝日志。
 - **payload**：`XPCSession(machService:targetQueue: .main, incomingMessageHandler:cancellationHandler:)`。session 不像连接那样能在对方退出后继续用：辅助进程一退出 session 就失效（`session.h`：「system will make no attempt to reestablish the connection」），所以取消回调里丢掉它、通知界面辅助进程走了，下一次 `begin` 建新 session，launchd 照旧按需拉起辅助进程。`TextInputHelperClient` 对界面层的接口（`begin(…completion:)`、`setString`、`setFocus`、`end(completion:)`、`post`）不变，`SpringboardRemoteTextField` 不用改。
 
 ### 没有询问就采用的假设
@@ -43,7 +43,7 @@ payload 与文本输入辅助进程之间的通道（[0001](0001-input-method-he
 - **签名要求换个写法。** 原来是代码签名要求字符串 `identifier "com.apple.dock" and anchor apple`。Swift 接口不收这种字符串，改用 `.isPlatformCode(andMatchesSigningIdentifier: "com.apple.dock")`，即「系统自带的二进制，且签名标识是 Dock」。Dock 两条都满足。注入过的 Dock 能不能通过，要在两台测试机上确认。
 - **只在 session 上设签名要求，监听器上不设。** 监听器上的要求不满足时，请求直接丢掉、不留痕迹（`listener.h`），也不会传给 session（「Peer sessions created from the listener do not inherit the requirement」）。只设在 session 上，不满足的 session 收到第一条消息就被取消，安全性一样，还能留日志。
 - **删掉按进程路径认 Dock 的检查。** session 拿不到对方的进程号；签名要求本来就逐条把关，路径检查原本只是「先看一眼」。日志里也不再有 Dock 的进程号。
-- **辅助进程这一侧要求 macOS 26**（`XPCPeerRequirement` 与 `setPeerRequirement` 从 26 开始才有）。包的最低系统是 macOS 15，所以服务类型标 `@available(macOS 26.0, *)`，入口在更早的系统上直接退出。payload 与辅助进程本来就只在 26 与 27 上运行。payload 用的 `XPCSession` 从 macOS 14 就有。
+- **签名要求要 macOS 26**（`XPCPeerRequirement` 与 `setPeerRequirement` 从 26 开始才有），包的最低系统是 macOS 15。只在设要求的那一处判断系统版本：低于 26 时监听器拒绝所有连接。payload 与辅助进程本来就只在 26 与 27 上运行。其余接口（`XPCSession`、`XPCListener`、匿名监听的 endpoint）macOS 15 就有。
 - **部署后要手动换掉旧辅助进程。** 还在运行的旧辅助进程不认新格式，收不到能让它自行退出的 `begin`。这次部署后，每台测试机上要 `pkill -f LaunchpadAwakenerTextInput` 一次；项目还没对外发布，没有用户受影响。以后再改消息格式就不需要了：辅助进程解码失败时，先检查自己的可执行文件有没有被换掉，换了就退出。
 - 不改 daemon，`daemonVersion` 不递增。payload 改了，部署后要重启 Dock。
 
@@ -60,7 +60,7 @@ payload 与文本输入辅助进程之间的通道（[0001](0001-input-method-he
 ### 落地步骤
 
 1. ✅ **消息类型**：在 `LaunchpadAwakenerShared` 加 `Codable` 消息与回复类型，新建 `LaunchpadAwakenerTextInputCoreTests`，用匿名监听测往返与顺序。旧的字符串常量暂时保留，两端照旧能编。
-2. ⬜ **辅助进程**：`TextInputService` 改用 `XPCListener` 与每个 session 上的签名要求，接替 Dock 的规则抽成能单测的类型并补测试；签名要求拒绝测试进程的测试也在这一步。
+2. ✅ **辅助进程**：`TextInputService` 改用 `XPCListener` 与每个 session 上的签名要求，接替 Dock 的规则抽成能单测的类型并补测试；签名要求拒绝测试进程的测试也在这一步。
 3. ⬜ **payload**：`TextInputHelperClient` 改用 `XPCSession`，删掉 `MessageKey` 与 `Request` 常量。
 4. ⬜ **文档与验证**：更新 `CLAUDE.md` 与实现说明，跑全部单元测试与 `RunScript.sh` 构建；部署到测试机看日志。
 
@@ -84,3 +84,4 @@ SwiftyXPC 已经在依赖图里，App 与 daemon、App 与 payload 两条通道�
 | 2026-11-10 | Created as Draft | 文本输入通道是项目里唯一手写 libxpc 的通道，用户要求改用更高层的 Swift 接口 |
 | 2026-11-10 | 起初的方案是 SwiftyXPC，改为系统的 Swift XPC 接口 | SwiftyXPC 不保证处理顺序，单向消息还会弹回空消息；用户让查系统接口，查下来顺序、单向消息、`Codable`、签名要求都满足，也不用新增依赖 |
 | 2026-11-10 | 用户批准，开始实现 | 实现放在 `feature/text-input-swift-xpc` |
+| 2026-11-10 | 服务类型不标 `@available(macOS 26.0, *)`，只在设签名要求处判断版本，低于 26 拒绝所有连接 | `@Loggable` 给生成的成员写死了 macOS 11 的 `@available`，类上标更高的版本就编不过；判断收在一处，效果相同 |

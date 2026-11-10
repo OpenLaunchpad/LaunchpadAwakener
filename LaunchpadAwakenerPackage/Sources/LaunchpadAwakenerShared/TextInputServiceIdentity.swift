@@ -20,9 +20,10 @@ public enum TextInputServiceIdentity {
     /// `SMAppService.agent(plistName:)` takes; the build generates the file under this name.
     public static var agentPropertyListName: String { "\(machServiceName).plist" }
 
-    /// The only peer the helper accepts: the Dock, as Apple signed it. Checked by libxpc on every message,
-    /// so neither another process nor a recycled process identifier gets the typed text.
-    public static let peerCodeSigningRequirement = "identifier \"com.apple.dock\" and anchor apple"
+    /// Signing identifier of the only peer the helper accepts: the Dock, which also has to be platform code,
+    /// part of the system. Checked by libxpc on every message, so neither another process nor a recycled
+    /// process identifier gets the typed text.
+    public static let dockSigningIdentifier = "com.apple.dock"
 
     /// Keys of the XPC messages between the payload and the helper.
     public enum MessageKey {

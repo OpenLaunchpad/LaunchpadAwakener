@@ -1,33 +1,22 @@
 import AppKit
-import Darwin
 import LaunchpadAwakenerAppKitPrivateInterfaces
 import LaunchpadAwakenerShared
 import OSToolbox
-import XPC
 
-/// An XPC object handed from libxpc's handler to the main actor; the handlers run on the main queue.
-private struct XPCObjectBox: @unchecked Sendable {
-    let object: xpc_object_t
-}
-
-/// Listens on the helper's Mach service and hosts the one field the payload asks for — the springboard's
-/// search field or an open folder's name, which are never edited at once — following macOS 15's
-/// `-[ECTIHelperDelegate _handleSetupMessage:forPeer:]` and `_handleSetupMiniViewMessage:forPeer:`.
+/// Hosts the one field the payload asks for — the springboard's search field or an open folder's name,
+/// which are never edited at once — following macOS 15's `-[ECTIHelperDelegate _handleSetupMessage:forPeer:]`
+/// and `_handleSetupMiniViewMessage:forPeer:`.
 ///
 /// The field lives in the Dock tile's mini view window, which never goes on screen but can be key. The
 /// payload shows that window's layer-hosting context in the Dock and posts the Dock's keys and clicks to
-/// this process; this service reports the text back.
+/// this process; this service reports the text back. The requests come through ``TextInputPeerListener``.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "TextInputService")
 @MainActor
 final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     static let shared = TextInputService()
 
-    private typealias MessageKey = TextInputServiceIdentity.MessageKey
-    private typealias Request = TextInputServiceIdentity.Request
-
-    private var listener: xpc_connection_t?
-    /// The Dock's connection; a new one replaces it when the Dock restarts.
-    private var peer: xpc_connection_t?
+    /// Only the Dock shows the field; anything else could read what is typed.
+    private let peerListener = TextInputPeerListener(peerPolicy: .appleSignedDock)
     private let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 25))
     private let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 25))
     private let fieldEditor = TextInputFieldEditor()
@@ -58,122 +47,57 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
             self?.reportState(isEditingComplete: false)
         }
 
-        let listener = xpc_connection_create_mach_service(
-            TextInputServiceIdentity.machServiceName,
-            DispatchQueue.main,
-            UInt64(XPC_CONNECTION_MACH_SERVICE_LISTENER)
-        )
-        xpc_connection_set_event_handler(listener) { event in
-            let box = XPCObjectBox(object: event)
-            MainActor.assumeIsolated {
-                TextInputService.shared.accept(box.object)
-            }
+        peerListener.requestHandler = { [weak self] request in
+            self?.handle(request)
         }
-        xpc_connection_resume(listener)
-        self.listener = listener
-        #log(.info, "Listening on \(TextInputServiceIdentity.machServiceName, privacy: .public)")
-    }
-
-    // MARK: - Connections
-
-    private func accept(_ event: xpc_object_t) {
-        guard xpc_get_type(event) == XPC_TYPE_CONNECTION else { return }
-        let connection = event as xpc_connection_t
-        let processIdentifier = xpc_connection_get_pid(connection)
-        // Only the Dock shows the field; anything else could read what is typed. libxpc enforces the
-        // Dock's signature on every message; the path is only a quick first look.
-        guard
-            Self.isDock(processIdentifier: processIdentifier),
-            xpc_connection_set_peer_code_signing_requirement(connection, TextInputServiceIdentity.peerCodeSigningRequirement) == 0
-        else {
-            #log(.error, "Refused a connection from process \(processIdentifier, privacy: .public), which is not the Dock")
-            xpc_connection_cancel(connection)
-            return
+        // The Dock went away: keep nothing composing and let the field go.
+        peerListener.peerDidEnd = { [weak self] in
+            self?.end()
         }
-        let connectionBox = XPCObjectBox(object: connection)
-        xpc_connection_set_event_handler(connection) { message in
-            let messageBox = XPCObjectBox(object: message)
-            MainActor.assumeIsolated {
-                TextInputService.shared.handle(messageBox.object, from: connectionBox.object)
-            }
+        peerListener.undecodableRequestHandler = { [weak self] in
+            self?.exitIfReplaced()
         }
-        xpc_connection_set_target_queue(connection, DispatchQueue.main)
-        xpc_connection_resume(connection)
-        #log(.info, "The Dock connected (process \(processIdentifier, privacy: .public))")
-    }
-
-    private static func isDock(processIdentifier: pid_t) -> Bool {
-        var pathBuffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(processIdentifier, &pathBuffer, UInt32(pathBuffer.count)) > 0 else { return false }
-        return String(cString: pathBuffer) == "/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock"
-    }
-
-    private func handle(_ message: xpc_object_t, from connection: xpc_object_t) {
-        guard xpc_get_type(message) == XPC_TYPE_DICTIONARY else {
-            // The Dock went away: keep nothing composing and let the field go. Another connection failing
-            // its signature check changes nothing, but leaves the fields without input methods.
-            guard connection === peer else {
-                if message === XPC_ERROR_PEER_CODE_SIGNING_REQUIREMENT {
-                    #log(.error, "Refused process \(xpc_connection_get_pid(connection), privacy: .public)'s messages: it is not the Apple-signed Dock")
-                }
-                return
-            }
-            #log(.info, "The Dock's connection ended")
-            peer = nil
-            end()
-            return
-        }
-        // A message that passed the signature check: this is the Dock, a restarted one replacing the last.
-        if connection !== peer {
-            if let peer {
-                xpc_connection_cancel(peer)
-            }
-            peer = connection
-        }
-        guard let requestPointer = xpc_dictionary_get_string(message, MessageKey.request) else { return }
-        switch String(cString: requestPointer) {
-        case Request.begin:
-            begin(with: message)
-        case Request.setString:
-            setString(xpc_dictionary_get_string(message, MessageKey.string).map { String(cString: $0) } ?? "")
-        case Request.setFocus:
-            showCaret(xpc_dictionary_get_bool(message, MessageKey.hasFocus))
-        case Request.end:
-            let endedString = end()
-            // The final text, composing text included, for a rename that ended while text was composing;
-            // none when this field was never set up, as the text left is then another field's.
-            if let peer, let reply = xpc_dictionary_create_reply(message) {
-                if let endedString {
-                    xpc_dictionary_set_string(reply, MessageKey.string, endedString)
-                }
-                xpc_connection_send_message(peer, reply)
-            }
-        default:
-            break
+        do {
+            try peerListener.listen(onMachService: TextInputServiceIdentity.machServiceName)
+            #log(.info, "Listening on \(TextInputServiceIdentity.machServiceName, privacy: .public)")
+        } catch {
+            #log(.error, "Could not listen on \(TextInputServiceIdentity.machServiceName, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 
     // MARK: - Requests
 
-    private func begin(with message: xpc_object_t) {
+    private func handle(_ request: TextInputRequest) -> (any Encodable & Sendable)? {
+        switch request {
+        case .begin(let configuration):
+            return begin(with: configuration)
+        case .setString(let string):
+            setString(string)
+            return nil
+        case .setFocus(let hasFocus):
+            showCaret(hasFocus)
+            return nil
+        case .end:
+            // The final text, composing text included, for a rename that ended while text was composing;
+            // none when this field was never set up, as the text left is then another field's.
+            return TextInputEnding(string: end())
+        }
+    }
+
+    private func begin(with configuration: TextInputFieldConfiguration) -> TextInputHosting {
         isHosting = false
         // A deployment replaced this executable: the new one hosts the field from the next opening on.
-        guard Self.currentExecutableIdentity() == executableIdentity else {
-            #log(.info, "A new build replaced the helper; exiting so that launchd starts that one")
-            reply(to: message, contextIdentifier: 0, windowNumber: 0)
-            DispatchQueue.main.async {
-                exit(EXIT_SUCCESS)
-            }
-            return
+        if exitIfReplaced() {
+            return .unavailable
         }
         // A field editor keeps what it was set up with — the search field's alignment, say — so the new
         // field starts its editing afresh.
         containerView.window?.makeFirstResponder(nil)
-        isSearchField = xpc_dictionary_get_bool(message, MessageKey.isSearchField)
-        let string = xpc_dictionary_get_string(message, MessageKey.string).map { String(cString: $0) } ?? ""
-        let width = xpc_dictionary_get_double(message, MessageKey.width)
-        let height = xpc_dictionary_get_double(message, MessageKey.height)
-        let fontSize = xpc_dictionary_get_double(message, MessageKey.fontSize)
+        isSearchField = configuration.isSearchField
+        let string = configuration.string
+        let width = configuration.width
+        let height = configuration.height
+        let fontSize = configuration.fontSize
         textField.font = NSFont.systemFont(ofSize: fontSize, weight: .light)
         textField.alignment = isSearchField ? .natural : .center
         containerView.setFrameSize(NSSize(width: width, height: height))
@@ -185,42 +109,51 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         lastReportedHasMarkedText = false
 
         guard let window = showMiniViewWindow() else {
-            reply(to: message, contextIdentifier: 0, windowNumber: 0)
-            return
+            return .unavailable
         }
         // Candidate windows are placed from where the window is on screen: where the field is shown.
-        let screenLeft = xpc_dictionary_get_double(message, MessageKey.screenLeft)
-        let screenTop = xpc_dictionary_get_double(message, MessageKey.screenTop)
+        let screenLeft = configuration.screenLeft
+        let screenTop = configuration.screenTop
         let zeroScreenHeight = NSScreen.screens.first?.frame.height ?? 0
         window.setFrame(NSRect(x: screenLeft, y: zeroScreenHeight - screenTop - height, width: width, height: height), display: false)
         window.makeKey()
         window.makeFirstResponder(textField)
         fieldEditor.alignment = textField.alignment
-        if xpc_dictionary_get_bool(message, MessageKey.selectsAll) {
+        if configuration.selectsAll {
             textField.selectText(nil)
         } else {
             fieldEditor.setSelectedRange(NSRange(location: (string as NSString).length, length: 0))
         }
-        showCaret(xpc_dictionary_get_bool(message, MessageKey.hasFocus))
+        showCaret(configuration.hasFocus)
         Self.setRemoteViewActivation(true)
         let contextIdentifier = Self.layerHostingContextIdentifier(of: window)
         isHosting = contextIdentifier != 0
-        reply(to: message, contextIdentifier: contextIdentifier, windowNumber: window.windowNumber)
         #log(.info, "Hosting the \(self.isSearchField ? "search" : "rename", privacy: .public) field, \(width, privacy: .public)×\(height, privacy: .public)")
-    }
-
-    private func reply(to message: xpc_object_t, contextIdentifier: UInt32, windowNumber: Int) {
-        guard let peer, let reply = xpc_dictionary_create_reply(message) else { return }
-        xpc_dictionary_set_uint64(reply, MessageKey.contextIdentifier, UInt64(contextIdentifier))
-        xpc_dictionary_set_int64(reply, MessageKey.processIdentifier, Int64(ProcessInfo.processInfo.processIdentifier))
-        xpc_dictionary_set_int64(reply, MessageKey.windowNumber, Int64(windowNumber))
-        xpc_connection_send_message(peer, reply)
+        guard isHosting else { return .unavailable }
+        return TextInputHosting(
+            contextIdentifier: contextIdentifier,
+            processIdentifier: ProcessInfo.processInfo.processIdentifier,
+            windowNumber: window.windowNumber
+        )
     }
 
     /// Without the focus the field shows no caret, as 15's did not. It stays the first responder, so that
     /// the next key forwarded to it still lands.
     private func showCaret(_ hasFocus: Bool) {
         fieldEditor.insertionPointColor = hasFocus ? .white : .clear
+    }
+
+    /// Exits when a deployment replaced this executable, so that launchd starts the new one on the next
+    /// request; that request's answer goes out first. Asked on every `begin`, and on a request this build
+    /// cannot read, which a newer payload sends when the messages changed. Returns whether it is exiting.
+    @discardableResult
+    private func exitIfReplaced() -> Bool {
+        guard Self.currentExecutableIdentity() != executableIdentity else { return false }
+        #log(.info, "A new build replaced the helper; exiting so that launchd starts that one")
+        DispatchQueue.main.async {
+            exit(EXIT_SUCCESS)
+        }
+        return true
     }
 
     /// The executable's file number and modification time; a deployment changes both.
@@ -281,18 +214,13 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     }
 
     private func reportState(isEditingComplete: Bool) {
-        guard let peer else { return }
+        guard peerListener.isServingPeer else { return }
         let string = fieldEditor.committedString
         let hasMarkedText = fieldEditor.hasMarkedText()
         guard isEditingComplete || string != lastReportedString || hasMarkedText != lastReportedHasMarkedText else { return }
         lastReportedString = string
         lastReportedHasMarkedText = hasMarkedText
-        let message = xpc_dictionary_create(nil, nil, 0)
-        xpc_dictionary_set_string(message, MessageKey.request, Request.changed)
-        xpc_dictionary_set_string(message, MessageKey.string, string)
-        xpc_dictionary_set_bool(message, MessageKey.hasMarkedText, hasMarkedText)
-        xpc_dictionary_set_bool(message, MessageKey.isEditingComplete, isEditingComplete)
-        xpc_connection_send_message(peer, message)
+        peerListener.send(TextInputChange(string: string, hasMarkedText: hasMarkedText, isEditingComplete: isEditingComplete))
     }
 
     // MARK: - AppKit and text services
