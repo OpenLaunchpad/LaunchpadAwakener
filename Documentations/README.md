@@ -3,7 +3,7 @@
 - [Evolutions/README.md](Evolutions/README.md) —— 提案状态总表
 - [Evolutions/draft-launchpad-replica.md](Evolutions/draft-launchpad-replica.md) —— 在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad（In Progress）
 - [Evolutions/draft-text-input-swift-xpc.md](Evolutions/draft-text-input-swift-xpc.md) —— 文本输入通道改用系统的 Swift XPC 接口：`XPCSession`、`XPCListener` 与共用的 `Codable` 消息（In Progress）
-- [Evolutions/draft-text-input-helper-status.md](Evolutions/draft-text-input-helper-status.md) —— 在控制面板里显示输入法辅助进程的运行状态与版本，加「重启」，App 启动时自动换掉旧版本（Accepted）
+- [Evolutions/draft-text-input-helper-status.md](Evolutions/draft-text-input-helper-status.md) —— 在控制面板里显示输入法辅助进程的运行状态与版本，加「重启」，App 启动时自动换掉旧版本（In Progress）
 - [Evolutions/0001-input-method-helper.md](Evolutions/0001-input-method-helper.md) —— 用常驻辅助进程给搜索框与改名框接上输入法（Implemented）
 - [Evolutions/0002-standalone-launchpad.md](Evolutions/0002-standalone-launchpad.md) —— 不注入 Dock 的独立版 Launchpad：与注入版共用数据层与界面层（Implemented）
 - [Evolutions/0003-app-control-panel.md](Evolutions/0003-app-control-panel.md) —— 照 DockIconOverride 重做注入版 App 的控制面板：状态横幅、payload 通道、daemon 自愈、重启 Dock、菜单栏 App（Implemented）
