@@ -20,11 +20,14 @@
 | `AppCore/ControlPanelReadiness.swift` | 横幅说什么：按顺序检查，返回第一个挡路的原因 |
 | `AppCore/PayloadChannel.swift` | App 这一侧的 [payload 通道](../Glossary.md#payload-channelpayload-通道)，以及读 daemon 注册表的 `InjectedPayloadRegistry` |
 | `AppCore/MachOFileUUIDReader.swift` | 读包里 payload 每个切片的 `LC_UUID` |
-| `AppCore/LaunchAtLoginController.swift`、`TextInputAgentController.swift`、`KillSwitchController.swift` | 开机启动、文本输入辅助进程、[退回开关](../Glossary.md#kill-switch退回开关)三个开关的状态，每次都从系统读回 |
+| `AppCore/LaunchAtLoginController.swift`、`TextInputAgentController.swift`、`KillSwitchController.swift` | 开机启动、文本输入辅助进程、[退回开关](../Glossary.md#kill-switch退回开关)三个开关的状态，每次都从系统读回；辅助进程还有它在不在运行、是不是旧版，以及重启 |
+| `AppCore/TextInputHelperState.swift`、`ProcessTable.swift` | 从进程表认出正在运行的输入法辅助进程，判断它是不是这个 App 里的那份、启动后有没有被换过 |
 | `PayloadInterface/PayloadRequests.swift` | 通道上的请求与回报类型，两边只共享这一个文件 |
 | `PayloadCore/Integration/PayloadPeer.swift` | payload 这一侧的通道：监听、把端点登记进 daemon、回答状态 |
 
 ## 关键设计决策
+
+**输入法辅助进程看进程表，旧版本自动换掉。** 辅助进程是 LaunchAgent，launchd 拉起后一直常驻到注销，重新构建或覆盖安装 App 都不会换掉它，重装 daemon 也不碰它；旧进程读不懂新消息时输入法就失效（提案 [在控制面板里显示输入法辅助进程，并自动换掉旧版本](../Evolutions/draft-text-input-helper-status.md)）。所以「Input method helper」一行在注册启用之后，改为显示进程的状态：没在运行（下次打开 Launchpad 时由 launchd 拉起）、在运行且是当前版本、在运行但是旧版本。旧版本分两种：这个 App 里的那份在进程启动后被换过，或者运行的是别处的一份。认进程按可执行文件名加所在 `.app` 的 bundle ID，Debug 与 Release 不会混。「被换过」比的是文件的状态变更时间（ctime）与进程的启动时间：构建、拷贝、改名都会更新 ctime，而 `rsync -a` 会把修改时间（mtime）拷成源文件的，不能用来比。路径按 `realpath` 解析，与 `proc_pidpath` 报的一致（`URL.resolvingSymlinksInPath()` 会把 `/private/var` 写回 `/var`）。行上的「Restart」给它发 `SIGTERM`，下次打开 Launchpad 时 launchd 拉起这个 App 里的那份。App 启动时只自动重启「这个 App 里的那份被换过」的情况，与 daemon 版本不符时自动重装一个道理；「别处的一份」只提示不自动处理：同一个服务名可能正被另一份构建注册着，自动重启会让两份来回抢。
 
 **payload 是不是旧的，比镜像 UUID。** payload 是映射进 Dock 的镜像，卸不掉；重新编译后再注入，Dock 里跑的还是旧代码。DockIconOverride 让 payload 报一个手写的版本号，这边 payload 改得太勤，版本号一定会忘了递增。所以 payload 报自己镜像的 `LC_UUID`（`#dsohandle` 指向的头），App 读包里 payload 每个切片的 UUID，都对不上才算旧的。链接器按内容算 UUID，代码不变 UUID 就不变，正好是「是不是同一份代码」。包里那份读不出来时不判旧，免得叫用户白白重启 Dock。
 
