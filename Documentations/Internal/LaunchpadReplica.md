@@ -78,7 +78,8 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **输入法靠一个托管文本框的辅助进程，照 15 的 ecti 服务做**（提案 [用常驻辅助进程给搜索框与改名框接上输入法](../Evolutions/0001-input-method-helper.md)）。Dock 不加载 AppKit，输入法只认真正的文本框和激活状态的进程，所以 App 里多带一个 LaunchAgent `LaunchpadAwakenerTextInput`：
 
-- **启动**：它放在 `Contents/Library/LoginItems/`，App 启动时用 `SMAppService.agent` 注册，不用用户批准。launchd 在 payload 连它的 Mach 服务时才拉起它。它只接受 Dock 的连接（按进程路径核对）。
+- **启动**：它放在 `Contents/Library/LoginItems/`，App 启动时用 `SMAppService.agent` 注册，不用用户批准。launchd 在 payload 连它的 Mach 服务时才拉起它。它只接受 Dock 的连接（见下文「几处细节」）。
+- **通道**：系统 XPC 框架的 Swift 接口（提案 [文本输入通道改用系统的 Swift XPC 接口](../Evolutions/draft-text-input-swift-xpc.md)）。payload 一侧是 `XPCSession`，辅助进程一侧是 `XPCListener`，都在主队列上收发；消息是 `LaunchpadAwakenerShared` 里的 `Codable` 类型：payload 发 `TextInputRequest`（`begin`、`setString`、`setFocus`、`end`，`begin` 回 `TextInputHosting`，`end` 回 `TextInputEnding`），辅助进程发 `TextInputChange`。消息按发送的先后处理。辅助进程一退出 session 就作废，payload 丢掉它，下一次 `begin` 再建一个，launchd 随之重新拉起辅助进程。
 - **托管**：它在 Dock 图块的 mini view 窗口里放一个 `NSTextField`，那扇窗口不上屏，却能成为 key 窗口。payload 用 `CALayerHost` 显示这扇窗口的图层托管上下文。
 - **转发**：payload 把这些事件复制一份，标上辅助进程的窗口编号与窗口内位置，用 `CGEventPostToPid` 发过去：
   - 搜索框该收的键；正在组字时是所有键；
@@ -97,8 +98,8 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
   - 搜索框没有焦点时，托管的框不显示光标，与 15 相同。框一直是第一响应者，只把光标颜色设成透明，转发来的键才不会落空。
   - 改名时还在组字就点到别处，辅助进程收尾时把组字原样上屏，回给 payload 的最终文字随后补进名字。只认辅助进程真正托管过的框：它还没托管上改名就结束了，名字以本地编辑的为准，辅助进程那次也不回报文字。补写直接写进布局库，界面这时已经收起也不丢。
   - 托管框的位置按几何规格算，不从图层换算：打开的文件夹、捏合与进场动画会让界面暂时缩放，辅助进程却一直用给它的位置放候选窗、量点按。
-  - 辅助进程只认 Apple 签名的 Dock（libxpc 逐条消息核对代码签名），新连接要先发来一条合法消息才接替旧连接。Dock 的签名一旦不再有效（比如换了注入方式），它的消息都会被拒、输入法随之停用，辅助进程的日志里会留下拒绝记录。
-  - 部署换掉了辅助进程的可执行文件时，它在下一次打开时自行退出，那一次退回本地编辑，再下一次由 launchd 拉起的新版本托管。
+  - 辅助进程只认 Dock：每个 session 激活前设好签名要求「系统自带的二进制、签名标识 `com.apple.dock`」（`XPCPeerRequirement.isPlatformCode`，macOS 26 才有，更早的系统上一律拒绝），libxpc 逐条消息核对，不符就取消这个 session。要求设在 session 上而不是监听器上：监听器上不符的请求会被悄悄丢掉，设在 session 上才能在日志里留下拒绝记录。新 session 要先发来一条合法请求才接替旧的。Dock 的签名一旦不再有效（比如换了注入方式），它的请求都会被拒、输入法随之停用，辅助进程的日志里会留下拒绝原因。连接管理在 `TextInputPeerListener` 里，不碰 AppKit，测试在测试进程里用匿名监听驱动它。
+  - 部署换掉了辅助进程的可执行文件时，它在下一次 `begin` 时自行退出，那一次退回本地编辑，再下一次由 launchd 拉起的新版本托管。收到解不开的消息时（新的 payload 改了消息格式）它也检查一次，所以以后改消息格式不必手动结束旧进程。
 
 **背景默认是 15 的模糊壁纸，Dock 自己的液态玻璃是选项。** 每次打开都截一张 WindowManager 的壁纸窗口（27 的壁纸窗口归它，每个空间一扇叫 `Wallpaper` 的窗口），用 15 同样的 `SLSHWCaptureWindowList(…, 0x11944)`；截好的图放进栅格化的容器，套 15 的三个滤镜（模糊 30、饱和度 1.8、颜色矩阵压暗），只算一次，App 的窗口被它挡住，与 15 一样。截不到时是 15 自带的径向渐变。中途一度改成玻璃（用户想要更贴合新系统的效果），看过后又改回来，因为模糊效果不如原版；玻璃留作 `springboard-background` 设为 `glass` 时的选项。
 
@@ -187,7 +188,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── DockLayerFactory.swift          # ECGridLayer、ECImageGridLayer、ECTextLayer、ECShadowTextLayer、材质
 │   ├── DockApplicationUninstaller.swift # Dock 的卸载器
 │   ├── SpringboardRemoteTextField.swift # 辅助进程托管的搜索框与改名框：CALayerHost 与事件转发
-│   └── TextInputHelperClient.swift     # 连文本输入辅助进程；给它发键鼠事件
+│   └── TextInputHelperClient.swift     # 经 XPCSession 连文本输入辅助进程；给它发键鼠事件
 └── Integration/                        # hook 声明（@RuntimeClassHook），以及事件接管时记下的当前事件
 ```
 

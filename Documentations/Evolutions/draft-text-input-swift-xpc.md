@@ -63,11 +63,11 @@ payload 与文本输入辅助进程之间的通道（[0001](0001-input-method-he
 1. ✅ **消息类型**：在 `LaunchpadAwakenerShared` 加 `Codable` 消息与回复类型，新建 `LaunchpadAwakenerTextInputCoreTests`，用匿名监听测往返与顺序。旧的字符串常量暂时保留，两端照旧能编。
 2. ✅ **辅助进程**：`TextInputService` 改用 `XPCListener` 与每个 session 上的签名要求，接替 Dock 的规则抽成能单测的类型并补测试；签名要求拒绝测试进程的测试也在这一步。
 3. ✅ **payload**：`TextInputHelperClient` 改用 `XPCSession`，删掉 `MessageKey` 与 `Request` 常量。
-4. ⬜ **文档与验证**：更新 `CLAUDE.md` 与实现说明，跑全部单元测试与 `RunScript.sh` 构建；部署到测试机看日志。
+4. ⬜ **文档与验证**：更新 `CLAUDE.md` 与实现说明，跑全部单元测试与 `RunScript.sh` 构建；部署到测试机看日志。文档、单元测试与构建已完成，部署到测试机还没做。
 
 ### 文档
 
-同一批次更新：项目 `CLAUDE.md`（结构表里辅助进程那行，以及「改文本输入辅助进程」一条里的部署说明），[Launchpad 复刻的实现说明](../Internal/LaunchpadReplica.md) 里讲辅助进程连接与签名的段落。0001 是当时的决策快照，不改。
+同一批次更新：项目 `CLAUDE.md`（结构表里 `LaunchpadAwakenerShared` 与辅助进程那两行，以及「改文本输入辅助进程」一条里的部署说明），[Launchpad 复刻的实现说明](../Internal/LaunchpadReplica.md) 里讲辅助进程连接与签名的段落，[已裁决清单](../Internal/ReviewAdjudications.md) 里提到 `XPCObjectBox` 与「测试进程里没有 seam」的两条。0001 是当时的决策快照，不改。不新增使用指南：这次只换了通道，用户看到的行为不变。
 
 ## 备选：SwiftyXPC
 
@@ -86,3 +86,4 @@ SwiftyXPC 已经在依赖图里，App 与 daemon、App 与 payload 两条通道�
 | 2026-11-10 | 起初的方案是 SwiftyXPC，改为系统的 Swift XPC 接口 | SwiftyXPC 不保证处理顺序，单向消息还会弹回空消息；用户让查系统接口，查下来顺序、单向消息、`Codable`、签名要求都满足，也不用新增依赖 |
 | 2026-11-10 | 用户批准，开始实现 | 实现放在 `feature/text-input-swift-xpc` |
 | 2026-11-10 | 服务类型不标 `@available(macOS 26.0, *)`，只在设签名要求处判断版本，低于 26 拒绝所有连接 | `@Loggable` 给生成的成员写死了 macOS 11 的 `@available`，类上标更高的版本就编不过；判断收在一处，效果相同 |
+| 2026-11-10 | 实现完成，待部署到测试机验证、用户看过后收尾 | 开发机上全部单元测试通过（新增 19 个），`RunScript.sh` 构建通过、三个切片都在，辅助进程只多链接了系统的 `libswiftXPC.dylib` |
