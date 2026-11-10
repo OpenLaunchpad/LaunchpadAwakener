@@ -51,7 +51,9 @@ struct TargetProcessMonitorTests {
     @Test("Discovery passes keep reporting a target, while onProcessStarted fires once", .timeLimit(.minutes(1)))
     func discoveryPassReportsTargetRepeatedly() async throws {
         let sleepProcess = try Self.startSleepProcess()
-        defer { Self.terminate(sleepProcess) }
+        // Only the signal: a defer cannot await the exit, and blocking on it here can hang (see
+        // `terminateAndWaitForExit(_:)`).
+        defer { if sleepProcess.isRunning { sleepProcess.terminate() } }
 
         let recorder = CallbackRecorder()
         let monitor = TargetProcessMonitor(matchingRule: .executablePath(Self.targetExecutablePath))
@@ -88,7 +90,7 @@ struct TargetProcessMonitorTests {
             recorder.startCount(of: processIdentifier) == 1
         }
 
-        Self.terminate(sleepProcess)
+        try await Self.terminateAndWaitForExit(sleepProcess)
 
         try await Self.waitUntil("the exit is reported") {
             recorder.hasSeenExit(of: processIdentifier)
@@ -132,10 +134,25 @@ struct TargetProcessMonitorTests {
         return process
     }
 
+    /// For synchronous tests only, which launch and wait on the same thread.
     private static func terminate(_ process: Process) {
         guard process.isRunning else { return }
         process.terminate()
         process.waitUntilExit()
+    }
+
+    /// Ends the process and waits until Foundation has reaped it, without blocking a thread.
+    ///
+    /// Not `waitUntilExit()`: it spins the calling thread's run loop until the exit wakes it, and after an
+    /// `await` an async test can resume on another thread, whose run loop the exit never wakes. That hung the
+    /// suite in about one run in ten once another suite launched processes at the same time. The process
+    /// identifier stops resolving once Foundation reaps the child on its own queue, whichever thread waits.
+    private static func terminateAndWaitForExit(_ process: Process) async throws {
+        let processIdentifier = process.processIdentifier
+        process.terminate()
+        try await waitUntil("the process has exited") {
+            !ProcessLiveness.isAlive(processIdentifier)
+        }
     }
 
     /// Polls `condition` until it holds, or fails the test after `timeout`.
