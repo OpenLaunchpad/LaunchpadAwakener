@@ -54,7 +54,11 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
     private lazy var daemonRow = FormRowView(title: "Privileged daemon", accessoryView: Self.makeAccessoryStack([daemonStatusView, daemonProgressIndicator, uninstallDaemonButton, installDaemonButton]))
     private let textInputStatusView = StatusIndicatorView()
     private let registerTextInputButton = ControlPanelViewController.makeButton(title: "Register", controlSize: .small)
-    private lazy var textInputRow = FormRowView(title: "Input method helper", accessoryView: Self.makeAccessoryStack([textInputStatusView, registerTextInputButton]))
+    private let restartTextInputButton = ControlPanelViewController.makeButton(title: "Restart", controlSize: .small)
+    private lazy var textInputRow = FormRowView(
+        title: "Input method helper",
+        accessoryView: Self.makeAccessoryStack([textInputStatusView, registerTextInputButton, restartTextInputButton])
+    )
     private lazy var textInputWarningRow = FormRowView(contentView: SystemSettingsWarningView(text: "Search and rename fields cannot use input methods.") { [weak self] in
         self?.textInputAgentController.openLoginItemsSettings()
     })
@@ -172,7 +176,8 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
     private func buildForm() {
         launchAtLoginRow.toolTip = Self.launchAtLoginHelp
         daemonRow.toolTip = "Injects the payload into the Dock, which needs root. System Settings asks you to approve it once, under General › Login Items."
-        textInputRow.toolTip = "Hosts the search and rename fields so that input methods such as Pinyin work in them."
+        textInputRow.toolTip = Self.textInputHelp
+        restartTextInputButton.toolTip = "Ends the helper. launchd starts this app's copy the next time Launchpad opens."
         killSwitchRow.toolTip = "Every way of opening Apps goes to the system's Apps while this is on. Takes effect at once."
         layoutRow.toolTip = "Opens a window listing Launchpad's pages and folders. Changes go to the Dock right away and show the next time Launchpad opens."
         restartDockButton.toolTip = "Only needed after installing a new build: the payload already in the Dock cannot be replaced while it runs. The new Dock is injected right away."
@@ -233,6 +238,9 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         }
         registerTextInputButton.box.setAction { [weak self] _ in
             self?.textInputAgentController.registerIfNeeded()
+        }
+        restartTextInputButton.box.setAction { [weak self] _ in
+            self?.textInputAgentController.restartHelper()
         }
         killSwitchSwitch.box.setAction { [weak self] toggle in
             self?.killSwitchController.setEngaged(toggle?.state == .on)
@@ -306,8 +314,11 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
 
         observe { [weak self] in
             guard let self else { return }
-            textInputStatusView.show(text: textInputAgentController.statusMessage, tint: StatusTint(textInputAgentController.registrationStatus))
+            let textInputStatus = textInputAgentController.statusLine
+            textInputStatusView.show(textInputStatus)
+            textInputRow.toolTip = textInputStatus.help.isEmpty ? Self.textInputHelp : "\(Self.textInputHelp)\n\n\(textInputStatus.help)"
             registerTextInputButton.isHidden = textInputAgentController.registrationStatus != .notRegistered
+            restartTextInputButton.isHidden = textInputAgentController.registrationStatus != .enabled || !textInputAgentController.canRestartHelper
             textInputWarningRow.isHidden = !textInputAgentController.isDisabledInSystemSettings
         }
 
@@ -406,6 +417,8 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         "The window stays closed at login; open it from the menu bar icon."
         #endif
     }
+
+    private static let textInputHelp = "Hosts the search and rename fields so that input methods such as Pinyin work in them. Once started, it keeps running until you log out; reinstalling the daemon does not restart it."
 
     private static func failureText(_ summary: String) -> NSAttributedString {
         let font = NSFont.preferredFont(forTextStyle: .callout)

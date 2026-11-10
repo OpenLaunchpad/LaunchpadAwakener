@@ -1,4 +1,5 @@
 import Darwin
+import ServiceManagement
 
 /// One status row of the control panel: its text, the colour of the dot beside it, and its help tag.
 ///
@@ -87,5 +88,47 @@ extension StatusLine {
             tint: payload.isStale ? .caution : .positive,
             help: help
         )
+    }
+}
+
+extension StatusLine {
+    /// The input method helper row: its LaunchAgent's registration until that is enabled, then which copy
+    /// of the helper runs.
+    public static func textInputHelper(registrationStatus: SMAppService.Status, helperState: TextInputHelperState) -> StatusLine {
+        let registrationTint = StatusTint(registrationStatus)
+        switch registrationStatus {
+        case .enabled:
+            break
+        case .notRegistered:
+            return StatusLine(text: "Not registered — search and rename fields work without input methods.", tint: registrationTint)
+        case .requiresApproval:
+            return StatusLine(text: "Turned off under System Settings › Login Items.", tint: registrationTint)
+        case .notFound:
+            return StatusLine(text: "Not found — the helper is missing from the app bundle.", tint: registrationTint)
+        @unknown default:
+            return StatusLine(text: "Unknown status (\(registrationStatus.rawValue)).", tint: registrationTint)
+        }
+        switch helperState {
+        case .notRunning:
+            return StatusLine(
+                text: "Registered — starts when Launchpad opens.",
+                tint: .positive,
+                help: "launchd starts the helper the first time Launchpad opens, and it stays up until you log out."
+            )
+        case .current(let process):
+            return StatusLine(text: "Running · process \(process.processIdentifier)", tint: .positive, help: process.executablePath)
+        case .replacedSinceLaunch(let process):
+            return StatusLine(
+                text: "An older build is running · process \(process.processIdentifier)",
+                tint: .caution,
+                help: "The helper was rebuilt or reinstalled after it started, so it still runs the old code. Restart it: the next time Launchpad opens, launchd starts the new one."
+            )
+        case .otherCopy(let process):
+            return StatusLine(
+                text: "Another copy is running · process \(process.processIdentifier)",
+                tint: .caution,
+                help: "It runs from \(process.executablePath). Restart it to run this app's copy the next time Launchpad opens, unless the other copy registers the helper again."
+            )
+        }
     }
 }

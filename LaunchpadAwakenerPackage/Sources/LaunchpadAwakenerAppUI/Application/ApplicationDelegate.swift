@@ -83,8 +83,11 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
         // bad launch the one thing a bad launch never reaches.
         injectionCoordinator.activateAutomaticInjectionIfEnabled()
 
-        // Needs no daemon either: launchd only starts the helper when a payload connects to it.
+        // Needs no daemon either: launchd only starts the helper when a payload connects to it. A helper
+        // left running from before this build was installed still runs the old code; it is ended, and launchd
+        // starts this one the next time Launchpad opens.
         textInputAgentController.registerIfNeeded()
+        textInputAgentController.restartHelperIfReplaced()
 
         // Only the launch at login keeps the window closed; the app then waits in the menu bar. Opened by
         // the user — from the Finder, the Dock, `open` — it shows the control panel whether or not

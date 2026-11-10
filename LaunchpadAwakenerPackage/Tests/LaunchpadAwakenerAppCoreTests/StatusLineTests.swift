@@ -132,4 +132,43 @@ struct StatusLineTests {
     func registrationTint(status: SMAppService.Status, tint: StatusTint) {
         #expect(StatusTint(status) == tint)
     }
+
+    // MARK: - Input method helper
+
+    private static let helperPath = "/Applications/LaunchpadAwakener.app/Contents/Library/LoginItems/LaunchpadAwakenerTextInput.app/Contents/MacOS/LaunchpadAwakenerTextInput"
+    private static let helper = TextInputHelperProcess(processIdentifier: 4182, executablePath: helperPath, launchDate: Date(timeIntervalSince1970: 1_793_000_000))
+
+    @Test("until the helper's agent is enabled, the row says what is wrong with the registration", arguments: [
+        (SMAppService.Status.notRegistered, StatusLine(text: "Not registered — search and rename fields work without input methods.", tint: .neutral)),
+        (.requiresApproval, StatusLine(text: "Turned off under System Settings › Login Items.", tint: .caution)),
+        (.notFound, StatusLine(text: "Not found — the helper is missing from the app bundle.", tint: .critical)),
+    ])
+    func helperRegistration(status: SMAppService.Status, expected: StatusLine) {
+        #expect(StatusLine.textInputHelper(registrationStatus: status, helperState: .current(Self.helper)) == expected)
+    }
+
+    @Test("an enabled helper that is not running starts with Launchpad")
+    func helperNotRunning() {
+        let line = StatusLine.textInputHelper(registrationStatus: .enabled, helperState: .notRunning)
+        #expect(line.text == "Registered — starts when Launchpad opens.")
+        #expect(line.tint == .positive)
+    }
+
+    @Test("the current helper is running, with its path in the help")
+    func currentHelper() {
+        let line = StatusLine.textInputHelper(registrationStatus: .enabled, helperState: .current(Self.helper))
+        #expect(line == StatusLine(text: "Running · process 4182", tint: .positive, help: Self.helperPath))
+    }
+
+    @Test("an older build or another copy of the helper needs attention")
+    func outdatedHelper() {
+        let replaced = StatusLine.textInputHelper(registrationStatus: .enabled, helperState: .replacedSinceLaunch(Self.helper))
+        let elsewhere = StatusLine.textInputHelper(registrationStatus: .enabled, helperState: .otherCopy(Self.helper))
+
+        #expect(replaced.text == "An older build is running · process 4182")
+        #expect(replaced.tint == .caution)
+        #expect(elsewhere.text == "Another copy is running · process 4182")
+        #expect(elsewhere.tint == .caution)
+        #expect(elsewhere.help.contains(Self.helperPath))
+    }
 }
