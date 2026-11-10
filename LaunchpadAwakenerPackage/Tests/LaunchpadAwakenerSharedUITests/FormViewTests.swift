@@ -58,6 +58,22 @@ struct FormViewTests {
         _ = Self.laidOut(FormView(sections: [section]))
         #expect(rows.map(\.showsSeparator) == [false, false, true])
     }
+
+    @Test("the separator is half as opaque as the system separator, in Dark Mode and in light", arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func separatorIsHalfTheSystemSeparator(appearanceName: NSAppearance.Name) throws {
+        let appearance = try #require(NSAppearance(named: appearanceName))
+        var systemSeparator: NSColor?
+        var rowSeparator: NSColor?
+        appearance.performAsCurrentDrawingAppearance {
+            systemSeparator = NSColor.separatorColor.usingColorSpace(.sRGB)
+            rowSeparator = FormRowView.separatorColor.usingColorSpace(.sRGB)
+        }
+        let resolvedSystemSeparator = try #require(systemSeparator)
+        let resolvedRowSeparator = try #require(rowSeparator)
+        #expect(resolvedRowSeparator.redComponent == resolvedSystemSeparator.redComponent)
+        // 12% white in Dark Mode, so 6%; `withAlphaComponent(0.5)` alone would make it 50%.
+        #expect(abs(resolvedRowSeparator.alphaComponent - resolvedSystemSeparator.alphaComponent / 2) < 0.001, "alpha \(resolvedRowSeparator.alphaComponent)")
+    }
 }
 
 /// Where a window sized to its content opens.

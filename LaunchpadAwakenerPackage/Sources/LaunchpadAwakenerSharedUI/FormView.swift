@@ -235,6 +235,19 @@ public final class FormRowView: XiblessView {
         }
     }
 
+    /// Half the opacity of the system separator: what the grouped form draws between its rows. Halved
+    /// per appearance, because `withAlphaComponent(_:)` on the system separator does not scale its
+    /// opacity, it replaces it: `withAlphaComponent(0.5)` turns Dark Mode's 12% white into 50%.
+    static let separatorColor = NSColor(name: nil) { appearance in
+        var halvedSeparator = NSColor.separatorColor
+        appearance.performAsCurrentDrawingAppearance {
+            if let systemSeparator = NSColor.separatorColor.usingColorSpace(.sRGB) {
+                halvedSeparator = systemSeparator.withAlphaComponent(systemSeparator.alphaComponent / 2)
+            }
+        }
+        return halvedSeparator
+    }
+
     private let titleLabel = NSTextField(labelWithString: "")
     private let subtitleLabel = NSTextField(wrappingLabelWithString: "")
     private let separatorView = XiblessView()
@@ -330,8 +343,7 @@ public final class FormRowView: XiblessView {
         snp.makeConstraints { make in
             make.height.equalTo(0).priority(1)
         }
-        // Half the opacity of the system separator: what the grouped form draws between its rows.
-        separatorView.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.5)
+        separatorView.backgroundColor = Self.separatorColor
         separatorView.isHidden = true
         hierarchy {
             separatorView
