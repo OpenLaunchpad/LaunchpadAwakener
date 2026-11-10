@@ -219,6 +219,16 @@ log "Verifying architectures:"
 verify_has_arm64e "daemon " "$DAEMON_PATH"
 verify_has_arm64e "payload" "$PAYLOAD_PATH"
 
+# --- The standalone app it installs while SIP is on --------------------------
+#
+# Zipped into the app's resources by the Embed Standalone Launchpad phase. Without it the control panel
+# cannot offer the standalone app on a Mac with System Integrity Protection on, and nothing else fails.
+STANDALONE_ARCHIVE_PATH="$APP_PATH/Contents/Resources/Launchpad.zip"
+[[ -f "$STANDALONE_ARCHIVE_PATH" ]] || fail "expected the standalone app at $STANDALONE_ARCHIVE_PATH"
+zipinfo -1 "$STANDALONE_ARCHIVE_PATH" "Launchpad.app/Contents/MacOS/Launchpad" >/dev/null \
+    || fail "$STANDALONE_ARCHIVE_PATH does not hold Launchpad.app"
+log "Embedded standalone app: $(du -h "$STANDALONE_ARCHIVE_PATH" | cut -f1) zipped"
+
 if $LAUNCH; then
     log "Launching $APP_PATH"
     run open "$APP_PATH"

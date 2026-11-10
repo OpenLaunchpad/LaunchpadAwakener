@@ -22,6 +22,8 @@
 | `AppCore/MachOFileUUIDReader.swift` | 读包里 payload 每个切片的 `LC_UUID` |
 | `AppCore/LaunchAtLoginController.swift`、`TextInputAgentController.swift`、`KillSwitchController.swift` | 开机启动、文本输入辅助进程、[退回开关](../Glossary.md#kill-switch退回开关)三个开关的状态，每次都从系统读回；辅助进程还有它在不在运行、是不是旧版，以及重启 |
 | `AppCore/TextInputHelperState.swift`、`ProcessTable.swift` | 从进程表认出正在运行的输入法辅助进程，判断它是不是这个 App 里的那份、启动后有没有被换过 |
+| `AppCore/SystemIntegrityProtectionConfiguration.swift` | 读内核正在执行的 SIP 配置，判断这次启动能不能注入 |
+| `AppCore/StandaloneLaunchpadInstaller.swift`、`StandaloneLaunchpadController.swift` | 从包里的 `Launchpad.zip` 安装独立版、认出已装的那份、打开它 |
 | `PayloadInterface/PayloadRequests.swift` | 通道上的请求与回报类型，两边只共享这一个文件 |
 | `PayloadCore/Integration/PayloadPeer.swift` | payload 这一侧的通道：监听、把端点登记进 daemon、回答状态 |
 
@@ -41,7 +43,14 @@
 
 **用户点「重启 Dock」，退出的那个 Dock 不算闪退。** 闪退保护（`QuickExitGuard`）把注入后 15 秒内退出的 Dock 算作 payload 弄崩的，连续三次就关掉自动注入。重启按钮先 `prepareForTargetRestart()` 忘掉旧 Dock（连同它的注入时间），再发 `SIGTERM`，所以连按几次不会误关。退出不论是监视器的退出源先看到，还是窗口的状态刷新先发现进程没了，都走同一个 `hostDidExit(_:)` 计数。被忘掉的旧 Dock 在退出之前另记在 `processIdentifiersBeingRestarted` 里，任何注入都跳过它：否则一轮刚好在发信号前跑过的发现会把它当成「漏注入的」，注入一个正在退出的进程，它的退出又被算成一次闪退。别的用户的 Dock（快速切换用户时）发不了信号，就留着不动，也不报错；它仍算在「旧的」那一组里，不会被当成重启后的新 Dock。
 
-**横幅的顺序就是修的顺序。** `ControlPanelReadiness` 依次看：启动是否还在跑、daemon 是否可用、退回开关、有没有注入、hook 装上没有、payload 旧不旧。退回开关排在注入之前：开着它，别的都改变不了 Dock 的行为。「hook 没装上」排在「payload 旧了」之前：Dock 构建不受支持时，重启 Dock 换上新 payload 也一样什么都装不上。注入了但 payload 还没回话，按「可用」算：注入已经发生，没有要修的。
+**SIP 没关时不注入，引导用户改用独立版。**（提案 [SIP 没关时引导用户改用独立版，并一键安装](../Evolutions/draft-system-integrity-protection-guide.md)）
+- **判断**：App 启动时经 `csr_get_active_config` 读一次内核正在执行的配置，改 SIP 要重启，所以不再重读。只有 `csrutil disable` 写入的那组标志都在才算关了；`csrutil enable --without …` 只放开一部分，照样算没关。读不出来时按「关了」处理，照旧去注入，失败由横幅报告。
+- **没关时**：不登记 daemon（否则会叫用户去登录项批准一个用不上的东西），不登记输入法辅助进程，不开自动注入，启动流程不跑。横幅的第一条原因换成「System Integrity Protection is on」，按钮是「Install Launchpad」或「Open Launchpad」；菜单栏菜单里也有同样的一项。表单只留「登录时启动」一行：SIP 关着时登记过开机启动、后来又打开 SIP 的，要能在这里关掉它。主菜单去掉整理窗口，它要经 Dock 里的 payload 改布局。
+- **安装**：独立版由注入版的 scheme 顺带编出，压成 `Contents/Resources/Launchpad.zip`。直接把 `.app` 放进包里，有被 LaunchServices 登记、被 Spotlight 列成第二个 Launchpad 的风险。安装时用 `ditto` 解到「应用程序」旁边的临时目录，再整个挪进去，中途失败不会留下半个 App；`/Applications` 写不了时退到 `~/Applications`。那里已有同名的别的 App 就报错，不覆盖。
+- **认出已装的**：按独立版的 bundle ID 先查 LaunchServices，再看两个「应用程序」文件夹，后者能认出刚拷进去、还没登记的。读 `Info.plist` 不用 `Bundle`：`Bundle` 按路径缓存，删掉的 App 它还会报在。废纸篓里的不算。
+- **测试**：测试机的 SIP 都关着，开发构建带启动参数 `--assume-system-integrity-protection-enabled` 时按没关处理。
+
+**横幅的顺序就是修的顺序。** SIP 没关排在最前：那时下面每一条都修不了，启动流程也不跑。其余 `ControlPanelReadiness` 依次看：启动是否还在跑、daemon 是否可用、退回开关、有没有注入、hook 装上没有、payload 旧不旧。退回开关排在注入之前：开着它，别的都改变不了 Dock 的行为。「hook 没装上」排在「payload 旧了」之前：Dock 构建不受支持时，重启 Dock 换上新 payload 也一样什么都装不上。注入了但 payload 还没回话，按「可用」算：注入已经发生，没有要修的。
 
 **开机启动只默认打开一次。** 原来开机启动跟着「自动注入」开关一起开关，每次启动都强行打开。现在它是独立的开关，第一次注入成功时，用户没表过态就登记一次，之后以用户为准（`LaunchAtLoginDefault`）。早先版本已经登记过的，原样保留。启动时不弹窗口的条件后来又改了一次：改用 AppKit 之后，只有登录时的自动启动才不弹，从 Finder 或 Dock 手动打开都弹（读启动时的 Apple 事件，见 [AppKit 界面层的实现说明](AppKitInterface.md)）。
 
@@ -59,5 +68,6 @@
 ## 验证
 
 - `LaunchpadAwakenerAppCoreTests`：重装冷却、注入死循环、状态过期、重启 Dock、进程监视器（这五组搬自 DockIconOverride），以及闪退保护、payload 构建识别、横幅顺序、开机启动默认值、退回开关、限时、同时到达的请求、重启时的进程选择与发信号。
+- SIP 引导（2026-11-10）：单元测试覆盖 SIP 标志的判断（`csrutil disable` 的 0x7F 与零售机上的 0x6F、只放开一部分、读不出来、开发构建的启动参数）、SIP 排在横幅最前、两种文案，以及安装（解到「应用程序」、不可写时退到下一个、保留已装的、不覆盖同名的别的 App、压缩包里不是独立版时什么都不装、认出已装的那份）。`RunScript.sh` 构建后核对包里有 `Launchpad.zip` 且装着独立版。没有在真机上看过：测试机的 SIP 都关着，要带上面的启动参数在测试机上点一次「Install Launchpad」。
 - 测试机（MacBook，macOS 27.2）上看日志验证过：daemon 从 1.0.0 自动重装成 1.1.0；payload 装上两个 hook、开通道、把端点登记进 daemon；App 退出重开后从注册表找回了 Dock。
 - 真机上的行为（payload 回话、重开 App 后找回 Dock、重启 Dock 后再注入）只能在测试机上看，见项目 `CLAUDE.md`「只在测试机上运行」。

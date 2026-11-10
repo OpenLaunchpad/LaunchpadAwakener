@@ -8,6 +8,8 @@
 
 独立版是一个普通的 App，自己开一扇盖住整块主屏幕的窗口，画出与注入版相同的 macOS 15 Launchpad，不注入 Dock、不需要关 SIP。两版共用 `LaunchpadAwakenerSpringboardCore` 里的布局库与界面层；界面层要的窗口、图层类、壁纸、图标样式这些，经宿主接口 `SpringboardHost` 向各自的宿主要（见[术语表](../Glossary.md)「Host（宿主）」）。
 
+注入版的包里带着一份压缩的独立版（`Contents/Resources/Launchpad.zip`）。SIP 没关时注入版不注入，控制面板一键把它装进「应用程序」并打开，见[控制面板的实现说明](ControlPanel.md)。
+
 ## 关键设计决策
 
 **宿主照现有调用的形状抽出，注入版只是把静态调用换成经宿主调用。** 图层工厂沿用 `DockLayerFactory` 的形状：网格对调用方就是一个 `CALayer`，排版、填充与滚动都交回造它的工厂。曾考虑给页面网格与缩略图网格各定一个协议，那样每处调用都要多包一层，注入版这边的改动面也大得多。宿主在每个进程里只选定一次（`SpringboardHostSystem.bootstrap(host:)`），在 payload 里是装 hook 之前、在后台线程上选的，所以宿主本身是 `Sendable` 的，界面层在主线程以外要读的三样（图层工厂、偏好、布局库配置）是它的 `nonisolated` 属性：Core Animation 在自己的线程上复制图层，图层的初始化方法会建文字图层。没有选定宿主时（单元测试）用 `DetachedSpringboardHost`：不给窗口、壁纸、玻璃、托管文本框与卸载器，Dock 取默认大小，图层用下文的等价图层。

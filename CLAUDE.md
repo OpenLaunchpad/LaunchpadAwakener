@@ -103,6 +103,8 @@ hook 与 Dock 自己的类（Dock 不导出任何类）用 FrameworkToolbox 的 
 
 独立版不注入，不需要 arm64e 切片，脚本也不替它核对切片。
 
+注入版的 scheme 也会顺带编出独立版，由「Embed Standalone Launchpad」阶段压成 `Contents/Resources/Launchpad.zip` 放进注入版：SIP 没关时，控制面板从这里一键安装独立版。脚本构建完会核对包里有它。
+
 daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —— 签目标线程 PC 的那条 PAC 指令在 arm64 构建里是空操作。这需要五处配置同时成立，外加一个 `-destination 'generic/platform=macOS'`。
 
 **在 Xcode GUI 里构建要把运行目标切成「Any Mac」**：My Mac 对应 `platform=macOS`（为本机构建），会静默丢掉 arm64e 切片，daemon 随即链接失败；Any Mac 对应 `generic/platform=macOS`，能正常构建。这是「Xcode 编不过」的第一个原因，第二个见下文讲 x86_64 的那一段。
@@ -157,9 +159,12 @@ remap 路径不会跑 payload 的构造函数，所以 `main.m` 里有第二个�
 
 文本输入辅助进程同理：构建设置 `TEXT_INPUT_SERVICE_NAME`（决定它的 bundle id、LaunchAgent plist 与 Mach 服务）要与 `TextInputServiceIdentity.machServiceName` 一致。
 
+独立版的 bundle ID 也是两处：独立版 target 的 `PRODUCT_BUNDLE_IDENTIFIER`，与注入版认它用的 `StandaloneLaunchpadInstaller.bundleIdentifier`。对不上时，控制面板认不出装好的独立版。
+
 Debug 和 Release 用不同的服务名，这样开发中的构建和已安装的正式版不会互相抢 Mach 服务注册。
 
 ## 运行前提
 
 - 注入其他进程通常需要关闭系统完整性保护（SIP）。目标启用了库校验时，无论用哪种注入方式都必须关。
+- App 启动时读一次 SIP 的实际配置（`SystemIntegrityProtectionConfiguration`）。只有 `csrutil disable` 那样整个关掉才走注入；没关（含只关了一部分）时不装 daemon、不注入，控制面板改为引导用户一键安装并打开独立版。两台测试机的 SIP 都关着，开发构建带启动参数 `--assume-system-integrity-protection-enabled` 走「没关」那条路：`open /Applications/LaunchpadAwakener.app --args --assume-system-integrity-protection-enabled`。那里的「Install Launchpad」会打开独立版、盖住整块屏幕，只在测试机上按。
 - daemon 需要用户在「系统设置 › 通用 › 登录项」批准一次，这一步无法跳过。App 的状态文字会说明当前卡在哪一步。

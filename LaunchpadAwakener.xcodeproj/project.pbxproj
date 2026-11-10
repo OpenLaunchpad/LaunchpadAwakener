@@ -39,6 +39,13 @@
 			remoteGlobalIDString = 1A5C00000000000000000103;
 			remoteInfo = LaunchpadAwakenerTextInput;
 		};
+		1A5C00000000000000000607 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A5C00000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A5C00000000000000000104;
+			remoteInfo = LaunchpadAwakenerStandalone;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -219,6 +226,7 @@
 				1A5C00000000000000000505 /* Generate LaunchDaemon Property List */,
 				1A5C00000000000000000506 /* Embed Text Input Helper */,
 				1A5C00000000000000000507 /* Generate LaunchAgent Property List */,
+				1A5C00000000000000000508 /* Embed Standalone Launchpad */,
 			);
 			buildRules = (
 			);
@@ -226,6 +234,7 @@
 				1A5C00000000000000000600 /* PBXTargetDependency */,
 				1A5C00000000000000000601 /* PBXTargetDependency */,
 				1A5C00000000000000000605 /* PBXTargetDependency */,
+				1A5C00000000000000000606 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				1A5C00000000000000000400 /* LaunchpadAwakener */,
@@ -426,6 +435,21 @@
 			shellPath = /bin/sh;
 			shellScript = "# SMAppService.agent(plistName:) reads this file out of the app bundle at registration time.\n# Generated, as the daemon's is, so that Label and MachServices follow TEXT_INPUT_SERVICE_NAME,\n# which differs between Debug and Release.\nset -e\n\nLAUNCH_AGENTS_DIRECTORY=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents\"\nPROPERTY_LIST_PATH=\"${LAUNCH_AGENTS_DIRECTORY}/${TEXT_INPUT_SERVICE_NAME}.plist\"\nPROPERTY_LIST_BUDDY=/usr/libexec/PlistBuddy\n\nmkdir -p \"${LAUNCH_AGENTS_DIRECTORY}\"\nrm -f \"${PROPERTY_LIST_PATH}\"\n\nprintf '%s\\n' \\\n  '<?xml version=\"1.0\" encoding=\"UTF-8\"?>' \\\n  '<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">' \\\n  '<plist version=\"1.0\"><dict/></plist>' > \"${PROPERTY_LIST_PATH}\"\n\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :Label string ${TEXT_INPUT_SERVICE_NAME}\" \"${PROPERTY_LIST_PATH}\"\n# Relative to the app bundle root: where Embed Text Input Helper copied the helper.\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :BundleProgram string Contents/Library/LoginItems/LaunchpadAwakenerTextInput.app/Contents/MacOS/LaunchpadAwakenerTextInput\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :MachServices dict\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :MachServices:${TEXT_INPUT_SERVICE_NAME} bool true\" \"${PROPERTY_LIST_PATH}\"\n# Started by launchd when the payload in the Dock connects, and only in a login session's GUI.\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :LimitLoadToSessionType string Aqua\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :ProcessType string Interactive\" \"${PROPERTY_LIST_PATH}\"\n\necho \"Generated ${PROPERTY_LIST_PATH}\"\n";
 		};
+		1A5C00000000000000000508 /* Embed Standalone Launchpad */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Standalone Launchpad";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# The standalone Launchpad, zipped into the app's resources. While System Integrity Protection is on,\n# the control panel installs it from there into the Applications folder (StandaloneLaunchpadInstaller).\n# A zip rather than the app itself, which LaunchServices could register and Spotlight list as a second\n# Launchpad running from inside this bundle.\nset -e\n\nSTANDALONE_APPLICATION_PATH=\"${BUILT_PRODUCTS_DIR}/Launchpad.app\"\nARCHIVE_PATH=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Launchpad.zip\"\n\nrm -f \"${ARCHIVE_PATH}\"\n/usr/bin/ditto -c -k --keepParent \"${STANDALONE_APPLICATION_PATH}\" \"${ARCHIVE_PATH}\"\n\necho \"Embedded ${STANDALONE_APPLICATION_PATH} as ${ARCHIVE_PATH}\"\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -481,6 +505,11 @@
 			isa = PBXTargetDependency;
 			target = 1A5C00000000000000000103 /* LaunchpadAwakenerTextInput */;
 			targetProxy = 1A5C00000000000000000604 /* PBXContainerItemProxy */;
+		};
+		1A5C00000000000000000606 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A5C00000000000000000104 /* LaunchpadAwakenerStandalone */;
+			targetProxy = 1A5C00000000000000000607 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
