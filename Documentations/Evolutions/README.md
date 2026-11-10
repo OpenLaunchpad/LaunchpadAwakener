@@ -12,3 +12,4 @@
 | 0006 | [用 ObjCRuntimeToolbox 改写 hook 与私有调用](0006-objc-runtime-toolbox.md) | Implemented |
 | 0007 | [两个 App 的界面改用 AppKit 重写，不再用 SwiftUI](0007-appkit-rewrite.md) | Implemented |
 | draft | [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md) | In Progress |
+| draft | [文本输入通道改用系统的 Swift XPC 接口](draft-text-input-swift-xpc.md) | Accepted |
