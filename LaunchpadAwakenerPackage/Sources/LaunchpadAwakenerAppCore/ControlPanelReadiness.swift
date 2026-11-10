@@ -9,6 +9,9 @@ import ServiceManagement
 /// in order, and each one only applies once everything before it is fine — the first obstacle is the
 /// one worth fixing first.
 public enum ControlPanelReadiness: Sendable, Equatable {
+    /// System Integrity Protection is on, so nothing can be injected into the Dock. The standalone
+    /// Launchpad works without turning it off; whether it is installed decides the next step.
+    case systemIntegrityProtectionEnabled(isStandaloneLaunchpadInstalled: Bool)
     /// The launch sequence is still running; the description says which step.
     case startingUp(progressDescription: String)
     /// The daemon is registered and waits for the user under System Settings › Login Items.
@@ -29,12 +32,19 @@ public enum ControlPanelReadiness: Sendable, Equatable {
     case active
 
     public static func evaluate(
+        isInjectionBlockedBySystemIntegrityProtection: Bool,
+        isStandaloneLaunchpadInstalled: Bool,
         launchPhase: ApplicationLaunchProgress.Phase,
         daemonStatus: SMAppService.Status,
         isKillSwitchEngaged: Bool,
         isInjected: Bool,
         residentPayloads: [PayloadInjectionCoordinator.ResidentPayload]
     ) -> ControlPanelReadiness {
+        // Before everything else: while SIP is on, no step below can be taken, and the app does not try.
+        if isInjectionBlockedBySystemIntegrityProtection {
+            return .systemIntegrityProtectionEnabled(isStandaloneLaunchpadInstalled: isStandaloneLaunchpadInstalled)
+        }
+
         if launchPhase.isInProgress {
             return .startingUp(progressDescription: launchPhase.progressDescription ?? "")
         }

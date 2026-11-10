@@ -15,7 +15,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let daemonController: PrivilegedDaemonController
     private let injectionCoordinator: PayloadInjectionCoordinator
     private let killSwitchController: KillSwitchController
+    private let standaloneLaunchpadController: StandaloneLaunchpadController
     private let launchProgress: ApplicationLaunchProgress
+    private let isInjectionBlockedBySystemIntegrityProtection: Bool
     private let showControlPanel: () -> Void
     private let showOrganizer: () -> Void
 
@@ -23,14 +25,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         daemonController: PrivilegedDaemonController,
         injectionCoordinator: PayloadInjectionCoordinator,
         killSwitchController: KillSwitchController,
+        standaloneLaunchpadController: StandaloneLaunchpadController,
         launchProgress: ApplicationLaunchProgress,
+        isInjectionBlockedBySystemIntegrityProtection: Bool,
         showControlPanel: @escaping () -> Void,
         showOrganizer: @escaping () -> Void
     ) {
         self.daemonController = daemonController
         self.injectionCoordinator = injectionCoordinator
         self.killSwitchController = killSwitchController
+        self.standaloneLaunchpadController = standaloneLaunchpadController
         self.launchProgress = launchProgress
+        self.isInjectionBlockedBySystemIntegrityProtection = isInjectionBlockedBySystemIntegrityProtection
         self.showControlPanel = showControlPanel
         self.showOrganizer = showOrganizer
         super.init()
@@ -45,7 +51,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if isInjectionBlockedBySystemIntegrityProtection {
+            standaloneLaunchpadController.refreshStatus()
+        }
         let readiness = ControlPanelReadiness.evaluate(
+            isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
+            isStandaloneLaunchpadInstalled: standaloneLaunchpadController.isInstalled,
             launchPhase: launchProgress.phase,
             daemonStatus: daemonController.registrationStatus,
             isKillSwitchEngaged: killSwitchController.isEngaged,
@@ -54,6 +65,32 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         )
         let statusTitleItem = NSMenuItem(title: ReadinessPresentation(readiness).title, action: nil, keyEquivalent: "")
         statusTitleItem.isEnabled = false
+
+        // Nothing here injects while SIP is on; the menu offers the standalone app instead.
+        guard !isInjectionBlockedBySystemIntegrityProtection else {
+            let standaloneItem = if standaloneLaunchpadController.isInstalled {
+                item("Open Launchpad") { [standaloneLaunchpadController] in
+                    standaloneLaunchpadController.open()
+                }
+            } else {
+                item("Install Launchpad") { [standaloneLaunchpadController] in
+                    Task { await standaloneLaunchpadController.installAndOpen() }
+                }
+            }
+            standaloneItem.isEnabled = standaloneLaunchpadController.isInstalled
+                || (standaloneLaunchpadController.canInstall && !standaloneLaunchpadController.isInstalling)
+            menu.items = [
+                statusTitleItem,
+                .separator(),
+                item("Open LaunchpadAwakener", keyEquivalent: ",", perform: showControlPanel),
+                standaloneItem,
+                .separator(),
+                item("Quit", keyEquivalent: "q") {
+                    NSApplication.shared.terminate(nil)
+                },
+            ]
+            return
+        }
 
         let killSwitchItem = item("Open the System's Apps Instead") { [killSwitchController] in
             killSwitchController.setEngaged(!killSwitchController.isEngaged)

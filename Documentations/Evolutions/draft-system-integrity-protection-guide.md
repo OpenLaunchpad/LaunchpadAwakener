@@ -29,7 +29,7 @@
 
 1. ✅ SIP 判断：`SystemIntegrityProtectionConfiguration` 与它的单元测试。
 2. ✅ 独立版的安装：找到包里的 `Launchpad.zip`、识别已装的独立版、解压到目标目录、打开，以及单元测试。
-3. 横幅与启动流程：就绪判断的新原因与两个按钮、SIP 没关时跳过注入相关的启动步骤、表单隐藏注入各节、开发构建的启动参数。
+3. ✅ 横幅与启动流程：就绪判断的新原因与两个按钮、SIP 没关时跳过注入相关的启动步骤、表单隐藏注入各节、开发构建的启动参数。
 4. 工程：注入版依赖独立版 target，构建时把它压进 `Contents/Resources/Launchpad.zip`；`RunScript.sh` 构建后核对包里有它。
 5. 文档同步。
 

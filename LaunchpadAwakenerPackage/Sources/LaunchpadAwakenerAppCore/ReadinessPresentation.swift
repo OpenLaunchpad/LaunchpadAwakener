@@ -12,6 +12,24 @@ public struct ReadinessPresentation: Equatable, Sendable {
 
     public init(_ readiness: ControlPanelReadiness) {
         switch readiness {
+        case .systemIntegrityProtectionEnabled(let isStandaloneLaunchpadInstalled):
+            if isStandaloneLaunchpadInstalled {
+                self.init(
+                    title: "System Integrity Protection is on",
+                    nextStep: "Launchpad in the Dock needs SIP turned off. The standalone Launchpad app works with it on, and it is installed.",
+                    symbolName: "lock.shield.fill",
+                    tint: .neutral,
+                    action: .openStandaloneLaunchpad
+                )
+            } else {
+                self.init(
+                    title: "System Integrity Protection is on",
+                    nextStep: "Launchpad in the Dock needs SIP turned off. Install the standalone Launchpad app instead: it works with SIP on.",
+                    symbolName: "lock.shield.fill",
+                    tint: .caution,
+                    action: .installStandaloneLaunchpad
+                )
+            }
         case .startingUp(let progressDescription):
             self.init(title: "Starting up", nextStep: progressDescription, symbolName: "hourglass.circle.fill", tint: .progress)
         case .awaitingDaemonApproval:
@@ -102,6 +120,9 @@ public enum ReadinessAction: Sendable, Equatable {
     case turnLaunchpadBackOn
     case injectNow
     case restartDock
+    /// Unpacks the standalone Launchpad embedded in this app into the Applications folder and opens it.
+    case installStandaloneLaunchpad
+    case openStandaloneLaunchpad
 
     public var title: String {
         switch self {
@@ -110,6 +131,8 @@ public enum ReadinessAction: Sendable, Equatable {
         case .turnLaunchpadBackOn: "Turn Back On"
         case .injectNow: "Inject Now"
         case .restartDock: "Restart Dock"
+        case .installStandaloneLaunchpad: "Install Launchpad"
+        case .openStandaloneLaunchpad: "Open Launchpad"
         }
     }
 }

@@ -32,7 +32,10 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
     private let launchAtLoginController: LaunchAtLoginController
     private let textInputAgentController: TextInputAgentController
     private let killSwitchController: KillSwitchController
+    private let standaloneLaunchpadController: StandaloneLaunchpadController
     private let launchProgress: ApplicationLaunchProgress
+    /// While SIP is on, the panel is the banner pointing at the standalone app, and the launch at login row.
+    private let isInjectionBlockedBySystemIntegrityProtection: Bool
     private let showOrganizer: () -> Void
 
     private let bannerView = ReadinessBannerView()
@@ -90,7 +93,9 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         launchAtLoginController: LaunchAtLoginController,
         textInputAgentController: TextInputAgentController,
         killSwitchController: KillSwitchController,
+        standaloneLaunchpadController: StandaloneLaunchpadController,
         launchProgress: ApplicationLaunchProgress,
+        isInjectionBlockedBySystemIntegrityProtection: Bool,
         showOrganizer: @escaping () -> Void
     ) {
         self.daemonController = daemonController
@@ -98,7 +103,9 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         self.launchAtLoginController = launchAtLoginController
         self.textInputAgentController = textInputAgentController
         self.killSwitchController = killSwitchController
+        self.standaloneLaunchpadController = standaloneLaunchpadController
         self.launchProgress = launchProgress
+        self.isInjectionBlockedBySystemIntegrityProtection = isInjectionBlockedBySystemIntegrityProtection
         self.showOrganizer = showOrganizer
         super.init()
     }
@@ -142,8 +149,14 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let injectionCoordinator = self?.injectionCoordinator else { return }
-                await injectionCoordinator.refreshState()
+                guard
+                    let injectionCoordinator = self?.injectionCoordinator,
+                    let isInjectionBlocked = self?.isInjectionBlockedBySystemIntegrityProtection
+                else { return }
+                // Nothing is ever injected while SIP is on, so there is no payload to ask.
+                if !isInjectionBlocked {
+                    await injectionCoordinator.refreshState()
+                }
                 self?.refreshEverything()
                 try? await Task.sleep(for: Self.stateRefreshInterval)
             }
@@ -169,6 +182,9 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         launchAtLoginController.refreshStatus()
         textInputAgentController.refreshStatus()
         killSwitchController.refreshStatus()
+        if isInjectionBlockedBySystemIntegrityProtection {
+            standaloneLaunchpadController.refreshStatus()
+        }
     }
 
     // MARK: - Building
@@ -183,6 +199,19 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         restartDockButton.toolTip = "Only needed after installing a new build: the payload already in the Dock cannot be replaced while it runs. The new Dock is injected right away."
         errorSection.headerTintColor = .systemRed
         errorSection.isHidden = true
+
+        // Every other row is about injecting into the Dock, which SIP rules out. Launch at login stays, so
+        // that an app left starting at login from before SIP was turned on can be stopped from here.
+        guard !isInjectionBlockedBySystemIntegrityProtection else {
+            formView.sections = [
+                FormSectionView(title: "General", symbolName: "gearshape.fill", rows: [
+                    launchAtLoginRow,
+                    launchAtLoginWarningRow,
+                ]),
+                errorSection,
+            ]
+            return
+        }
 
         formView.sections = [
             FormSectionView(title: "General", symbolName: "gearshape.fill", rows: [
@@ -272,6 +301,10 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
             Task { [injectionCoordinator] in await injectionCoordinator.injectIntoRunningTargets() }
         case .restartDock:
             injectionCoordinator.restartTargets()
+        case .installStandaloneLaunchpad:
+            Task { [standaloneLaunchpadController] in await standaloneLaunchpadController.installAndOpen() }
+        case .openStandaloneLaunchpad:
+            standaloneLaunchpadController.open()
         }
     }
 
@@ -279,9 +312,10 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
 
     /// One closure per group of rows that change together, so that a change redraws only its rows.
     private func observeState() {
-        observe { [weak self] in
-            guard let self else { return }
+        observe { [unowned self] in
             let readiness = ControlPanelReadiness.evaluate(
+                isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
+                isStandaloneLaunchpadInstalled: standaloneLaunchpadController.isInstalled,
                 launchPhase: launchProgress.phase,
                 daemonStatus: daemonController.registrationStatus,
                 isKillSwitchEngaged: killSwitchController.isEngaged,
@@ -389,6 +423,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
                 ("Injection", injectionCoordinator.lastErrorDescription),
                 ("Input method helper", textInputAgentController.lastErrorDescription),
                 ("Kill switch", killSwitchController.lastErrorDescription),
+                ("Standalone Launchpad", standaloneLaunchpadController.lastErrorDescription),
             ].compactMap { label, description in description.map { (label: label, description: $0) } }
             errorSection.rows = errorDescriptions.map { FormRowView(contentView: ErrorDescriptionView(label: $0.label, description: $0.description)) }
             errorSection.isHidden = errorDescriptions.isEmpty
@@ -401,7 +436,9 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
             !daemonController.isPerformingRegistrationChange
         case .injectNow, .restartDock:
             !injectionCoordinator.isBusy
-        case .openLoginItems, .turnLaunchpadBackOn, nil:
+        case .installStandaloneLaunchpad:
+            standaloneLaunchpadController.canInstall && !standaloneLaunchpadController.isInstalling
+        case .openLoginItems, .turnLaunchpadBackOn, .openStandaloneLaunchpad, nil:
             true
         }
     }

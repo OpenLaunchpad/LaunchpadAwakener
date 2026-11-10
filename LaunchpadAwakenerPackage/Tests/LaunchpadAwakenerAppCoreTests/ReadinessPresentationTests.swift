@@ -15,6 +15,8 @@ struct ReadinessPresentationTests {
     }
 
     static let expectations: [Expectation] = [
+        Expectation(readiness: .systemIntegrityProtectionEnabled(isStandaloneLaunchpadInstalled: false), title: "System Integrity Protection is on", symbolName: "lock.shield.fill", tint: .caution, action: .installStandaloneLaunchpad),
+        Expectation(readiness: .systemIntegrityProtectionEnabled(isStandaloneLaunchpadInstalled: true), title: "System Integrity Protection is on", symbolName: "lock.shield.fill", tint: .neutral, action: .openStandaloneLaunchpad),
         Expectation(readiness: .startingUp(progressDescription: "Checking the privileged daemon…"), title: "Starting up", symbolName: "hourglass.circle.fill", tint: .progress, action: nil),
         Expectation(readiness: .awaitingDaemonApproval, title: "Waiting for approval", symbolName: "hand.raised.circle.fill", tint: .caution, action: .openLoginItems),
         Expectation(readiness: .daemonMissingFromBundle, title: "Daemon missing from the app bundle", symbolName: "exclamationmark.triangle.fill", tint: .critical, action: nil),
@@ -60,5 +62,7 @@ struct ReadinessPresentationTests {
         #expect(ReadinessAction.turnLaunchpadBackOn.title == "Turn Back On")
         #expect(ReadinessAction.injectNow.title == "Inject Now")
         #expect(ReadinessAction.restartDock.title == "Restart Dock")
+        #expect(ReadinessAction.installStandaloneLaunchpad.title == "Install Launchpad")
+        #expect(ReadinessAction.openStandaloneLaunchpad.title == "Open Launchpad")
     }
 }

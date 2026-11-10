@@ -14,9 +14,17 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginController = LaunchAtLoginController()
     private let textInputAgentController = TextInputAgentController()
     private let killSwitchController = KillSwitchController()
+    private let standaloneLaunchpadController = StandaloneLaunchpadController()
     private let launchProgress = ApplicationLaunchProgress()
     private let organizerViewModel: LaunchpadOrganizerViewModel
     private var statusItemController: StatusItemController?
+
+    /// Whether System Integrity Protection keeps this app from injecting into the Dock. Read once: changing
+    /// SIP takes a restart.
+    private let isInjectionBlockedBySystemIntegrityProtection = SystemIntegrityProtectionConfiguration.blocksInjection(
+        active: SystemIntegrityProtectionConfiguration.active(),
+        launchArguments: ProcessInfo.processInfo.arguments
+    )
 
     private lazy var controlPanelWindowController = ControlPanelWindowController(
         controlPanelViewController: ControlPanelViewController(
@@ -25,7 +33,9 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             launchAtLoginController: launchAtLoginController,
             textInputAgentController: textInputAgentController,
             killSwitchController: killSwitchController,
+            standaloneLaunchpadController: standaloneLaunchpadController,
             launchProgress: launchProgress,
+            isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
             showOrganizer: { [weak self] in self?.showOrganizer() }
         ),
         activationPolicyController: activationPolicyController
@@ -57,18 +67,34 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
         // finishes.
         let wasLaunchedAtLogin = ApplicationLaunch.wasLaunchedAtLogin
 
+        // The organizer edits Launchpad through the payload in the Dock, which there is none of while SIP is on.
+        let organizerItems = isInjectionBlockedBySystemIntegrityProtection ? [] : [
+            menuItem("Organize Launchpad") { [weak self] in self?.showOrganizer() },
+        ]
         NSApp.mainMenu = ApplicationMainMenu.make(applicationName: "LaunchpadAwakener", windowItems: [
             menuItem("LaunchpadAwakener") { [weak self] in self?.showControlPanel() },
-            menuItem("Organize Launchpad") { [weak self] in self?.showOrganizer() },
-        ])
+        ] + organizerItems)
         statusItemController = StatusItemController(
             daemonController: daemonController,
             injectionCoordinator: injectionCoordinator,
             killSwitchController: killSwitchController,
+            standaloneLaunchpadController: standaloneLaunchpadController,
             launchProgress: launchProgress,
+            isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
             showControlPanel: { [weak self] in self?.showControlPanel() },
             showOrganizer: { [weak self] in self?.showOrganizer() }
         )
+
+        // While SIP is on there is nothing to inject into: the daemon would only ask for approval in System
+        // Settings, and the input method helper only serves Launchpad in the Dock. The window says so and
+        // offers the standalone app instead, which needs none of them.
+        guard !isInjectionBlockedBySystemIntegrityProtection else {
+            #log(.info, "System Integrity Protection is on: offering the standalone Launchpad instead of injecting into the Dock")
+            if !wasLaunchedAtLogin {
+                showControlPanel()
+            }
+            return
+        }
 
         // A Dock injected once and not after the next login is a tool that silently stops working, so the
         // first time the tool works, launching at login is turned on — once, and only if the user has not
@@ -118,6 +144,11 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     /// now can. Without this the banner kept the old reason ("Awaiting approval") after the approval, and
     /// with automatic injection off nothing reconnected to a Dock that already held the payload.
     public func applicationDidBecomeActive(_ notification: Notification) {
+        guard !isInjectionBlockedBySystemIntegrityProtection else {
+            // Coming back from the Finder, where the user may have installed or deleted the standalone app.
+            standaloneLaunchpadController.refreshStatus()
+            return
+        }
         guard case .stopped = launchProgress.phase else { return }
         // Entered here rather than inside the task, so that a second activation in the meantime sees a
         // sequence in progress and does not start another.

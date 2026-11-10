@@ -25,6 +25,8 @@ struct ControlPanelReadinessTests {
     }
 
     private static func evaluate(
+        isInjectionBlockedBySystemIntegrityProtection: Bool = false,
+        isStandaloneLaunchpadInstalled: Bool = false,
         launchPhase: ApplicationLaunchProgress.Phase = .ready,
         daemonStatus: SMAppService.Status = .enabled,
         isKillSwitchEngaged: Bool = false,
@@ -32,6 +34,8 @@ struct ControlPanelReadinessTests {
         residentPayloads: [ResidentPayload] = [payload()]
     ) -> ControlPanelReadiness {
         ControlPanelReadiness.evaluate(
+            isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
+            isStandaloneLaunchpadInstalled: isStandaloneLaunchpadInstalled,
             launchPhase: launchPhase,
             daemonStatus: daemonStatus,
             isKillSwitchEngaged: isKillSwitchEngaged,
@@ -43,6 +47,25 @@ struct ControlPanelReadinessTests {
     @Test("Everything in place is active")
     func everythingInPlaceIsActive() {
         #expect(Self.evaluate() == .active)
+    }
+
+    /// While SIP is on nothing below can be fixed by injecting, so the banner points at the standalone app
+    /// whatever else is going on — the launch sequence does not even run then.
+    @Test("SIP on is reported before anything else, with the standalone app's state")
+    func systemIntegrityProtectionComesFirst() {
+        #expect(
+            Self.evaluate(isInjectionBlockedBySystemIntegrityProtection: true, launchPhase: .notStarted, daemonStatus: .notRegistered, isInjected: false, residentPayloads: [])
+                == .systemIntegrityProtectionEnabled(isStandaloneLaunchpadInstalled: false)
+        )
+        #expect(
+            Self.evaluate(isInjectionBlockedBySystemIntegrityProtection: true, isStandaloneLaunchpadInstalled: true, launchPhase: .preparingDaemon, isKillSwitchEngaged: true)
+                == .systemIntegrityProtectionEnabled(isStandaloneLaunchpadInstalled: true)
+        )
+    }
+
+    @Test("With SIP off, the standalone app being installed changes nothing")
+    func standaloneApplicationIgnoredWithoutSystemIntegrityProtection() {
+        #expect(Self.evaluate(isStandaloneLaunchpadInstalled: true) == .active)
     }
 
     @Test("A launch still running is reported before anything else")
