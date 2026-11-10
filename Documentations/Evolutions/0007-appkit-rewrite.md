@@ -1,9 +1,9 @@
-# Draft - 两个 App 的界面改用 AppKit 重写，不再用 SwiftUI
+# 0007 - 两个 App 的界面改用 AppKit 重写，不再用 SwiftUI
 
-- **状态**: In Progress
+- **状态**: Implemented
 - **作者**: JH
 - **创建日期**: 2026-11-09
-- **最后更新**: 2026-11-09
+- **最后更新**: 2026-11-10
 - **所属愿景**: 无
 - **关联提案**: [0002 不注入 Dock 的独立版 Launchpad](0002-standalone-launchpad.md)、[0003 照 DockIconOverride 重做注入版 App 的控制面板](0003-app-control-panel.md)、[0005 在注入版 App 里整理 Launchpad 的布局](0005-launchpad-organizer.md)
 - **实现分支 / PR**: `feature/appkit-rewrite`（worktree `.worktrees/LaunchpadAwakener-AppKitRewrite`）
@@ -390,3 +390,4 @@ extension LaunchpadOrganizerViewModel {
 | 2026-11-09 | 实现完成，待用户看过后收尾 | MacBook（27.2）上对照与交互都做完了。还没做：26 虚拟机上的对照（虚拟机没开机），以及注销再登录确认登录时启动不弹控制面板（MacBook 没开自动登录，要用户手动登录）。 |
 | 2026-11-09 | 注销再登录的真机验证这次不做 | 用户决定跳过。手动打开会弹控制面板已在 MacBook 上验过；登录时不弹这一半由 `ApplicationLaunchTests` 用构造的 Apple 事件覆盖，真机上没验证过。26 虚拟机上的对照等用户开机后再做；合进 main 要等主检出里另一份草案的未提交改动处理完。 |
 | 2026-11-09 | 列表改用 AppKitPlus 的可重排表格数据源 | 第一版在 AppKit 自带的 diffable 数据源上手写拖放，没有记下为什么不用 `NSTableViewDiffableReorderableDataSource`。用户问起后决定改用：AppKitPlus 有的不手写，它还带来按指针定位落点、整块移动带动画、保留选中。子类补三处：放到文件夹行上是放进文件夹，在它把「放到行上」改成「插到行前」之前截下；每个拖动行在它写的剪贴板项上加本 App 的编号类型，侧栏才读得到，搜索结果不能重排时只写这一个类型；它先在本地挪行，Dock 拒绝时布局不变、定时刷新只回「没变」，所以编辑结束后列表按布局重画。视图模型的 `dropOperation(of:onto:)` 只剩侧栏与文件夹行两种目标，重排改由 `reorderOperation(to:)` 决定。 |
+| 2026-11-10 | 落地：编号 0007，状态 Implemented，变基到 0006（ObjCRuntimeToolbox 改写）之上后快进进 `main` | 摘要承诺的都已实现：两个 App 的界面全部是 AppKit，仓库代码里没有 `import SwiftUI`，手动打开会弹控制面板。变基时与 0006 只在 `Package.swift`（独立版模块两边都加了依赖与链接设置）和 `CLAUDE.md`（模块表与各自新加的一节）上冲突，两边都保留，删掉了已不存在的 HookKit 一行；落地前在合起来的代码上跑了两个 scheme 的 `RunScript.sh` 构建与包的全部测试。留作后续：26 虚拟机上的截图对照与交互验证；在真机上注销再登录，确认登录时启动不弹控制面板。文档判断沿用上面「文档」一行：实现说明已写，没有新术语，不需要使用指南 |

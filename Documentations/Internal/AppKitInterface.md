@@ -1,6 +1,6 @@
 # 两个 App 的 AppKit 界面层：实现说明
 
-> 配套提案见 [两个 App 的界面改用 AppKit 重写，不再用 SwiftUI](../Evolutions/draft-appkit-rewrite.md)。
+> 配套提案见 [两个 App 的界面改用 AppKit 重写，不再用 SwiftUI](../Evolutions/0007-appkit-rewrite.md)。
 > 本文记录实际落地的实现、与提案的差异，以及没在代码里写明、下一任维护者会踩到的决策。面向维护者。
 
 ## 背景与目标
