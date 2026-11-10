@@ -1,6 +1,8 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 import LaunchpadAwakenerShared
+import LaunchpadAwakenerSpringboardCore
 import Testing
 import TestingSupport
 import XPC
@@ -11,8 +13,8 @@ import XPC
 @Suite("The client of the text input helper", .timeLimit(.minutes(1)))
 @MainActor
 struct TextInputHelperClientTests {
-    /// Stands in for the helper: answers `begin` and `end` with what it was given, keeps every request, and
-    /// can report changes to the Dock or exit.
+    /// Stands in for the helper: answers `begin`, `end` and the deletion confirmation with what it was given,
+    /// keeps every request, and can report changes and buttons to the Dock or exit.
     private final class StandInHelper {
         /// `XPCSession` is safe to use from any thread, but the SDK declares it `Sendable` only from macOS 26
         /// on, past the package's deployment target.
@@ -24,7 +26,11 @@ struct TextInputHelperClientTests {
         private let sessions = Recorder<SessionBox>()
         private let listener: XPCListener
 
-        init(hosting: TextInputHosting, ending: TextInputEnding = TextInputEnding(string: nil)) {
+        init(
+            hosting: TextInputHosting,
+            ending: TextInputEnding = TextInputEnding(string: nil),
+            presentation: DeletionConfirmationPresentation = DeletionConfirmationPresentation(isShown: true)
+        ) {
             let requests = requests
             let sessions = sessions
             listener = XPCListener { request in
@@ -36,7 +42,9 @@ struct TextInputHelperClientTests {
                             return hosting
                         case .end:
                             return ending
-                        case .setString, .setFocus:
+                        case .presentDeletionConfirmation:
+                            return presentation
+                        case .setString, .setFocus, .dismissDeletionConfirmation:
                             return nil
                         }
                     }
@@ -55,7 +63,12 @@ struct TextInputHelperClientTests {
         }
 
         func report(_ change: TextInputChange) throws {
-            try #require(sessions.recorded.last).session.send(change)
+            try #require(sessions.recorded.last).session.send(TextInputHelperMessage.fieldChange(change))
+        }
+
+        /// A button of the deletion confirmation pressed.
+        func press(_ answer: DeletionConfirmationAnswer) throws {
+            try #require(sessions.recorded.last).session.send(TextInputHelperMessage.deletionConfirmationAnswer(answer))
         }
 
         /// Ends every session, as the helper's process exiting does.
@@ -229,5 +242,306 @@ struct TextInputHelperClientTests {
         #expect(await Self.begin(client) == Self.hosting)
         #expect(helper.sessionCount == 2)
         #expect(interruptions == 1)
+    }
+
+    // MARK: - The deletion confirmation
+
+    private static let deletionConfirmation = DeletionConfirmationConfiguration(
+        iconPNGData: nil,
+        bundlePath: "/Applications/可删测试.app",
+        message: "确定要删除应用程序“可删测试”吗？",
+        cancelButtonTitle: "取消",
+        deleteButtonTitle: "删除",
+        iconCenterX: 742.5,
+        iconCenterY: 318
+    )
+
+    private static func presentDeletionConfirmation(_ client: TextInputHelperClient) async -> Bool {
+        await withCheckedContinuation { continuation in
+            client.presentDeletionConfirmation(deletionConfirmation) { isShown in
+                continuation.resume(returning: isShown)
+            }
+        }
+    }
+
+    /// What the springboard asks the Dock's confirmation to show: its icon, words and place.
+    private static func confirmationConfiguration(icon: CGImage?) -> SpringboardHostedDeletionConfirmationConfiguration {
+        SpringboardHostedDeletionConfirmationConfiguration(
+            icon: icon,
+            bundleURL: URL(fileURLWithPath: "/Applications/可删测试.app"),
+            message: "确定要删除应用程序“可删测试”吗？",
+            cancelButtonTitle: "取消",
+            deleteButtonTitle: "删除",
+            screenIconCenter: CGPoint(x: 742.5, y: 318)
+        )
+    }
+
+    /// The deletion confirmation on the Dock's side, asking `client`'s helper.
+    private static func remoteConfirmation(client: TextInputHelperClient) -> SpringboardRemoteDeletionConfirmation {
+        SpringboardRemoteDeletionConfirmation(configuration: confirmationConfiguration(icon: nil), client: client)
+    }
+
+    @Test("showing the deletion confirmation sends what it shows, and gets whether it is on screen", arguments: [true, false])
+    func presentDeletionConfirmation(isShown: Bool) async throws {
+        let helper = StandInHelper(hosting: Self.hosting, presentation: DeletionConfirmationPresentation(isShown: isShown))
+        let client = TextInputHelperClient(destination: .endpoint(helper.endpoint))
+        defer {
+            client.cancel()
+            helper.stop()
+        }
+
+        #expect(await Self.presentDeletionConfirmation(client) == isShown)
+        #expect(helper.requests.recorded == [.presentDeletionConfirmation(Self.deletionConfirmation)])
+    }
+
+    @Test("a helper that refuses the Dock leaves the springboard to ask itself")
+    func presentDeletionConfirmationRefused() async throws {
+        let listener = XPCListener { request in
+            request.reject(reason: "Not the Dock")
+        }
+        let client = TextInputHelperClient(destination: .endpoint(listener.endpoint))
+        defer {
+            client.cancel()
+            listener.cancel()
+        }
+
+        #expect(await Self.presentDeletionConfirmation(client) == false)
+    }
+
+    @Test("the buttons pressed reach the confirmation in order, apart from the field's changes")
+    func deletionAnswersInOrder() async throws {
+        let helper = StandInHelper(hosting: Self.hosting)
+        let client = TextInputHelperClient(destination: .endpoint(helper.endpoint))
+        var answers: [DeletionConfirmationAnswer] = []
+        var changes: [TextInputHelperClient.Change] = []
+        client.deletionConfirmationAnswerHandler = { answer in
+            answers.append(answer)
+        }
+        client.changeHandler = { change in
+            changes.append(change)
+        }
+        defer {
+            client.cancel()
+            helper.stop()
+        }
+        _ = await Self.presentDeletionConfirmation(client)
+        let change = TextInputChange(string: "Safari", hasMarkedText: false, isEditingComplete: false)
+
+        try helper.press(.cancel)
+        try helper.report(change)
+        try helper.press(.delete)
+
+        #expect(await waitUntil { answers.count == 2 && changes.count == 1 })
+        #expect(answers == [.cancel, .delete])
+        #expect(changes == [change])
+    }
+
+    @Test("dismissing reaches the helper after showing, and needs no session when nothing was shown")
+    func dismissDeletionConfirmation() async throws {
+        let helper = StandInHelper(hosting: Self.hosting)
+        let client = TextInputHelperClient(destination: .endpoint(helper.endpoint))
+        defer {
+            client.cancel()
+            helper.stop()
+        }
+
+        client.dismissDeletionConfirmation()
+        #expect(helper.sessionCount == 0)
+        _ = await Self.presentDeletionConfirmation(client)
+        client.dismissDeletionConfirmation()
+        _ = await Self.end(client)
+
+        #expect(helper.requests.recorded == [.presentDeletionConfirmation(Self.deletionConfirmation), .dismissDeletionConfirmation, .end])
+    }
+
+    @Test("the helper going away is reported to the deletion confirmation as well as to the field")
+    func helperGoingAwayReachesTheConfirmation() async throws {
+        let helper = StandInHelper(hosting: Self.hosting)
+        let client = TextInputHelperClient(destination: .endpoint(helper.endpoint))
+        var fieldInterruptions = 0
+        var confirmationInterruptions = 0
+        client.interruptionHandler = {
+            fieldInterruptions += 1
+        }
+        client.deletionConfirmationInterruptionHandler = {
+            confirmationInterruptions += 1
+        }
+        defer {
+            client.cancel()
+            helper.stop()
+        }
+        _ = await Self.presentDeletionConfirmation(client)
+
+        helper.exit()
+
+        #expect(await waitUntil { confirmationInterruptions == 1 })
+        #expect(fieldInterruptions == 1)
+    }
+
+    /// Shows the Dock's confirmation and waits until the helper's answer to showing it has come back: the
+    /// answer to `end`, sent after it on the same session, comes back after it.
+    private static func presentAndWait(_ confirmation: SpringboardRemoteDeletionConfirmation, client: TextInputHelperClient) async {
+        confirmation.present()
+        _ = await end(client)
+    }
+
+    @Test("the Dock's confirmation reports the button pressed once the helper shows it, and nothing after it is dismissed")
+    func remoteConfirmationAnswers() async throws {
+        let helper = StandInHelper(hosting: Self.hosting)
+        let client = TextInputHelperClient(destination: .endpoint(helper.endpoint))
+        defer {
+            client.cancel()
+            helper.stop()
+        }
+        let confirmation = Self.remoteConfirmation(client: client)
+        var choices: [SpringboardDeletionChoice] = []
+        var failures = 0
+        confirmation.answerHandler = { choice in
+            choices.append(choice)
+        }
+        confirmation.presentationDidFail = {
+            failures += 1
+        }
+
+        await Self.presentAndWait(confirmation, client: client)
+        try helper.press(.delete)
+        #expect(await waitUntil { choices == [.delete] })
+        confirmation.dismiss()
+        try helper.press(.cancel)
+        // The button pressed after the dismissal has come back by the time the answer to `end` does.
+        _ = await Self.end(client)
+
+        #expect(choices == [.delete])
+        #expect(failures == 0)
+        #expect(helper.requests.recorded == [
+            .presentDeletionConfirmation(SpringboardRemoteDeletionConfirmation.message(for: confirmation.configuration)),
+            .end,
+            .dismissDeletionConfirmation,
+            .end,
+        ])
+    }
+
+    @Test("the Dock's confirmation leaves the question to the springboard when the helper cannot show it")
+    func remoteConfirmationCannotBeShown() async throws {
+        let helper = StandInHelper(hosting: Self.hosting, presentation: DeletionConfirmationPresentation(isShown: false))
+        let client = TextInputHelperClient(destination: .endpoint(helper.endpoint))
+        defer {
+            client.cancel()
+            helper.stop()
+        }
+        let confirmation = Self.remoteConfirmation(client: client)
+        var failures = 0
+        var interruptions = 0
+        var sessionEndings = 0
+        confirmation.presentationDidFail = {
+            failures += 1
+        }
+        confirmation.interruptionHandler = {
+            interruptions += 1
+        }
+        client.interruptionHandler = {
+            sessionEndings += 1
+        }
+
+        await Self.presentAndWait(confirmation, client: client)
+        #expect(failures == 1)
+        helper.exit()
+        #expect(await waitUntil { sessionEndings == 1 })
+
+        #expect(failures == 1)
+        #expect(interruptions == 0)
+    }
+
+    @Test("the helper going away before it answers leaves the question to the springboard, once")
+    func remoteConfirmationHelperGoneBeforeShowing() async throws {
+        let listener = XPCListener { request in
+            request.reject(reason: "Not the Dock")
+        }
+        let client = TextInputHelperClient(destination: .endpoint(listener.endpoint))
+        defer {
+            client.cancel()
+            listener.cancel()
+        }
+        let confirmation = Self.remoteConfirmation(client: client)
+        var failures = 0
+        var interruptions = 0
+        var sessionEndings = 0
+        confirmation.presentationDidFail = {
+            failures += 1
+        }
+        confirmation.interruptionHandler = {
+            interruptions += 1
+        }
+        client.interruptionHandler = {
+            sessionEndings += 1
+        }
+
+        confirmation.present()
+
+        #expect(await waitUntil { failures == 1 && sessionEndings == 1 })
+        #expect(failures == 1)
+        #expect(interruptions == 0)
+    }
+
+    @Test("the helper going away while it shows the confirmation ends the question")
+    func remoteConfirmationInterrupted() async throws {
+        let helper = StandInHelper(hosting: Self.hosting)
+        let client = TextInputHelperClient(destination: .endpoint(helper.endpoint))
+        defer {
+            client.cancel()
+            helper.stop()
+        }
+        let confirmation = Self.remoteConfirmation(client: client)
+        var failures = 0
+        var interruptions = 0
+        confirmation.presentationDidFail = {
+            failures += 1
+        }
+        confirmation.interruptionHandler = {
+            interruptions += 1
+        }
+        await Self.presentAndWait(confirmation, client: client)
+
+        helper.exit()
+
+        #expect(await waitUntil { interruptions == 1 })
+        #expect(failures == 0)
+    }
+
+    @Test("the Dock sends the icon as PNG of the same size, and the bundle's path, the words and the place as they are")
+    func remoteConfirmationMessage() throws {
+        let icon = try #require(Self.makeIcon(side: 48))
+
+        let message = SpringboardRemoteDeletionConfirmation.message(for: Self.confirmationConfiguration(icon: icon))
+
+        let pngData = try #require(message.iconPNGData)
+        let source = try #require(CGImageSourceCreateWithData(pngData as CFData, nil))
+        #expect(CGImageSourceGetType(source) as String? == "public.png")
+        let decoded = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(decoded.width == 48 && decoded.height == 48)
+        #expect(message.bundlePath == "/Applications/可删测试.app")
+        #expect(message.message == "确定要删除应用程序“可删测试”吗？")
+        #expect(message.cancelButtonTitle == "取消")
+        #expect(message.deleteButtonTitle == "删除")
+        #expect(message.iconCenterX == 742.5 && message.iconCenterY == 318)
+        #expect(SpringboardRemoteDeletionConfirmation.message(for: Self.confirmationConfiguration(icon: nil)).iconPNGData == nil)
+    }
+
+    private static func makeIcon(side: Int) -> CGImage? {
+        guard
+            let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+            let context = CGContext(
+                data: nil,
+                width: side,
+                height: side,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else { return nil }
+        context.setFillColor(CGColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        return context.makeImage()
     }
 }

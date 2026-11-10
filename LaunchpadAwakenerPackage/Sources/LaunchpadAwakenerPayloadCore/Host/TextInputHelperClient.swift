@@ -8,7 +8,9 @@ import XPC
 
 /// The connection to the text input helper, the LaunchAgent that hosts the springboard's text fields so
 /// that input methods work in them, and the events posted to it, as macOS 15's Dock had its
-/// `com.apple.dock.ecti` service (`-[ECTextInputLayer _setupConnection]`, `_forwardEvent:`).
+/// `com.apple.dock.ecti` service (`-[ECTextInputLayer _setupConnection]`, `_forwardEvent:`). The helper also
+/// shows the confirmation for deleting an application, which 15's Dock had its `com.apple.dock.ecap`
+/// service show (`ECAlertPanel`).
 ///
 /// One `XPCSession` at a time, delivering on the main queue. A session ends for good when the helper exits —
 /// "the system will make no attempt to reestablish the connection" (`xpc/session.h`) — so the next `begin`
@@ -36,6 +38,10 @@ final class TextInputHelperClient {
     var changeHandler: ((Change) -> Void)?
     /// Called when the helper went away; whatever it hosted is gone.
     var interruptionHandler: (() -> Void)?
+    /// Called with the button pressed in the deletion confirmation.
+    var deletionConfirmationAnswerHandler: ((DeletionConfirmationAnswer) -> Void)?
+    /// Called when the helper went away; the deletion confirmation it showed, if any, went with it.
+    var deletionConfirmationInterruptionHandler: (() -> Void)?
 
     private let destination: Destination
     private var session: XPCSession?
@@ -112,6 +118,32 @@ final class TextInputHelperClient {
         }
     }
 
+    // MARK: - The deletion confirmation
+
+    /// Has the helper show the confirmation for deleting an application; `completion` gets whether it is on
+    /// screen. Its buttons come back through ``deletionConfirmationAnswerHandler``.
+    func presentDeletionConfirmation(_ configuration: DeletionConfirmationConfiguration, completion: @escaping @MainActor (Bool) -> Void) {
+        guard let session = currentSession() else {
+            completion(false)
+            return
+        }
+        do {
+            try session.send(TextInputRequest.presentDeletionConfirmation(configuration)) { (result: Result<DeletionConfirmationPresentation, any Error>) in
+                TextInputHelperClient.onMainActor {
+                    completion(TextInputHelperClient.isShown(from: result))
+                }
+            }
+        } catch {
+            #log(.error, "Could not ask the text input helper to show the deletion confirmation: \(error.localizedDescription, privacy: .public)")
+            completion(false)
+        }
+    }
+
+    /// Closes the deletion confirmation, however it was answered.
+    func dismissDeletionConfirmation() {
+        send(.dismissDeletionConfirmation)
+    }
+
     /// Lets the session go without reporting the helper gone; the next `begin` opens a new one.
     func cancel() {
         sessionGeneration += 1
@@ -141,8 +173,8 @@ final class TextInputHelperClient {
 
     // MARK: - The session
 
-    /// A request without a reply, to the helper hosting the field; none goes out without a session, as there
-    /// is then no field to update.
+    /// A request without a reply, to the helper hosting the field or showing the confirmation; none goes out
+    /// without a session, as there is then nothing there to update or close.
     private func send(_ request: TextInputRequest) {
         guard let session else { return }
         do {
@@ -158,10 +190,10 @@ final class TextInputHelperClient {
         }
         sessionGeneration += 1
         let generation = sessionGeneration
-        let incomingMessageHandler: @Sendable (TextInputChange) -> (any Encodable)? = { [weak self] change in
+        let incomingMessageHandler: @Sendable (TextInputHelperMessage) -> (any Encodable)? = { [weak self] message in
             let client = self
             TextInputHelperClient.onMainActor {
-                client?.receive(change, sessionGeneration: generation)
+                client?.receive(message, sessionGeneration: generation)
             }
             return nil
         }
@@ -197,9 +229,14 @@ final class TextInputHelperClient {
         }
     }
 
-    private func receive(_ change: Change, sessionGeneration generation: Int) {
+    private func receive(_ message: TextInputHelperMessage, sessionGeneration generation: Int) {
         guard generation == sessionGeneration else { return }
-        changeHandler?(change)
+        switch message {
+        case .fieldChange(let change):
+            changeHandler?(change)
+        case .deletionConfirmationAnswer(let answer):
+            deletionConfirmationAnswerHandler?(answer)
+        }
     }
 
     /// The helper exited, refused the Dock, or was never there; launchd starts it again for the next session.
@@ -208,6 +245,20 @@ final class TextInputHelperClient {
         session = nil
         #log(.info, "The text input helper went away: \(reason, privacy: .public)")
         interruptionHandler?()
+        deletionConfirmationInterruptionHandler?()
+    }
+
+    private static func isShown(from result: Result<DeletionConfirmationPresentation, any Error>) -> Bool {
+        do {
+            let presentation = try result.get()
+            if !presentation.isShown {
+                #log(.error, "The text input helper could not show the deletion confirmation")
+            }
+            return presentation.isShown
+        } catch {
+            #log(.info, "The text input helper did not answer; the springboard asks itself: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     private static func hosting(from result: Result<TextInputHosting, any Error>) -> Hosting? {

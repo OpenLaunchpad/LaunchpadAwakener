@@ -14,15 +14,22 @@ struct TextInputPeerListenerTests {
     private final class PayloadSession {
         let session: XPCSession
         let changes: Recorder<TextInputChange>
+        let deletionAnswers: Recorder<DeletionConfirmationAnswer>
         private let cancellations: Recorder<String>
 
         init(endpoint: XPCEndpoint) throws {
             let changes = Recorder<TextInputChange>()
+            let deletionAnswers = Recorder<DeletionConfirmationAnswer>()
             let cancellations = Recorder<String>()
             session = try XPCSession(
                 endpoint: endpoint,
-                incomingMessageHandler: { (change: TextInputChange) -> (any Encodable)? in
-                    changes.append(change)
+                incomingMessageHandler: { (message: TextInputHelperMessage) -> (any Encodable)? in
+                    switch message {
+                    case .fieldChange(let change):
+                        changes.append(change)
+                    case .deletionConfirmationAnswer(let answer):
+                        deletionAnswers.append(answer)
+                    }
                     return nil
                 },
                 cancellationHandler: { error in
@@ -30,6 +37,7 @@ struct TextInputPeerListenerTests {
                 }
             )
             self.changes = changes
+            self.deletionAnswers = deletionAnswers
             self.cancellations = cancellations
         }
 
@@ -127,11 +135,32 @@ struct TextInputPeerListenerTests {
             TextInputChange(string: "text \(index)", hasMarkedText: index.isMultiple(of: 3), isEditingComplete: index == 299)
         }
         for change in reported {
-            listener.send(change)
+            listener.send(.fieldChange(change))
         }
 
         #expect(await waitUntil { dock.changes.recorded.count == reported.count })
         #expect(dock.changes.recorded == reported)
+    }
+
+    @Test("the deletion confirmation's buttons reach the Dock, apart from the field's changes")
+    func deletionAnswersReachTheDock() async throws {
+        let listener = TextInputPeerListener(peerPolicy: .anyPeer)
+        listener.requestHandler = { _ in TextInputEnding(string: nil) }
+        let dock = try PayloadSession(endpoint: listener.listenAnonymously())
+        defer {
+            dock.cancel()
+            listener.cancel()
+        }
+        try await dock.becomeServedPeer()
+        let change = TextInputChange(string: "Safari", hasMarkedText: false, isEditingComplete: false)
+
+        listener.send(.deletionConfirmationAnswer(.cancel))
+        listener.send(.fieldChange(change))
+        listener.send(.deletionConfirmationAnswer(.delete))
+
+        #expect(await waitUntil { dock.deletionAnswers.recorded.count == 2 && dock.changes.recorded.count == 1 })
+        #expect(dock.deletionAnswers.recorded == [.cancel, .delete])
+        #expect(dock.changes.recorded == [change])
     }
 
     @Test("a restarted Dock's connection replaces the last, which is let go without ending the hosting")
@@ -154,7 +183,7 @@ struct TextInputPeerListenerTests {
         try await firstDock.becomeServedPeer()
         try await restartedDock.becomeServedPeer()
         let change = TextInputChange(string: "Safari", hasMarkedText: false, isEditingComplete: false)
-        listener.send(change)
+        listener.send(.fieldChange(change))
 
         #expect(await waitUntil { restartedDock.changes.recorded == [change] })
         #expect(await waitUntil { firstDock.wasCancelled })

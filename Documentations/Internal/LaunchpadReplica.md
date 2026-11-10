@@ -45,7 +45,15 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **新装 App 的蓝点照 15 存在库里，标记与清除的时机按 27 能拿到的信号近似。** 15 的蓝点就是 `items.flags` 的 0x400 位：App Store 下载完成时置位，Dock 听到这个 App 启动时清除，跨重启保留，从 15 导入的库里也带着。27.2 的 Dock 只在 Swift 内部处理 App Store 下载完成，没有可替换的入口，所以复刻在对账时给带购买收据（`Contents/_MASReceipt/receipt`）的新 App 置位，首次建库不置位；从 Launchpad 启动时清除，每次打开前再看一眼带蓝点的 App：Spotlight 记的最近使用时间晚于这份拷贝放进来的时间，就算启动过，清掉（`RecentlyAddedApplications`）。没有 hook Dock 的 `handleApplicationLaunchNotification:time:data:asn:`：它的数据内容没逆向，而且每个 App 启动都会经过它。圆点照 15 的 `ECFlagLayer`（9 点圆、`GenericRGB(0, 122/255, 1)`）挂在标题图层上，随标题一起移动和淡入淡出；放不下时标题缩短、右移半个标记宽并左对齐，规则照 15。
 
-**删除 App 用 Dock 自己的卸载器，确认气泡自己画。** 15 在抖动模式里给卸载器认可的 App（App Store 的、网页 App、快捷指令、带包装容器的）显示关闭按钮，按下后由 `com.apple.dock.ecap` 服务弹一个 `NSPopover` 确认，确认后经 `DockCore.SystemApplicationUninstaller` 交给 `uninstalld` 删除。27.2 的 Dock.app 里已经没有 ecap 服务，卸载器却还在（`DockBar.environment.applicationUninstaller`，Objective-C 可调，只是 Dock 自己不再调用）。复刻的关闭按钮照 15 用 Dock.app 的 `ecsb_closebox` 贴图，按下换 `ecsb_closebox_pressed`；能不能删在开始抖动时问卸载器（`uninstallabilityOfFileAtURL:` 为 1），每次打开问一遍。确认气泡照 ecap 的视图自己画：400×84，箭头指向图标中心、在图标下方，图标 64 点、问句 13 点、取消与删除两个按钮，删除是默认按钮；回车删除，Esc 与 Command-句号取消，背景不变暗，点别处没反应。文案 27 的 Dock.app 里没有了，取自 15.5 Dock.app 的各语言 `Localizable.strings`（`SpringboardDeletionStrings`）。确认后照 15 先用 0.5 秒把图标缩到一成并淡出，再调卸载器；成功后本页在 0.25 秒内补上空位（后面的页不前移），库删掉这个 App；失败时图标在原处恢复（15 是放到下一个空位）。卸载是永久删除，不进废纸篓，连同偏好设置与容器一起删，正在运行的会先被要求退出、再被强制结束，与 15 相同。
+**删除 App 用 Dock 自己的卸载器，确认由文本输入辅助进程弹真的 `NSPopover`。** 15 在抖动模式里给卸载器认可的 App（App Store 的、网页 App、快捷指令、带包装容器的）显示关闭按钮，按下后由 `com.apple.dock.ecap` 服务弹一个 `NSPopover` 确认，确认后经 `DockCore.SystemApplicationUninstaller` 交给 `uninstalld` 删除。卸载器判断能不能删，第一条只看 `Contents/_MASReceipt/receipt` 在不在，不读内容（15.5 `+[UNUninstallRequest uninstallablityOfFileAtURL:]`），所以对照用的 15.5 虚拟机里放一个带空收据的 App 就能看到原版的删除（见项目 `CLAUDE.md`）。27.2 的 Dock.app 里已经没有 ecap 服务，卸载器却还在（`DockBar.environment.applicationUninstaller`，Objective-C 可调，只是 Dock 自己不再调用）。复刻的关闭按钮照 15 用 Dock.app 的 `ecsb_closebox` 贴图，按下换 `ecsb_closebox_pressed`；能不能删在开始抖动时问卸载器（`uninstallabilityOfFileAtURL:` 为 1），每次打开问一遍。确认照 ecap 的做法，由下文的文本输入辅助进程弹出（逆向见 `/Volumes/RE/Dock/15.5/Notes/LaunchpadFoldersAndDragging.md` 第 6.3 节）：
+
+- **上屏**：15 的气泡是 ecap 进程里一扇直接上屏的真窗口，不经 `CALayerHost`。辅助进程照做：把一扇 16×16 的透明锚点窗口挪到图标中心，以中心 20×20 的矩形、下边弹出 popover，再把 popover 窗口抬到层级 106，盖在 Launchpad（27）与 Dock（29）之上。锚点窗口不接点按，层级同样是 106，AppKit 把 popover 挂在它上面时也不会被压到 Launchpad 下面。锚点必须是 nonactivating panel：弹出时 popover 窗口照抄锚点窗口的这一项（26.6 `-[NSPopover showRelativeToRect:ofView:preferredEdge:]`），而在辅助进程这种不是活跃 App 的进程里，只有 nonactivating 窗口能成为 key；只有 key 窗口才把「删除」画成默认按钮。最初用普通的无边框窗口当锚点，「删除」就和「取消」一个样子。15 的锚点 mini view 窗口同样自称 nonactivating（逆向笔记见 `/Volumes/DyldSharedCaches/macOS/26.6/AppKit/Notes/DefaultButtonAndPopoverKey.md`）。
+- **内容**照 ecap 的 nib：宽 400，图标 64 点在左上 (10, 10)，问句 13 点、最宽 304，右下是取消与删除，删除是默认按钮。高度随系统按钮而定，不低于 84。外观跟随系统，所以是 26/27 的玻璃样式，不是 15 的。图标由 payload 编成 PNG 发过去，与 15 相同；解不开时用 App 自己的图标。
+- **按键与点按**：点按钮由窗口服务器直接送到辅助进程，它只回报按了哪个，自己不关。弹出后把 popover 窗口设成 key：AppKit 经辅助进程覆写的 `_stealKeyFocusWithOptions:` 认为拿到了焦点，系统键盘焦点仍在 Dock。普通按钮第一下点按就生效（`acceptsFirstMouse` 为 YES），不要给按钮设 `hasDestructiveAction`，那会吞掉第一下。键盘不转发：Return、Enter 删除，Esc 与 Command-句号取消，都由 Dock 判断。背景不变暗，点气泡以外被吞掉、没反应。
+- **关闭**总由 Dock 发起：按钮、按键，或 Launchpad 开始收起（按取消处理，与 15 相同）。关闭后若辅助进程正托管着搜索框，把 key 窗口交还给那扇窗口，转发来的键才不落空。15 等服务关好才删；复刻关闭请求一发出就开始删除动画，气泡同时淡出。
+- **辅助进程不在时**：连不上或弹不出，退回界面层自己画的气泡（`SpringboardDeletionPanel`，照 ecap 的尺寸画的平面近似）；气泡显示中辅助进程退出，按取消处理。一次只问一个 App，与 15 相同。
+
+文案 27 的 Dock.app 里没有了，取自 15.5 Dock.app 的各语言 `Localizable.strings`（`SpringboardDeletionStrings`），两种气泡共用。确认后照 15 先用 0.5 秒把图标缩到一成并淡出，再调卸载器；成功后本页在 0.25 秒内补上空位（后面的页不前移），库删掉这个 App；失败时图标在原处恢复（15 是放到下一个空位）。卸载是永久删除，不进废纸篓，连同偏好设置与容器一起删，正在运行的会先被要求退出、再被强制结束，与 15 相同。
 
 **拖动时自己摆放图标，不经 `ECGridLayer` 布局。** `ECGridLayer` 的布局在内部关掉隐式动画，借它没法做出 15 那种 0.4 秒的让位动画；拖动期间按「排列」（当前页的条目按新顺序排好、被拖的那个占一格）逐个设图标的 frame。被拖的图层离开网格挂到容器最上层跟手。松手时一次性写库，库发布的新布局再重建页面；拖动或文件夹开合期间到达的新布局先存着，动作结束后才换上（`replaceLayout` / `applyPendingLayoutIfIdle`）。
 
@@ -79,13 +87,14 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 **输入法靠一个托管文本框的辅助进程，照 15 的 ecti 服务做**（提案 [用常驻辅助进程给搜索框与改名框接上输入法](../Evolutions/0001-input-method-helper.md)）。Dock 不加载 AppKit，输入法只认真正的文本框和激活状态的进程，所以 App 里多带一个 LaunchAgent `LaunchpadAwakenerTextInput`：
 
 - **启动**：它放在 `Contents/Library/LoginItems/`，App 启动时用 `SMAppService.agent` 注册，不用用户批准。launchd 在 payload 连它的 Mach 服务时才拉起它。它只接受 Dock 的连接（见下文「几处细节」）。
-- **通道**：系统 XPC 框架的 Swift 接口（提案 [文本输入通道改用系统的 Swift XPC 接口](../Evolutions/0008-text-input-swift-xpc.md)）。payload 一侧是 `XPCSession`，辅助进程一侧是 `XPCListener`，都在主队列上收发；消息是 `LaunchpadAwakenerShared` 里的 `Codable` 类型：payload 发 `TextInputRequest`（`begin`、`setString`、`setFocus`、`end`，`begin` 回 `TextInputHosting`，`end` 回 `TextInputEnding`），辅助进程发 `TextInputChange`。消息按发送的先后处理。辅助进程一退出 session 就作废，payload 丢掉它，下一次 `begin` 再建一个，launchd 随之重新拉起辅助进程。
+- **通道**：系统 XPC 框架的 Swift 接口（提案 [文本输入通道改用系统的 Swift XPC 接口](../Evolutions/0008-text-input-swift-xpc.md)）。payload 一侧是 `XPCSession`，辅助进程一侧是 `XPCListener`，都在主队列上收发；消息是 `LaunchpadAwakenerShared` 里的 `Codable` 类型：payload 发 `TextInputRequest`（`begin`、`setString`、`setFocus`、`end`，以及删除确认的 `presentDeletionConfirmation`、`dismissDeletionConfirmation`；`begin` 回 `TextInputHosting`，`end` 回 `TextInputEnding`，`presentDeletionConfirmation` 回 `DeletionConfirmationPresentation`），辅助进程发 `TextInputHelperMessage`（文本框的变化，或删除确认按了哪个按钮）。消息按发送的先后处理。辅助进程一退出 session 就作废，payload 丢掉它，下一次 `begin` 再建一个，launchd 随之重新拉起辅助进程。
 - **托管**：它在 Dock 图块的 mini view 窗口里放一个 `NSTextField`，那扇窗口能成为 key 窗口。payload 用 `CALayerHost` 显示这扇窗口的图层托管上下文；窗口本身虽在屏上，却是完全透明的（见下文「与 15 不同的地方」）。
 - **转发**：payload 把这些事件复制一份，标上辅助进程的窗口编号与窗口内位置，用 `CGEventPostToPid` 发过去：
   - 搜索框该收的键；正在组字时是所有键；
   - 改名时的所有键；
   - 框里的点按与拖动。
 - **回报**：辅助进程回报不含组字部分的文字、是否在组字、改名时是否按了 Return、Enter 或 Esc。输入法不让文本框报告组字，所以它用一个改写了 `setMarkedText`、`unmarkText` 的字段编辑器来报。
+- **删除确认**：它还照 15 的 ecap 服务弹删除确认的 popover（见上文「删除 App」）。15 的 ecti 与 ecap 是两个服务，复刻并进这一个进程，共用连接与只认 Dock 的规矩。
 
 与 15 不同的地方：
 
@@ -136,7 +145,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 ```
 LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/
 ├── Hosting/
-│   └── SpringboardHost.swift           # 宿主接口：窗口、图层工厂、Dock 几何、图标样式、壁纸、玻璃、托管文本框、卸载器；选定宿主的 SpringboardHostSystem
+│   └── SpringboardHost.swift           # 宿主接口：窗口、图层工厂、Dock 几何、图标样式、壁纸、玻璃、托管文本框、托管的删除确认、卸载器；选定宿主的 SpringboardHostSystem
 ├── System/                             # 系统框架的私有接口，两个宿主都能用
 │   ├── QuartzCorePrivate.swift         # CA 私有滤镜与 CABackdropLayer
 │   ├── IconServicesBridge.swift        # IconServices 取图
@@ -158,7 +167,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/
     ├── SpringboardInterface.swift      # 页面、搜索、选中、点击、文件夹开合与改名、背景（ECSBSpringboard + ECSBLayer）
     ├── SpringboardInterface+Dragging.swift # 拖动整理（ECSBDragCapture 与各 DragState）
     ├── SpringboardInterface+FolderMaking.swift # 拖到图标上建文件夹、放进文件夹、未存的文件夹与解散
-    ├── SpringboardInterface+Deleting.swift # 抖动模式的关闭按钮与删除
+    ├── SpringboardInterface+Deleting.swift # 抖动模式的关闭按钮、删除确认（问谁、怎么答、何时撤）与删除
+    ├── SpringboardDeletionPanel.swift  # 辅助进程弹不出 popover 时自己画的删除确认；按键的读法
     ├── SpringboardIconFlight.swift     # 图片缩进文件夹缩略图的动画
     ├── SpringboardJiggle.swift         # 抖动模式：15 的两段抖动动画、长按时长、Option 规则
     ├── SpringboardBackground.swift     # 背景：15 的模糊壁纸，或宿主给的玻璃
@@ -192,7 +202,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── DockLayerFactory.swift          # ECGridLayer、ECImageGridLayer、ECTextLayer、ECShadowTextLayer、材质
 │   ├── DockApplicationUninstaller.swift # Dock 的卸载器
 │   ├── SpringboardRemoteTextField.swift # 辅助进程托管的搜索框与改名框：CALayerHost 与事件转发
-│   └── TextInputHelperClient.swift     # 经 XPCSession 连文本输入辅助进程；给它发键鼠事件
+│   ├── SpringboardRemoteDeletionConfirmation.swift # 辅助进程弹的删除确认：图标编成 PNG，转达按钮、失败与关闭
+│   └── TextInputHelperClient.swift     # 经 XPCSession 连文本输入辅助进程；给它发键鼠事件，请它弹、关删除确认
 └── Integration/                        # hook 声明（@RuntimeClassHook），以及事件接管时记下的当前事件
 ```
 
@@ -244,7 +255,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
   - 复现：结束辅助进程，再第一次打开界面，点进搜索框、点开文件夹，连拍 6 张里 5 张看得到光标，与用户在 Ultra 上的截图一致。之后的打开里，Launchpad 的窗口压在它上面，看不出来。
   - 搜「q」后点空白处收起，「q」留在桌面上方。
   - 修复（窗口设成完全透明）只有单元测试，没有在实机上看过：MacBook 被拿去装 macOS 15 了。
-- 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认气泡的样子与真删一个 App。
+- 删除确认改用辅助进程弹的 `NSPopover`（2026-11-10）：单元测试覆盖消息经真实 XPC 往返、Dock 一侧客户端（弹出的回答、按钮回报、关闭请求、辅助进程退出）、界面层的状态（问辅助进程要的内容与图标中心、按钮与按键都关掉它、一次只问一个、弹不出时退回自己画的、辅助进程退出时按取消、收起时撤下、答过之后迟到的按钮不算）、辅助进程里锚点的位置与 popover 的内容排版（与 nib 的框一致：问句 (82, 40, 308×34)，删除按钮右边缘 388）。之前先在 15.5 虚拟机里放了带空收据的「可删测试」，用户截到了原版的气泡。部署到 26.6.2 虚拟机（非交互）：认出 Dock 2427.6、23 个方法签名全部吻合、两个 hook 装上；同样放了「可删测试」后，对账把它加进第 2 页，自检报卸载器 69 个 App 里 1 个可删，正是它。用户在 26 虚拟机里看到 popover 照预期上屏、位置与内容都对，但「删除」没有画成默认按钮；锚点改成 nonactivating panel 后重新部署，单元测试锁住锚点的这几项（改前先失败）。改后用户看过，删除是蓝色的默认按钮，日志记的是 popover 窗口 `key true, application active true`。开发构建 20 秒没有输入就收起 Launchpad，点 popover 不算输入，所以那里的气泡最多停 20 秒。在复刻里点按钮真删、27 上的样子都没有试（MacBook 改装了 15）。
+- 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认 popover 的样子、第一下点按钮是否就生效，以及真删一个 App。
 
 ## 已知降级
 
@@ -252,7 +264,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 文本输入辅助进程不可用时（在「登录项」里关掉了它，或它反复退出），搜索与改名没有输入法，退回本地编辑。
 - 文本输入辅助进程只在 27.2 上验证过，macOS 26 上没有试过。
 - 改名的选区色固定为 15 深色外观下的蓝色，不随系统强调色变化。
-- 删除确认的气泡是照 15 的尺寸与文案画的，深浅色外观没有与 15 对照过（15.5 虚拟机里没有 App Store 的 App），按钮按下时没有高亮。网页 App 与快捷指令在 15 里用「移除」的文案，复刻一律写「删除」。
+- 删除确认是辅助进程弹的系统 `NSPopover`，样子随 26/27 的系统（玻璃材质、按钮形状），与 15 的不同。辅助进程不在时退回自己画的气泡，那是照 15 的尺寸画的平面近似：没有半透明材质，箭头与边框不连成一体，按钮按下时没有高亮。网页 App 与快捷指令在 15 里用「移除」的文案，复刻一律写「删除」。
 - 玻璃背景：打开期间切换深浅色或辅助功能里的透明度、对比度，要到下次打开才跟上（界面每次打开都重建，没有注册 Dock 的外观观察者）。
 - 背景是打开那一刻的静态截图，动态壁纸不会动（与 15 相同）；截不到时是 15 的径向渐变。
 - 快速放进文件夹后，文件夹图标的缩略图在库发布新布局、页面重建时就滚回顶部；15 要等下次打开再关上这个文件夹才滚回。

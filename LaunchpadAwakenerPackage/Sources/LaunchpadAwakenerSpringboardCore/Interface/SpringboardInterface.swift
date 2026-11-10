@@ -114,8 +114,12 @@ final class SpringboardInterface {
     }
 
     private var pointerTracking: PointerTracking = .none
-    /// The confirmation asked before deleting an application; while it shows it takes all input.
-    var deletionPanel: SpringboardDeletionPanel?
+    /// The confirmation asked before deleting an application; while it is asked it takes all input.
+    var deletionQuestion: SpringboardDeletionQuestion?
+    /// Makes the popover another process shows for a deletion: the host's, replaced in tests.
+    var makeHostedDeletionConfirmation: (SpringboardHostedDeletionConfirmationConfiguration) -> (any SpringboardHostedDeletionConfirmation)? = { configuration in
+        SpringboardHostSystem.host.makeHostedDeletionConfirmation(configuration: configuration)
+    }
     /// What the Dock's uninstaller answered for each bundle path, asked once per showing.
     var deletabilityByBundlePath: [String: Bool] = [:]
     /// Set while an icon is being dragged; see `SpringboardInterface+Dragging.swift`.
@@ -295,6 +299,9 @@ final class SpringboardInterface {
     /// is kept, a pending search is dropped.
     func prepareForHiding() {
         isGoing = true
+        // 15 took the deletion confirmation down as Launchpad started to go, as if Cancel had been pressed
+        // (`-[Springboard setVisible:slow:forGaming:reason:]`, 15.5 `0x100091764`).
+        answerDeletionPanel(.cancel)
         if let dragSession {
             if dragSession.isLeavingSearch {
                 // Going now: a search result still on its way out of the search fades out with everything
@@ -316,6 +323,8 @@ final class SpringboardInterface {
     }
 
     func tearDown() {
+        // A popover another process shows would outlive the springboard.
+        answerDeletionPanel(.cancel)
         searchTask?.cancel()
         cancelLongPress()
         mainPages.tearDown()
@@ -1035,8 +1044,8 @@ final class SpringboardInterface {
     // MARK: - Keys
 
     func handleKeyDown(keyCode: Int64, characters: String, modifierFlags: CGEventFlags) -> Action {
-        if deletionPanel != nil {
-            if let choice = SpringboardDeletionPanel.Choice(keyCode: keyCode, characters: characters, hasCommand: modifierFlags.contains(.maskCommand)) {
+        if deletionQuestion != nil {
+            if let choice = SpringboardDeletionChoice(keyCode: keyCode, characters: characters, hasCommand: modifierFlags.contains(.maskCommand)) {
                 answerDeletionPanel(choice)
             }
             return .none
@@ -1127,7 +1136,7 @@ final class SpringboardInterface {
         } else if folderPanel == nil, searchFieldLayer.hasFocus || remoteSearchField?.isComposing == true || searchEditor.editing.hasMarkedText {
             _ = forwardToRemoteSearchField() || offerKeyToInputMethod(isComposing: true, command: nil)
         }
-        guard renaming == nil, deletionPanel == nil else { return }
+        guard renaming == nil, deletionQuestion == nil else { return }
         let pages = frontPages
         pages.isJiggling = optionKeyJiggle.isJiggling(afterOptionIsDown: modifierFlags.contains(.maskAlternate), isJiggling: pages.isJiggling)
     }
@@ -1202,7 +1211,7 @@ final class SpringboardInterface {
 
     /// - Parameter clickCount: 2 for the second press of a double-click, and so on.
     func handleMouseDown(at containerPoint: CGPoint, timestamp: UInt64, modifierFlags: CGEventFlags = [], clickCount: Int64 = 1) -> Action {
-        if deletionPanel != nil {
+        if deletionQuestion != nil {
             pressWhileAskingToDelete(at: containerPoint)
             return .none
         }
@@ -1463,7 +1472,7 @@ final class SpringboardInterface {
     // MARK: - Scroll wheel and trackpad
 
     func handleScrollWheel(_ scrollWheel: SpringboardInputEvent.ScrollWheel, timestamp: UInt64) -> Action {
-        guard !isAnimatingFolder, dragSession == nil, deletionPanel == nil else { return .none }
+        guard !isAnimatingFolder, dragSession == nil, deletionQuestion == nil else { return .none }
         pages(for: folderPanel == nil ? .main : .folder).handleScrollWheel(scrollWheel, timestamp: timestamp)
         return .none
     }
@@ -1471,7 +1480,7 @@ final class SpringboardInterface {
     /// A three-finger swipe turns the pages in front one page, as 15's pager did for the main pages and
     /// an open folder alike.
     func handleNavigationSwipe(_ navigationSwipe: SpringboardInputEvent.NavigationSwipe) -> Action {
-        guard !isAnimatingFolder, dragSession == nil, deletionPanel == nil, let pageOffset = navigationSwipe.pageOffset else { return .none }
+        guard !isAnimatingFolder, dragSession == nil, deletionQuestion == nil, let pageOffset = navigationSwipe.pageOffset else { return .none }
         frontPages.turn(toPageAt: frontPages.currentPageIndex + pageOffset)
         return .none
     }

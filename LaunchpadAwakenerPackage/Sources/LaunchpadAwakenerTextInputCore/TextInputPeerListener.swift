@@ -76,13 +76,14 @@ final class TextInputPeerListener {
         peer = nil
     }
 
-    /// Reports a change to the Dock this serves, if one is connected.
-    func send(_ change: TextInputChange) {
+    /// Tells the Dock this serves, if one is connected: a change to the hosted field, or the button pressed in
+    /// the deletion confirmation.
+    func send(_ message: TextInputHelperMessage) {
         guard let peer else { return }
         do {
-            try peer.send(change)
+            try peer.send(message)
         } catch {
-            #log(.error, "Could not report a change to the Dock: \(error.localizedDescription, privacy: .public)")
+            #log(.error, "Could not tell the Dock something: \(error.localizedDescription, privacy: .public)")
         }
     }
 

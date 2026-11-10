@@ -15,6 +15,20 @@ public enum TextInputRequest: Codable, Sendable, Equatable {
     case setFocus(Bool)
     /// Commit any composing text and let the field go; answered with ``TextInputEnding``.
     case end
+    /// Show the confirmation for deleting an application, macOS 15's popover under its icon; answered with
+    /// ``DeletionConfirmationPresentation``.
+    case presentDeletionConfirmation(DeletionConfirmationConfiguration)
+    /// Close the confirmation, however it was answered.
+    case dismissDeletionConfirmation
+}
+
+/// What the helper tells the payload without being asked. One type for every message, because the payload
+/// reads its session through one handler.
+public enum TextInputHelperMessage: Codable, Sendable, Equatable {
+    /// The hosted field's text or its composing state changed.
+    case fieldChange(TextInputChange)
+    /// A button of the deletion confirmation was pressed. The popover stays up until the payload dismisses it.
+    case deletionConfirmationAnswer(DeletionConfirmationAnswer)
 }
 
 /// The field the payload asks the helper to host.

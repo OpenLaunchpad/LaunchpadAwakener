@@ -4,7 +4,7 @@ import QuartzCore
 import LaunchpadAwakenerSpringboardCore
 
 /// The springboard's host inside the Dock: the Dock's own window, layer classes, glass and uninstaller,
-/// the text input helper for the fields, and the Dock's preferences domain.
+/// the text input helper for the fields and the deletion confirmation, and the Dock's preferences domain.
 ///
 /// Holds no state of its own; everything is read from the Dock as it is asked for.
 final class DockSpringboardHost: SpringboardHost {
@@ -65,6 +65,10 @@ final class DockSpringboardHost: SpringboardHost {
 
     func makeHostedTextField(configuration: SpringboardHostedTextFieldConfiguration) -> (any SpringboardHostedTextField)? {
         SpringboardRemoteTextField(configuration: configuration)
+    }
+
+    func makeHostedDeletionConfirmation(configuration: SpringboardHostedDeletionConfirmationConfiguration) -> (any SpringboardHostedDeletionConfirmation)? {
+        SpringboardRemoteDeletionConfirmation(configuration: configuration)
     }
 
     /// The Dock is not an application input methods serve; the text input helper stands in.
@@ -136,3 +140,5 @@ final class DockSpringboardUninstaller: SpringboardApplicationUninstaller {
 extension DockGlassMaterial: SpringboardGlassBackground {}
 
 extension SpringboardRemoteTextField: SpringboardHostedTextField {}
+
+extension SpringboardRemoteDeletionConfirmation: SpringboardHostedDeletionConfirmation {}

@@ -62,6 +62,11 @@ final class StandaloneSpringboardHost: SpringboardHost {
         nil
     }
 
+    /// Nothing is deleted here: without an uninstaller, jiggle mode shows no close boxes.
+    func makeHostedDeletionConfirmation(configuration: SpringboardHostedDeletionConfirmationConfiguration) -> (any SpringboardHostedDeletionConfirmation)? {
+        nil
+    }
+
     var inputMethod: (any SpringboardInputMethod)? {
         StandaloneInputMethod.shared
     }

@@ -44,7 +44,7 @@
 
 ### Jiggle mode（抖动模式）
 
-长按图标或按住 Option 后，当前页面（文件夹开着时是文件夹里）的图标一起抖动的状态，可以接着拖动整理。15 的代码管它叫 `deleting`，因为 15 在这个状态下给 App Store 的 App 显示关闭按钮用来删除；复刻只做了抖动，没做删除。不要和 15 代码里的 `editing` 混淆：那是「正在按着或拖着图标」，与抖动无关。
+长按图标或按住 Option 后，当前页面（文件夹开着时是文件夹里）的图标一起抖动的状态，可以接着拖动整理。15 的代码管它叫 `deleting`，因为 15 在这个状态下给 App Store 的 App 显示关闭按钮用来删除；注入版照做，独立版只抖动、不显示关闭按钮。不要和 15 代码里的 `editing` 混淆：那是「正在按着或拖着图标」，与抖动无关。
 
 - **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardJiggle.swift`、`SpringboardPagedGrids.isJiggling`、[实现说明](Internal/LaunchpadReplica.md)「关键设计决策」
 

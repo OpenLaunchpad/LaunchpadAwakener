@@ -5,7 +5,8 @@ import OSToolbox
 
 /// Hosts the one field the payload asks for — the springboard's search field or an open folder's name,
 /// which are never edited at once — following macOS 15's `-[ECTIHelperDelegate _handleSetupMessage:forPeer:]`
-/// and `_handleSetupMiniViewMessage:forPeer:`.
+/// and `_handleSetupMiniViewMessage:forPeer:`. Also shows the confirmation for deleting an application, as
+/// 15's `com.apple.dock.ecap` service did (``DeletionConfirmationPopover``).
 ///
 /// The field lives in the Dock tile's mini view window, which can be key and is kept transparent on screen
 /// (``makeInvisibleOnScreen(_:)``). The payload shows that window's layer-hosting context in the Dock and
@@ -21,6 +22,7 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     private let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 25))
     private let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 25))
     private let fieldEditor = TextInputFieldEditor()
+    private let deletionConfirmation = DeletionConfirmationPopover()
     private var isSearchField = true
     private var lastReportedString = ""
     private var lastReportedHasMarkedText = false
@@ -48,12 +50,18 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
             self?.reportState(isEditingComplete: false)
         }
 
+        // Only the Dock closes the confirmation; a button just says which it was, as ecap's did.
+        deletionConfirmation.answerHandler = { [weak self] answer in
+            self?.peerListener.send(.deletionConfirmationAnswer(answer))
+        }
+
         peerListener.requestHandler = { [weak self] request in
             self?.handle(request)
         }
-        // The Dock went away: keep nothing composing and let the field go.
+        // The Dock went away: keep nothing composing, let the field go, and take the confirmation down.
         peerListener.peerDidEnd = { [weak self] in
             self?.end()
+            self?.deletionConfirmation.dismiss()
         }
         peerListener.undecodableRequestHandler = { [weak self] in
             self?.exitIfReplaced()
@@ -82,7 +90,20 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
             // The final text, composing text included, for a rename that ended while text was composing;
             // none when this field was never set up, as the text left is then another field's.
             return TextInputEnding(string: end())
+        case .presentDeletionConfirmation(let configuration):
+            return DeletionConfirmationPresentation(isShown: deletionConfirmation.present(configuration))
+        case .dismissDeletionConfirmation:
+            deletionConfirmation.dismiss()
+            restoreHostedFieldWindowAsKey()
+            return nil
         }
+    }
+
+    /// The popover's window took the key status from the field's while it showed; a field still hosted, the
+    /// search field say, gets it back so that the keys the Dock forwards land in it again.
+    private func restoreHostedFieldWindowAsKey() {
+        guard isHosting, let window = containerView.window else { return }
+        window.makeKey()
     }
 
     private func begin(with configuration: TextInputFieldConfiguration) -> TextInputHosting {
@@ -221,7 +242,7 @@ final class TextInputService: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         guard isEditingComplete || string != lastReportedString || hasMarkedText != lastReportedHasMarkedText else { return }
         lastReportedString = string
         lastReportedHasMarkedText = hasMarkedText
-        peerListener.send(TextInputChange(string: string, hasMarkedText: hasMarkedText, isEditingComplete: isEditingComplete))
+        peerListener.send(.fieldChange(TextInputChange(string: string, hasMarkedText: hasMarkedText, isEditingComplete: isEditingComplete)))
     }
 
     // MARK: - AppKit and text services

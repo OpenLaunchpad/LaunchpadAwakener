@@ -41,7 +41,7 @@ struct SpringboardDeletionReviewTests {
         let itemLayer = SpringboardItemLayer()
         itemLayer.configure(with: .application(Self.application), metrics: interface.metrics, scale: 2)
         interface.presentDeletionPanel(for: itemLayer, context: .main)
-        try #require(interface.deletionPanel != nil)
+        try #require(interface.deletionQuestion != nil)
 
         interface.answerDeletionPanel(.delete)
 

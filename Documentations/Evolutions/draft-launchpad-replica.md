@@ -3,10 +3,10 @@
 - **状态**: In Progress
 - **作者**: JH
 - **创建日期**: 2026-11-05
-- **最后更新**: 2026-11-09
+- **最后更新**: 2026-11-10
 - **所属愿景**: 无
 - **关联提案**: 无
-- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；拖动搜索结果在 `feature/drag-to-dock` 上实现、已合进 `main`，分支已删除（拖到 Dock 暂停，没有代码）；输入法见提案 0001；选中高亮的修复在 `fix/search-selection-highlight` 上实现、已合进 `main`，分支已删除；验证用原型在分支 `experiment/injection-prototype`
+- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；拖动搜索结果在 `feature/drag-to-dock` 上实现、已合进 `main`，分支已删除（拖到 Dock 暂停，没有代码）；输入法见提案 0001；选中高亮的修复在 `fix/search-selection-highlight` 上实现、已合进 `main`，分支已删除；删除确认改用真 `NSPopover` 在 `feature/deletion-popover` 上实现（worktree `.worktrees/LaunchpadAwakener-DeletionPopover`）；验证用原型在分支 `experiment/injection-prototype`
 - **配套文档**: [实现说明](../Internal/LaunchpadReplica.md)
 
 ## 摘要
@@ -209,10 +209,16 @@ final class SpringboardController {
    1. ✅ 三指轻扫翻页：读 Dock 收到的导航轻扫（手势事件，字段 110 为 16），照 15 的 `-[ECPagerLayer gesture:]` 每个方向有效的事件翻一页，主页与打开的文件夹都适用。
    2. ✅ 文件夹里的方向键导航，规则照 15 的 `-[ECSBGroupPager navigate:withEvent:]`。
    3. ✅ 新装 App 名字旁的蓝点，判据与画法照 15 的 `ECFlagLayer`。
-   4. ✅ 抖动模式的关闭按钮与删除 App Store 的 App。15 的确认气泡由 `com.apple.dock.ecap` 服务画，27.2 的 Dock.app 里已经没有这个服务，要自己画。
+   4. ✅ 抖动模式的关闭按钮与删除 App Store 的 App。15 的确认气泡由 `com.apple.dock.ecap` 服务画，27.2 的 Dock.app 里已经没有这个服务，要自己画。2026-11-10 起确认气泡改由辅助进程弹真的 `NSPopover`，见第 8 步。
    5. ◐ 把图标拖到 Dock 上加入 Dock，拖动搜索结果：2026-11-08 先留作后续项，同日接着做。拖动搜索结果已做：照 15 先退出搜索，再从 App 真正所在的地方接着拖（见决策日志），2026-11-08 在 MacBook 上交互验证。拖到 Dock 暂停，没有写代码（见决策日志）。
    6. ✅ 搜索框与改名框的完整文本编辑（光标、选区、复制粘贴、撤销已做；输入法由文本输入辅助进程接上，见提案 [0001 用常驻辅助进程给搜索框与改名框接上输入法](0001-input-method-helper.md)）：搜索框的光标与选区、输入法、复制粘贴、撤销。15 用 `com.apple.dock.ecti` 服务里的真 `NSTextField`，27.2 里这个服务也没有了，方案先逆向再定。
    7. 捏合要用户关掉 Spotlight 的捏合后在真机上试，agent 做不了，留给用户。
+   8. ✅ 删除确认改用真的 `NSPopover`（2026-11-10 用户对照 15.5 后要求），照 15 的 ecap 服务由文本输入辅助进程弹出：
+      - 辅助进程把一扇透明、不接点按的 16×16 锚点窗口（nonactivating panel，popover 窗口照抄它才能成为 key、把删除画成默认按钮）挪到图标中心，以中心 20×20 的矩形、下边弹出 popover，再把 popover 窗口抬到层级 106，直接盖在 Launchpad（27）与 Dock（29）之上。内容照 ecap 的 nib：宽 400，图标 64 点在左上 (10, 10)，问句 13 点、最宽 304，右下是取消与删除，删除是默认按钮；高度随 26/27 的按钮而定、不低于 84。外观跟随系统。
+      - 点按钮由窗口服务器直接送到辅助进程，它只回报按了哪个、不自己关。Return、Enter、Esc、Command-句号仍由 Dock 判断；点气泡以外照旧被吞掉。关闭总由 Dock 发起：按钮、按键，或 Launchpad 开始收起。
+      - 辅助进程回报的消息从「文本框变了」一种改成「文本框变了 / 按了删除确认的哪个按钮」两种，两边同批部署。
+      - 没有询问就采用的假设：辅助进程不可用或弹不出时，退回自己画的气泡；气泡显示中辅助进程退出，按取消处理；不像 15 那样等辅助进程关好再删，关闭请求发出就开始删除动画；关闭后若辅助进程正托管着搜索框，把键盘交还给那扇窗口。
+      - 验证：单元测试覆盖消息、辅助进程客户端与界面的状态切换；真机只有 26.6.2 虚拟机可用（MacBook 改装了 15）。用户在那里看过：popover 盖在 Launchpad 上、位置与内容对，锚点改成 nonactivating panel 后删除是蓝色的默认按钮。点按钮真删、27 上的样子没有试。
 
 **收尾时必须判断两件事**（判断结果写进决策日志，不允许沉默跳过）：
 
@@ -306,3 +312,6 @@ final class SpringboardController {
 | 2026-11-09 | 照 15 补上 Dock 的显隐。Launchpad 开着时给 Dock 设显示覆盖，开了自动隐藏的 Dock 也露出来。文件夹面板开始打开时，Dock 借自己的自动隐藏滑走；面板开始关闭、或 Launchpad 开始退场时滑回；显示覆盖等退场动画结束才撤。只改注入版，独立版的窗口本来就盖着 Dock | 用户发现 5 行的文件夹面板压进了 Dock，又在 15.5 虚拟机里截图确认：原版打开文件夹时 Dock 是收起来的。面板几何本来与 15 一致，底边落在给 Dock 留的那条线上；15 靠收起 Dock 腾出这块地方，27 的玻璃 Dock 又比 15 的高，所以只差这一步。逆向确认 15.5 用 `-[DockVisibility setOverrideShowType:]`、`forceDockHiddenWithReason:` 与对应的撤销方法做这件事，签名在 26.0 到 27.2 都没变（`/Volumes/RE/Dock/27.2/Notes/DockVisibilityAndFloor.md`）。撤销 Dock 没登记过的原因会让 Dock 崩溃，所以只在拿过的对象上撤，撤前确认原因还在。显示覆盖是用户选择一并补上的 |
 | 2026-11-09 | Dock 显隐收尾，直接提交在 `main` 上并推送；本提案仍是 In Progress | 用户在真机上看过文件夹开合时 Dock 滑走、滑回。文档：实现说明补了设计、验证，以及两条已知问题（侧放 Dock 时满 5 行文件夹的格子矮 6 点、Dock 藏起时指针推到屏幕边能否叫回它没验证）；独立版说明补了一句。没有调用方契约，不需要使用指南；没有新术语 |
 | 2026-11-09 | 对账改为「一个条目只代表它书签指向的那一份 App」：书签找不到、或那份 App 换了 bundle ID 就删；没有条目指着的副本当新 App 加入；读 bundle ID 每次从磁盘读。取代 2026-11-05「三者都成立才删」的规则 | 用户的布局里出现 9 个过期条目：原地换了 bundle ID 的 App 出现两次，删掉的旧版 Xcode、IDA 靠同 ID 的别的副本一直留着；同 ID 的几个 Xcode 还都打开同一个。用户批准修对账规则 |
+| 2026-11-10 | 删除确认改用真的 `NSPopover`，由文本输入辅助进程照 15 的 ecap 服务弹出（第 6 批第 8 步）：锚点窗口挪到图标中心，popover 窗口抬到层级 106 直接上屏，按钮由辅助进程回报、按键由 Dock 判断，关闭总由 Dock 发起。自己画的气泡只在辅助进程不可用时用 | 用户在 15.5 虚拟机里截到原版后指出自己画的气泡明显不对：原版是系统 popover，半透明材质透出壁纸，箭头与边框连成一体。用户看过「照 15 的样子自己画」与「改用真 NSPopover」的取舍后选了后者，接受它在 26/27 上是系统的玻璃样式、与 15 的样子不同。逆向 ecap 确认 15 的气泡就是上屏的真窗口，不经 `CALayerHost`，Dock 只吞掉气泡以外的点按、自己判断按键（`/Volumes/RE/Dock/15.5/Notes/LaunchpadFoldersAndDragging.md` 第 6.3 节） |
+| 2026-11-10 | 删除确认的锚点窗口改成 nonactivating panel | 用户在 26 虚拟机里看到 popover 正常弹出，但「删除」没有画成默认按钮。逆向 26.6 的 AppKit：popover 窗口弹出时照抄锚点窗口是否 nonactivating，不是活跃 App 的进程里只有 nonactivating 窗口能成为 key，而默认按钮只在 key 窗口里画成强调色；15 的锚点 mini view 窗口同样自称 nonactivating。改后 popover 窗口经辅助进程覆写的 `_stealKeyFocusWithOptions:` 成为 key，不动 Dock 的键盘焦点 |
+| 2026-11-10 | 删除确认改用真 `NSPopover` 收尾，第 6 批第 8 步完成：快进进 `main` 并推送，`feature/deletion-popover` 与它的 worktree 删除。本提案仍是 In Progress、不取号 | 用户在 26 虚拟机里看过改后的 popover 后要求收尾。第 6 批第 5 步的拖到 Dock 仍暂停，第 7 步的捏合仍待用户在真机上试。文档：实现说明改写了「删除 App」并补了辅助进程的新职责、目录树、验证与已知降级；项目 `CLAUDE.md` 同步了辅助进程的职责、消息文件与 15 虚拟机里造可删 App 的办法；术语表「抖动模式」一条更正了「复刻没做删除」的旧说法。没有给外部调用方的契约，不需要使用指南；没有新术语 |

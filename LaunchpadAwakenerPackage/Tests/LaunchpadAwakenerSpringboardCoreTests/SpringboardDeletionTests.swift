@@ -39,16 +39,16 @@ struct SpringboardDeletionTests {
     @Test(
         "Return and Enter delete; Escape and Command-period cancel; other keys do nothing",
         arguments: [
-            (SpringboardKeyCode.returnKey, "\r", false, SpringboardDeletionPanel.Choice.delete),
+            (SpringboardKeyCode.returnKey, "\r", false, SpringboardDeletionChoice.delete),
             (SpringboardKeyCode.keypadEnter, "\u{3}", false, .delete),
             (SpringboardKeyCode.escape, "\u{1B}", false, .cancel),
             (Int64(47), ".", true, .cancel),
             (Int64(47), ".", false, nil),
             (Int64(0), "a", false, nil),
-        ] as [(Int64, String, Bool, SpringboardDeletionPanel.Choice?)]
+        ] as [(Int64, String, Bool, SpringboardDeletionChoice?)]
     )
-    func keys(keyCode: Int64, characters: String, hasCommand: Bool, expectedChoice: SpringboardDeletionPanel.Choice?) {
-        #expect(SpringboardDeletionPanel.Choice(keyCode: keyCode, characters: characters, hasCommand: hasCommand) == expectedChoice)
+    func keys(keyCode: Int64, characters: String, hasCommand: Bool, expectedChoice: SpringboardDeletionChoice?) {
+        #expect(SpringboardDeletionChoice(keyCode: keyCode, characters: characters, hasCommand: hasCommand) == expectedChoice)
     }
 
     @Test("a deleted application leaves its page, and a folder left with one application dissolves")

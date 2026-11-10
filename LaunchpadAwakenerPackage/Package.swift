@@ -289,7 +289,7 @@ let package = Package(
         ),
 
         // The text input channel: its messages sent through real XPC inside this process, an anonymous
-        // listener standing in for the helper's Mach service. Nothing here creates a window.
+        // listener standing in for the helper's Mach service. Nothing here puts a window on screen.
         .testTarget(
             name: "LaunchpadAwakenerTextInputCoreTests",
             dependencies: ["LaunchpadAwakenerTextInputCore", "LaunchpadAwakenerShared", "TestingSupport"]

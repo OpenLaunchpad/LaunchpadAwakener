@@ -47,7 +47,7 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 | `LaunchpadAwakener/` | App 外壳：`main.swift` 建 `ApplicationDelegate` 并运行。菜单栏 App，窗口是控制面板（见[控制面板实现说明](Documentations/Internal/ControlPanel.md)） |
 | `LaunchpadAwakenerDaemon/` | 特权 daemon 的 `main.swift`，两行 |
 | `LaunchpadAwakenerPayload/` | payload 的 `main.m`，提供两条注入入口 |
-| `LaunchpadAwakenerTextInput/` | 文本输入辅助进程的 `main.swift`：嵌在 App 里的 LaunchAgent，替 Launchpad 托管搜索框与改名框，好让输入法能用 |
+| `LaunchpadAwakenerTextInput/` | 文本输入辅助进程的 `main.swift`：嵌在 App 里的 LaunchAgent，替 Launchpad 托管搜索框与改名框，好让输入法能用；也替它弹删除 App 的确认 popover |
 | `LaunchpadAwakenerStandalone/` | 独立版 App「Launchpad」的外壳：只有 `main.swift` 与图标 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerShared` | 服务名、版本、路径，以及 payload 与文本输入辅助进程之间的 `Codable` 消息。**不依赖任何东西** |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPrivateInterfaces` | 只有头文件：IconServices、IconFoundation、SkyLight、QuartzCore 导出的私有类的声明，供直接调用。不引入 AppKit |
@@ -59,7 +59,7 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerDaemonCore` | 组装特权 XPC 服务端 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore` | Launchpad 本身：布局库与界面层。经宿主接口 `SpringboardHost` 拿窗口、图层类、壁纸这些，不认识 Dock，不链接 AppKit |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore` | 跑在 Dock 里、围着 Launchpad 的代码：Dock 宿主、hook 声明、入口 |
-| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore` | 文本输入辅助进程：经系统 Swift XPC 接口（`XPCListener`）的服务、托管的 `NSTextField`。只有它链接 AppKit 的私有部分 |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore` | 文本输入辅助进程：经系统 Swift XPC 接口（`XPCListener`）的服务、托管的 `NSTextField`、删除确认的 `NSPopover`。只有它链接 AppKit 的私有部分 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerStandaloneCore` | 独立版的宿主：盖住全屏的窗口与事件、壁纸、图标样式、看门狗、设置窗口。链接 AppKit |
 
 模块按「谁链接它」划分。App 不能链接 daemon 的特权依赖，payload 要尽量小 —— 它会被映射进一个并没有请求它的进程。
@@ -131,7 +131,7 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 - **改 App** —— 重新运行即可。
 - **改 daemon** —— 重新编译后运行 App，它会检测到版本不一致并自动注销重装。前提是**递增了 `InjectionServiceIdentity.daemonVersion`**；不递增这套机制不会触发，内存里还是旧 daemon。
 - **改 payload** —— payload 是加载进目标进程的镜像，卸不掉。必须让目标进程重启（`killall <目标>`）才能换成新版本。App 的窗口会把 Dock 里的旧 payload 标成「older build」（按镜像 UUID 比对，不用手动递增版本号），窗口与菜单栏里的「Restart Dock」重启后会自动再注入。
-- **改文本输入辅助进程** —— 它由 launchd 按需拉起后一直常驻。部署换掉它的可执行文件后，它在下一次打开 Launchpad 时自行退出（那一次没有输入法），再下一次 launchd 起的就是新版本；想立刻换就 `pkill -f LaunchpadAwakenerTextInput`，或在控制面板「Input method helper」一行按「Restart」。App 启动时发现它的可执行文件在进程启动后被换过（重新构建、覆盖安装），会自动结束它。payload 与辅助进程之间的消息在 `LaunchpadAwakenerShared/TextInputMessages.swift`，两边同批部署；改了消息格式时，可执行文件已被换掉的旧辅助进程收到解不开的消息也会自行退出。
+- **改文本输入辅助进程** —— 它由 launchd 按需拉起后一直常驻。部署换掉它的可执行文件后，它在下一次打开 Launchpad 时自行退出（那一次没有输入法），再下一次 launchd 起的就是新版本；想立刻换就 `pkill -f LaunchpadAwakenerTextInput`，或在控制面板「Input method helper」一行按「Restart」。App 启动时发现它的可执行文件在进程启动后被换过（重新构建、覆盖安装），会自动结束它。payload 与辅助进程之间的消息在 `LaunchpadAwakenerShared/TextInputMessages.swift` 与 `DeletionConfirmationMessages.swift`，两边同批部署；改了消息格式时，可执行文件已被换掉的旧辅助进程收到解不开的消息也会自行退出。
 - **改共用模块（`LaunchpadAwakenerSpringboardCore`）** —— 两版都受影响：注入版照「改 payload」重启 Dock，独立版照下一条重新打开。
 - **改独立版** —— 它收起后常驻，部署前先让它退出（`tell application "Launchpad" to quit`），换掉后再打开才是新版本。
 

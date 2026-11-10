@@ -20,6 +20,16 @@ struct TextInputMessageTests {
         screenTop: 61
     )
 
+    static let deletionConfirmationConfiguration = DeletionConfirmationConfiguration(
+        iconPNGData: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF]),
+        bundlePath: "/Applications/可删测试.app",
+        message: "确定要删除应用程序“可删测试”吗？",
+        cancelButtonTitle: "取消",
+        deleteButtonTitle: "删除",
+        iconCenterX: 742.5,
+        iconCenterY: 318.25
+    )
+
     /// Answers every message of `Message` with the message itself, so what comes back went through XPC's
     /// encoding twice.
     private static func echo<Message: Codable & Equatable & Sendable>(_ message: Message) async throws -> Message {
@@ -54,9 +64,27 @@ struct TextInputMessageTests {
         .setFocus(true),
         .setFocus(false),
         .end,
+        .presentDeletionConfirmation(deletionConfirmationConfiguration),
+        .presentDeletionConfirmation(DeletionConfirmationConfiguration(
+            iconPNGData: nil,
+            bundlePath: "/Applications/Pages.app",
+            message: "Are you sure you want to delete the application “Pages”?",
+            cancelButtonTitle: "Cancel",
+            deleteButtonTitle: "Delete",
+            iconCenterX: -512,
+            iconCenterY: 0
+        )),
+        .dismissDeletionConfirmation,
     ])
     func requestRoundTrip(request: TextInputRequest) async throws {
         #expect(try await Self.echo(request) == request)
+    }
+
+    @Test("the helper's answer to showing the deletion confirmation comes back unchanged", arguments: [true, false])
+    func deletionConfirmationPresentationRoundTrip(isShown: Bool) async throws {
+        let presentation = DeletionConfirmationPresentation(isShown: isShown)
+
+        #expect(try await Self.echo(presentation) == presentation)
     }
 
     @Test("the helper's answer to begin comes back unchanged", arguments: [
@@ -76,12 +104,14 @@ struct TextInputMessageTests {
         #expect(try await Self.echo(ending) == ending)
     }
 
-    @Test("a change the helper reports comes back unchanged", arguments: [
-        TextInputChange(string: "にほ", hasMarkedText: true, isEditingComplete: false),
-        TextInputChange(string: "Notes", hasMarkedText: false, isEditingComplete: true),
+    @Test("what the helper tells the Dock comes back unchanged", arguments: [
+        TextInputHelperMessage.fieldChange(TextInputChange(string: "にほ", hasMarkedText: true, isEditingComplete: false)),
+        .fieldChange(TextInputChange(string: "Notes", hasMarkedText: false, isEditingComplete: true)),
+        .deletionConfirmationAnswer(.delete),
+        .deletionConfirmationAnswer(.cancel),
     ])
-    func changeRoundTrip(change: TextInputChange) async throws {
-        #expect(try await Self.echo(change) == change)
+    func helperMessageRoundTrip(message: TextInputHelperMessage) async throws {
+        #expect(try await Self.echo(message) == message)
     }
 
     /// The helper has to apply `setString` and `setFocus` in the order the Dock sent them; one-way messages

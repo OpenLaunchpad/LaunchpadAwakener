@@ -44,6 +44,9 @@ package protocol SpringboardHost: AnyObject, Sendable {
     func makeGlassBackground(frame: CGRect, scale: CGFloat, backdropGroupName: String) -> (any SpringboardGlassBackground)?
     /// A text field another process hosts so that input methods work in it; nil edits the field in place.
     func makeHostedTextField(configuration: SpringboardHostedTextFieldConfiguration) -> (any SpringboardHostedTextField)?
+    /// The confirmation asked before deleting an application, shown by another process the way 15's Dock had
+    /// its ecap service show it; nil where no other process shows it, and the springboard draws its own.
+    func makeHostedDeletionConfirmation(configuration: SpringboardHostedDeletionConfirmationConfiguration) -> (any SpringboardHostedDeletionConfirmation)?
     /// The system's input methods for the fields edited in place, where the host's window takes the
     /// keyboard itself; nil where they are out of reach, as in the Dock.
     var inputMethod: (any SpringboardInputMethod)? { get }
@@ -280,6 +283,46 @@ extension SpringboardHostedTextField {
     }
 }
 
+/// What the confirmation asked before deleting an application shows, and where.
+package struct SpringboardHostedDeletionConfirmationConfiguration {
+    /// The icon as the springboard draws it; nil leaves the other process the bundle's own icon.
+    package let icon: CGImage?
+    package let bundleURL: URL
+    package let message: String
+    package let cancelButtonTitle: String
+    package let deleteButtonTitle: String
+    /// The icon's centre on screen, from the top left of the main display; the popover hangs below it.
+    package let screenIconCenter: CGPoint
+
+    package init(icon: CGImage?, bundleURL: URL, message: String, cancelButtonTitle: String, deleteButtonTitle: String, screenIconCenter: CGPoint) {
+        self.icon = icon
+        self.bundleURL = bundleURL
+        self.message = message
+        self.cancelButtonTitle = cancelButtonTitle
+        self.deleteButtonTitle = deleteButtonTitle
+        self.screenIconCenter = screenIconCenter
+    }
+}
+
+/// macOS 15's confirmation for deleting an application, shown by another process: a popover whose own
+/// window goes on screen over the springboard's, as the Dock's ecap service showed it. Clicks on it never
+/// reach the springboard; the keys still do, and the springboard answers them itself. Only the springboard
+/// closes it.
+@MainActor
+package protocol SpringboardHostedDeletionConfirmation: AnyObject {
+    var configuration: SpringboardHostedDeletionConfirmationConfiguration { get }
+    /// Called with the button pressed in the popover, which stays up until it is dismissed.
+    var answerHandler: ((SpringboardDeletionChoice) -> Void)? { get set }
+    /// Called when the popover could not be shown; the springboard asks with its own instead.
+    var presentationDidFail: (() -> Void)? { get set }
+    /// Called when the popover went away by itself, with the process that showed it.
+    var interruptionHandler: (() -> Void)? { get set }
+
+    func present()
+    /// Closes the popover, however the question was answered.
+    func dismiss()
+}
+
 /// The system's input methods, for a host whose own window takes the keyboard: the springboard offers
 /// them the keys that would type into a field, and every key while they compose.
 @MainActor
@@ -316,9 +359,9 @@ package protocol SpringboardInputMethodClient: AnyObject {
 
 // MARK: - Until a host is chosen
 
-/// The host until one is chosen, as in unit tests: no window, no wallpaper, no glass, no hosted fields, no
-/// uninstaller and none of the Dock's resources, a Dock of the default size, and the replicas of the Dock's
-/// layer classes.
+/// The host until one is chosen, as in unit tests: no window, no wallpaper, no glass, no hosted fields or
+/// deletion confirmation, no uninstaller and none of the Dock's resources, a Dock of the default size, and
+/// the replicas of the Dock's layer classes.
 final class DetachedSpringboardHost: SpringboardHost {
     nonisolated init() {}
 
@@ -367,6 +410,10 @@ final class DetachedSpringboardHost: SpringboardHost {
     }
 
     func makeHostedTextField(configuration: SpringboardHostedTextFieldConfiguration) -> (any SpringboardHostedTextField)? {
+        nil
+    }
+
+    func makeHostedDeletionConfirmation(configuration: SpringboardHostedDeletionConfirmationConfiguration) -> (any SpringboardHostedDeletionConfirmation)? {
         nil
     }
 

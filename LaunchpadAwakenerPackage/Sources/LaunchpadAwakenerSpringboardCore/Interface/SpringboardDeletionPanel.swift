@@ -3,31 +3,33 @@ import CoreText
 import Foundation
 import QuartzCore
 
-/// The confirmation macOS 15 asked for before deleting an application: a popover under the icon from the
-/// Dock's `com.apple.dock.ecap` service, with the icon, the question, Cancel, and Delete as the default
-/// button. 27's Dock no longer has that service, so this draws it with layers in the springboard. The
-/// content is the service's 400 × 84 view: the icon 64 points at 10, 10 from the top left, the question
-/// in 13-point text beside it, the buttons at the bottom right. Nothing behind it dims; while it shows it
-/// takes every click and key (`-[ECAlertPanel keyDown:]`, 15.5 `0x10007BD04`).
-final class SpringboardDeletionPanel: CALayer {
-    enum Choice: Sendable, Equatable {
-        case delete
-        case cancel
+/// The answer to the confirmation asked before deleting an application.
+package enum SpringboardDeletionChoice: Sendable, Equatable {
+    case delete
+    case cancel
 
-        /// Return and Enter delete; Escape and Command-period cancel; nil for any other key.
-        init?(keyCode: Int64, characters: String, hasCommand: Bool) {
-            switch keyCode {
-            case SpringboardKeyCode.returnKey, SpringboardKeyCode.keypadEnter:
-                self = .delete
-            case SpringboardKeyCode.escape:
-                self = .cancel
-            default:
-                guard hasCommand, characters == "." else { return nil }
-                self = .cancel
-            }
+    /// Return and Enter delete; Escape and Command-period cancel; nil for any other key. 15's Dock read
+    /// these itself, never handing them to the popover (`-[ECAlertPanel keyDown:]`, 15.5 `0x10007BD04`).
+    init?(keyCode: Int64, characters: String, hasCommand: Bool) {
+        switch keyCode {
+        case SpringboardKeyCode.returnKey, SpringboardKeyCode.keypadEnter:
+            self = .delete
+        case SpringboardKeyCode.escape:
+            self = .cancel
+        default:
+            guard hasCommand, characters == "." else { return nil }
+            self = .cancel
         }
     }
+}
 
+/// The confirmation macOS 15 asked for before deleting an application, drawn with layers in the
+/// springboard for when no other process shows the real popover (``SpringboardHostedDeletionConfirmation``).
+/// 15's was a popover under the icon from the Dock's `com.apple.dock.ecap` service, with the icon, the
+/// question, Cancel, and Delete as the default button. The content is the service's 400 × 84 view: the icon
+/// 64 points at 10, 10 from the top left, the question in 13-point text beside it, the buttons at the bottom
+/// right. Nothing behind it dims; while it shows it takes every click and key.
+final class SpringboardDeletionPanel: CALayer {
     static let bodySize = CGSize(width: 400, height: 84)
     static let arrowHeight: CGFloat = 13
     static let arrowHalfWidth: CGFloat = 13
@@ -61,24 +63,14 @@ final class SpringboardDeletionPanel: CALayer {
         }
     }
 
-    /// The application being asked about, and where its icon is.
-    struct Target {
-        let application: LaunchpadApplication
-        let context: SpringboardInterface.GridContext
-        weak var itemLayer: SpringboardItemLayer?
-    }
-
-    /// Nil only on the copies Core Animation makes to animate.
-    let target: Target?
-
     private let bubbleLayer = CAShapeLayer()
     private let iconLayer = CALayer()
     private let messageLayer = CATextLayer()
     private let cancelButtonLayer = CALayer()
     private let deleteButtonLayer = CALayer()
 
-    init(application: LaunchpadApplication, itemLayer: SpringboardItemLayer, context: SpringboardInterface.GridContext, layout: Layout, scale: CGFloat) {
-        target = Target(application: application, context: context, itemLayer: itemLayer)
+    /// - Parameter iconContents: The icon's image, as the item layer shows it.
+    init(applicationTitle: String, iconContents: Any?, layout: Layout, scale: CGFloat) {
         super.init()
         let isDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
         let textColor = isDark ? CGColor(gray: 1, alpha: 0.9) : CGColor(gray: 0, alpha: 0.85)
@@ -103,14 +95,14 @@ final class SpringboardDeletionPanel: CALayer {
 
         let contentTop = Self.bodySize.height - Self.contentInset
         iconLayer.frame = CGRect(x: Self.contentInset, y: contentTop - Self.iconSide, width: Self.iconSide, height: Self.iconSide)
-        iconLayer.contents = itemLayer.imageLayer.contents
+        iconLayer.contents = iconContents
         iconLayer.contentsGravity = .resizeAspect
         iconLayer.contentsScale = scale
         addSublayer(iconLayer)
 
         let messageX = Self.contentInset + Self.iconSide + Self.contentInset
         messageLayer.frame = CGRect(x: messageX, y: Self.buttonInset + Self.buttonHeight + 4, width: Self.messageMaximumWidth, height: contentTop - (Self.buttonInset + Self.buttonHeight + 4))
-        messageLayer.string = SpringboardDeletionStrings.message(forApplicationNamed: application.title)
+        messageLayer.string = SpringboardDeletionStrings.message(forApplicationNamed: applicationTitle)
         messageLayer.font = font
         messageLayer.fontSize = CTFontGetSize(font)
         messageLayer.foregroundColor = textColor
@@ -138,7 +130,6 @@ final class SpringboardDeletionPanel: CALayer {
     }
 
     override init(layer: Any) {
-        target = (layer as? SpringboardDeletionPanel)?.target
         super.init(layer: layer)
     }
 
@@ -147,7 +138,7 @@ final class SpringboardDeletionPanel: CALayer {
     }
 
     /// The button under `point`, a point in this layer.
-    func choice(at point: CGPoint) -> Choice? {
+    func choice(at point: CGPoint) -> SpringboardDeletionChoice? {
         if deleteButtonLayer.frame.contains(point) {
             return .delete
         }
