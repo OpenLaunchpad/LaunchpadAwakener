@@ -1,9 +1,10 @@
-# Draft - 用 ObjCRuntimeToolbox 改写 hook 与私有调用
+# 0006 - 用 ObjCRuntimeToolbox 改写 hook 与私有调用
 
-- **状态**: In Progress
+- **状态**: Implemented
 - **创建日期**: 2026-11-09
-- **最后更新**: 2026-11-09
+- **最后更新**: 2026-11-10
 - **实现分支**: LaunchpadAwakener `feature/objc-runtime-toolbox`；FrameworkToolbox `feature/objc-runtime-method-families`（0.17.2）、`feature/runtime-proxy-coverage`（0.18.0）
+- **配套文档**: 同步更新了 [Launchpad 复刻的实现说明](../Internal/LaunchpadReplica.md) 里校验签名的一段，以及项目 `CLAUDE.md` 的结构表、私有方法的写法与「加 hook」一节
 
 ## 摘要
 
@@ -112,3 +113,4 @@ payload、独立版与文本输入辅助进程里调用 Objective-C 私有方法
 | 2026-11-09 | 文字图层也改由 proxy 的 `init?()` 构造（原来按 `CATextLayer.Type` 直接调 `init`） | 两个 `init` 本来就在 23 个必查方法里，靠手写的签名条目登记；改成 proxy 后由声明推出，清单与数目不变 |
 | 2026-11-09 | 卸载的回调闭包标 `@Sendable` | 回调在 XPC 或全局队列上到来；不标的话，它会被当成随所在函数隔离在主 actor 上的闭包 |
 | 2026-11-09 | 第二轮测试机验证完成，实现完成，待用户验收后收尾 | MacBook 27.2 与 26.6.2 虚拟机：23 个方法全部吻合、两个 hook 装上，环境对象在两个版本的类名下都核对通过，图标样式、卸载器、网格、图标、壁纸与 27.2 的玻璃都与改前一致；独立版自检照旧。代码里的类型编码字面量为 0，也不再调用 `DynamicObject`。真正删除应用要交互，没有验证 |
+| 2026-11-10 | 落地：编号 0006，状态 Implemented，快进进 `main`，与 AppKit 重写同一批推送、排在它前面 | 摘要承诺的都已实现：hook、Dock 的类与经环境对象拿到的对象全部由声明推出编码，系统框架的私有类按头文件直接调用，HookKit 已删。落地前的验证在两条线合起来的最终代码上跑：两个 scheme 的 `RunScript.sh` 构建与包的全部测试。真正删除应用要交互，仍没有验证，留作后续。文档判断：Launchpad 复刻的实现说明与 `CLAUDE.md` 已随实现更新，不需要另写实现说明或使用指南；没有新的项目术语，`@RuntimeClassProxy` 这类是工具箱的 API 名，术语表不动 |
