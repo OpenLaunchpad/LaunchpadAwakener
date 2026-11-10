@@ -21,6 +21,11 @@ public enum TextInputServiceIdentity {
     /// `SMAppService.agent(plistName:)` takes; the build generates the file under this name.
     public static var agentPropertyListName: String { "\(machServiceName).plist" }
 
+    /// The helper's executable, relative to the app bundle's root: the LaunchAgent's `BundleProgram`, which
+    /// the build script that writes its property list spells the same way. The helper's bundle identifier
+    /// is ``machServiceName``, from the same build setting.
+    public static let helperBundleProgram = "Contents/Library/LoginItems/LaunchpadAwakenerTextInput.app/Contents/MacOS/LaunchpadAwakenerTextInput"
+
     /// Signing identifier of the only peer the helper accepts: the Dock, which also has to be platform code,
     /// part of the system. Checked by libxpc on every message, so neither another process nor a recycled
     /// process identifier gets the typed text.

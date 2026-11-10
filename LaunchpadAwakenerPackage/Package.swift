@@ -278,7 +278,7 @@ let package = Package(
         // anything inside the Dock, so neither is exercised here.
         .testTarget(
             name: "LaunchpadAwakenerAppCoreTests",
-            dependencies: ["LaunchpadAwakenerAppCore"]
+            dependencies: ["LaunchpadAwakenerAppCore", "LaunchpadAwakenerShared"]
         ),
 
         // The Dock's side: the build profiles, read from the Dock binaries' facts, never from a live Dock, and

@@ -104,8 +104,8 @@ public final class TargetProcessMonitor: @unchecked Sendable {
     /// depend on the monitor having been switched on, and reading ``trackedProcessIdentifiers``
     /// instead would silently do nothing whenever it has not.
     public func currentlyRunningTargetProcessIdentifiers() -> [pid_t] {
-        Self.allProcessIdentifiers().filter { processIdentifier in
-            guard let executablePath = Self.executablePath(forProcessIdentifier: processIdentifier) else { return false }
+        ProcessTable.allProcessIdentifiers().filter { processIdentifier in
+            guard let executablePath = ProcessTable.executablePath(ofProcessIdentifier: processIdentifier) else { return false }
             return matches(executablePath: executablePath)
         }
     }
@@ -158,41 +158,5 @@ public final class TargetProcessMonitor: @unchecked Sendable {
         }
         exitSourcesByProcessIdentifier[processIdentifier] = exitSource
         exitSource.activate()
-    }
-
-    // MARK: - Process enumeration
-
-    private static func allProcessIdentifiers() -> [pid_t] {
-        let requiredByteCount = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
-        guard requiredByteCount > 0 else { return [] }
-
-        // proc_listpids reports a byte count, not an element count. Round up by one element so a
-        // process that spawns between the sizing call and the fetching call still fits.
-        let capacity = Int(requiredByteCount) / MemoryLayout<pid_t>.size + 1
-        var identifiers = [pid_t](repeating: 0, count: capacity)
-        let writtenByteCount = proc_listpids(
-            UInt32(PROC_ALL_PIDS),
-            0,
-            &identifiers,
-            Int32(capacity * MemoryLayout<pid_t>.size)
-        )
-        guard writtenByteCount > 0 else { return [] }
-
-        let writtenElementCount = Int(writtenByteCount) / MemoryLayout<pid_t>.size
-        // The kernel zero-fills unused slots; a zero identifier is never a real process.
-        return identifiers.prefix(writtenElementCount).filter { $0 != 0 }
-    }
-
-    private static func executablePath(forProcessIdentifier processIdentifier: pid_t) -> String? {
-        // PROC_PIDPATHINFO_MAXSIZE is a C macro, so it does not cross into Swift. Its definition is
-        // 4 * MAXPATHLEN, and proc_pidpath rejects anything smaller.
-        var pathBuffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        let pathLength = proc_pidpath(processIdentifier, &pathBuffer, UInt32(pathBuffer.count))
-        guard pathLength > 0 else { return nil }
-        // proc_pidpath returns the byte count it wrote, excluding the terminator, so decoding
-        // exactly that many bytes avoids both the deprecated array overload of String(cString:) and
-        // any dependence on the terminator being where we expect.
-        let pathBytes = pathBuffer.prefix(Int(pathLength)).map { UInt8(bitPattern: $0) }
-        return String(decoding: pathBytes, as: UTF8.self)
     }
 }
