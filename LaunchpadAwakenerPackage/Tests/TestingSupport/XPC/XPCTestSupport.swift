@@ -1,23 +1,24 @@
 import Foundation
 import Synchronization
-import Testing
 import XPC
 
 /// Values a handler on an XPC queue hands to the test, behind a lock.
-final class Recorder<Element: Sendable>: Sendable {
+public final class Recorder<Element: Sendable>: Sendable {
     private let elements = Mutex<[Element]>([])
 
-    func append(_ element: Element) {
+    public init() {}
+
+    public func append(_ element: Element) {
         elements.withLock { $0.append(element) }
     }
 
-    var recorded: [Element] {
+    public var recorded: [Element] {
         elements.withLock { $0 }
     }
 }
 
-/// Sends `message` and waits for the reply, decoded as `Reply`.
-func sendExpectingReply<Message: Encodable, Reply: Decodable & Sendable>(
+/// Sends `message` over `session` and waits for the reply, decoded as `Reply`.
+public func sendExpectingReply<Message: Encodable, Reply: Decodable & Sendable>(
     _ message: Message,
     over session: XPCSession,
     as replyType: Reply.Type = Reply.self,
@@ -35,9 +36,9 @@ func sendExpectingReply<Message: Encodable, Reply: Decodable & Sendable>(
 }
 
 /// Polls `condition` on the main actor until it holds or `timeout` runs out. XPC delivers on its own queues,
-/// so a test that waits for a cancellation it cannot await waits this way.
+/// so a test that waits for something it cannot await — a cancellation, a one-way message — waits this way.
 @MainActor
-func waitUntil(timeout: Duration = .seconds(5), _ condition: @MainActor () -> Bool) async -> Bool {
+public func waitUntil(timeout: Duration = .seconds(5), _ condition: @MainActor () -> Bool) async -> Bool {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: timeout)
     while clock.now < deadline {

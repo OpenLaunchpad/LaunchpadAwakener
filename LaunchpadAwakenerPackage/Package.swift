@@ -281,17 +281,18 @@ let package = Package(
             dependencies: ["LaunchpadAwakenerAppCore"]
         ),
 
-        // The Dock's side: the build profiles. Read from the Dock binaries' facts, never from a live Dock.
+        // The Dock's side: the build profiles, read from the Dock binaries' facts, never from a live Dock, and
+        // the client of the text input helper, against an anonymous XPC listener in the test process.
         .testTarget(
             name: "LaunchpadAwakenerPayloadCoreTests",
-            dependencies: ["LaunchpadAwakenerPayloadCore"]
+            dependencies: ["LaunchpadAwakenerPayloadCore", "TestingSupport"]
         ),
 
         // The text input channel: its messages sent through real XPC inside this process, an anonymous
         // listener standing in for the helper's Mach service. Nothing here creates a window.
         .testTarget(
             name: "LaunchpadAwakenerTextInputCoreTests",
-            dependencies: ["LaunchpadAwakenerTextInputCore", "LaunchpadAwakenerShared"]
+            dependencies: ["LaunchpadAwakenerTextInputCore", "LaunchpadAwakenerShared", "TestingSupport"]
         ),
     ]
 )

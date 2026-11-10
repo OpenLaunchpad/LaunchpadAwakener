@@ -1,6 +1,7 @@
 import Foundation
 import LaunchpadAwakenerShared
 import Testing
+import TestingSupport
 import XPC
 @testable import LaunchpadAwakenerTextInputCore
 

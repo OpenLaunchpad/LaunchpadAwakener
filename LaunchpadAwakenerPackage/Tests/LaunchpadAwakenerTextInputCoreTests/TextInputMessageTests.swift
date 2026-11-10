@@ -1,6 +1,7 @@
 import Foundation
 import LaunchpadAwakenerShared
 import Testing
+import TestingSupport
 import XPC
 
 /// The messages between the payload and the text input helper, sent through real XPC in this process: an

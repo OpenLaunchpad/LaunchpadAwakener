@@ -36,7 +36,7 @@ payload 与文本输入辅助进程之间的通道（[0001](0001-input-method-he
 ### 两端
 
 - **辅助进程**：连接管理放在不碰 AppKit 的 `TextInputPeerListener`，`TextInputService` 只管托管的文本框。它用 `XPCListener(service:targetQueue: .main, incomingSessionHandler:)` 监听原来的 Mach 服务名，每个接进来的 session 在激活前设好签名要求与主队列，交给一个 `XPCPeerHandler`。测试里用同一个类型匿名监听、不设签名要求（`PeerPolicy.anyPeer`）。「先发来一条合法消息才接替旧连接」不变：处理者收到的消息来自另一个 session 时，取消旧的、换成新的。当前 Dock 的 session 取消时结束托管；不是当前 Dock 的 session 因签名不符被取消时记一条拒绝日志。
-- **payload**：`XPCSession(machService:targetQueue: .main, incomingMessageHandler:cancellationHandler:)`。session 不像连接那样能在对方退出后继续用：辅助进程一退出 session 就失效（`session.h`：「system will make no attempt to reestablish the connection」），所以取消回调里丢掉它、通知界面辅助进程走了，下一次 `begin` 建新 session，launchd 照旧按需拉起辅助进程。`TextInputHelperClient` 对界面层的接口（`begin(…completion:)`、`setString`、`setFocus`、`end(completion:)`、`post`）不变，`SpringboardRemoteTextField` 不用改。
+- **payload**：`XPCSession(machService:targetQueue: .main, incomingMessageHandler:cancellationHandler:)`；测试里改连匿名监听的 endpoint（`TextInputHelperClient.Destination`）。回调在主队列上直接进主 actor，万一不在主线程就改为跳一次，绝不在 Dock 里断言崩溃。session 不像连接那样能在对方退出后继续用：辅助进程一退出 session 就失效（`session.h`：「system will make no attempt to reestablish the connection」），所以取消回调里丢掉它、通知界面辅助进程走了，下一次 `begin` 建新 session，launchd 照旧按需拉起辅助进程。`TextInputHelperClient` 对界面层的接口（`begin(…completion:)`、`setString`、`setFocus`、`end(completion:)`、`post`）不变，`SpringboardRemoteTextField` 不用改。
 
 ### 没有询问就采用的假设
 
@@ -49,11 +49,12 @@ payload 与文本输入辅助进程之间的通道（[0001](0001-input-method-he
 
 ### 测试与验证
 
-- 新增 `LaunchpadAwakenerTextInputCoreTests`，在测试进程里用匿名监听（`XPCListener(targetQueue:incomingSessionHandler:)` 加 `XPCSession(endpoint:)`）跑真实的 XPC：
+- 新增 `LaunchpadAwakenerTextInputCoreTests`，在测试进程里用匿名监听（`XPCListener(targetQueue:incomingSessionHandler:)` 加 `XPCSession(endpoint:)`）跑真实的 XPC。两个测试 target 共用的 XPC 测试辅助放进 `TestingSupport`。
   - 每种请求和回复经 XPC 往返后不变。
   - 连发几百条消息，到达顺序与发送顺序一致。
   - 测试进程不是 Dock，所以用辅助进程那份签名要求的 session 会被取消；取消时能拿到原因。
   - 换 Dock 的规则：新 session 发来合法消息后接替旧的，当前 session 取消时托管结束。
+- `LaunchpadAwakenerPayloadCoreTests` 里用一个替身辅助进程测 `TextInputHelperClient`：`begin` 送出的配置与拿回的托管、托管不了与拒绝 Dock 时退回本地编辑、之后的请求按顺序到达、`end` 拿回最终文字、回报按顺序到达、辅助进程退出后只报一次并在下一次 `begin` 重新连上。
 - 开发机上用 `RunScript.sh` 构建，跑全部单元测试。
 - 部署到测试 MacBook（27.2）和 macOS 26 的虚拟机，看日志确认 Dock 通过了签名要求、连上辅助进程、`begin` 拿到托管。用输入法实际打字属于交互验证，用户提出才做。
 
@@ -61,7 +62,7 @@ payload 与文本输入辅助进程之间的通道（[0001](0001-input-method-he
 
 1. ✅ **消息类型**：在 `LaunchpadAwakenerShared` 加 `Codable` 消息与回复类型，新建 `LaunchpadAwakenerTextInputCoreTests`，用匿名监听测往返与顺序。旧的字符串常量暂时保留，两端照旧能编。
 2. ✅ **辅助进程**：`TextInputService` 改用 `XPCListener` 与每个 session 上的签名要求，接替 Dock 的规则抽成能单测的类型并补测试；签名要求拒绝测试进程的测试也在这一步。
-3. ⬜ **payload**：`TextInputHelperClient` 改用 `XPCSession`，删掉 `MessageKey` 与 `Request` 常量。
+3. ✅ **payload**：`TextInputHelperClient` 改用 `XPCSession`，删掉 `MessageKey` 与 `Request` 常量。
 4. ⬜ **文档与验证**：更新 `CLAUDE.md` 与实现说明，跑全部单元测试与 `RunScript.sh` 构建；部署到测试机看日志。
 
 ### 文档

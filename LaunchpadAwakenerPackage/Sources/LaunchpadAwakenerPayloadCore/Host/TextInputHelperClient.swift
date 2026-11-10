@@ -6,42 +6,45 @@ import OSToolbox
 import QuartzCore
 import XPC
 
-/// An XPC object handed from libxpc's handler to the main actor; the handlers run on the main queue.
-private struct XPCObjectBox: @unchecked Sendable {
-    let object: xpc_object_t
-}
-
 /// The connection to the text input helper, the LaunchAgent that hosts the springboard's text fields so
 /// that input methods work in them, and the events posted to it, as macOS 15's Dock had its
 /// `com.apple.dock.ecti` service (`-[ECTextInputLayer _setupConnection]`, `_forwardEvent:`).
+///
+/// One `XPCSession` at a time, delivering on the main queue. A session ends for good when the helper exits —
+/// "the system will make no attempt to reestablish the connection" (`xpc/session.h`) — so the next `begin`
+/// opens another, and launchd starts the helper again.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "TextInputHelperClient")
 @MainActor
 final class TextInputHelperClient {
     /// What showing the hosted field takes, and where its events go.
-    struct Hosting: Equatable {
-        let contextIdentifier: UInt32
-        let processIdentifier: pid_t
-        let windowNumber: Int
-    }
+    typealias Hosting = TextInputHosting
 
     /// The field as the helper reports it: the text without what is still composing.
-    struct Change: Equatable {
-        let string: String
-        let hasMarkedText: Bool
-        let isEditingComplete: Bool
+    typealias Change = TextInputChange
+
+    /// Where the helper listens.
+    enum Destination {
+        /// The helper's Mach service, which launchd starts it for.
+        case machService(name: String)
+        /// A listener's endpoint; for tests.
+        case endpoint(XPCEndpoint)
     }
 
-    private typealias MessageKey = TextInputServiceIdentity.MessageKey
-    private typealias Request = TextInputServiceIdentity.Request
-
-    static let shared = TextInputHelperClient()
+    static let shared = TextInputHelperClient(destination: .machService(name: TextInputServiceIdentity.machServiceName))
 
     /// Called with every change the helper reports.
     var changeHandler: ((Change) -> Void)?
     /// Called when the helper went away; whatever it hosted is gone.
     var interruptionHandler: (() -> Void)?
 
-    private var connection: xpc_connection_t?
+    private let destination: Destination
+    private var session: XPCSession?
+    /// Counts the sessions opened, so that a session's handlers can tell whether it is still the current one.
+    private var sessionGeneration = 0
+
+    init(destination: Destination) {
+        self.destination = destination
+    }
 
     /// Sets the field up in the helper; `completion` gets what showing it takes, or nil when the helper
     /// cannot host it.
@@ -55,61 +58,65 @@ final class TextInputHelperClient {
         screenTopLeft: CGPoint,
         completion: @escaping @MainActor (Hosting?) -> Void
     ) {
-        let message = xpc_dictionary_create(nil, nil, 0)
-        xpc_dictionary_set_string(message, MessageKey.request, Request.begin)
-        xpc_dictionary_set_bool(message, MessageKey.isSearchField, isSearchField)
-        xpc_dictionary_set_string(message, MessageKey.string, string)
-        xpc_dictionary_set_bool(message, MessageKey.selectsAll, selectsAll)
-        xpc_dictionary_set_bool(message, MessageKey.hasFocus, hasFocus)
-        xpc_dictionary_set_double(message, MessageKey.width, Double(size.width))
-        xpc_dictionary_set_double(message, MessageKey.height, Double(size.height))
-        xpc_dictionary_set_double(message, MessageKey.fontSize, Double(fontSize))
-        xpc_dictionary_set_double(message, MessageKey.screenLeft, Double(screenTopLeft.x))
-        xpc_dictionary_set_double(message, MessageKey.screenTop, Double(screenTopLeft.y))
-        xpc_connection_send_message_with_reply(currentConnection(), message, DispatchQueue.main) { reply in
-            let replyBox = XPCObjectBox(object: reply)
-            MainActor.assumeIsolated {
-                completion(Self.hosting(from: replyBox.object))
+        let request = TextInputRequest.begin(TextInputFieldConfiguration(
+            isSearchField: isSearchField,
+            string: string,
+            selectsAll: selectsAll,
+            hasFocus: hasFocus,
+            width: Double(size.width),
+            height: Double(size.height),
+            fontSize: Double(fontSize),
+            screenLeft: Double(screenTopLeft.x),
+            screenTop: Double(screenTopLeft.y)
+        ))
+        guard let session = currentSession() else {
+            completion(nil)
+            return
+        }
+        do {
+            try session.send(request) { (result: Result<TextInputHosting, any Error>) in
+                TextInputHelperClient.onMainActor {
+                    completion(TextInputHelperClient.hosting(from: result))
+                }
             }
+        } catch {
+            #log(.error, "Could not ask the text input helper to host the field: \(error.localizedDescription, privacy: .public)")
+            completion(nil)
         }
     }
 
     func setString(_ string: String) {
-        guard let connection else { return }
-        let message = xpc_dictionary_create(nil, nil, 0)
-        xpc_dictionary_set_string(message, MessageKey.request, Request.setString)
-        xpc_dictionary_set_string(message, MessageKey.string, string)
-        xpc_connection_send_message(connection, message)
+        send(.setString(string))
     }
 
     func setFocus(_ hasFocus: Bool) {
-        guard let connection else { return }
-        let message = xpc_dictionary_create(nil, nil, 0)
-        xpc_dictionary_set_string(message, MessageKey.request, Request.setFocus)
-        xpc_dictionary_set_bool(message, MessageKey.hasFocus, hasFocus)
-        xpc_connection_send_message(connection, message)
+        send(.setFocus(hasFocus))
     }
 
     /// Commits any composing text and lets the field go; `completion` gets the final text, composing text
     /// included, or nil when the helper did not answer.
     func end(completion: @escaping @MainActor (String?) -> Void) {
-        guard let connection else {
+        guard let session else {
             completion(nil)
             return
         }
-        let message = xpc_dictionary_create(nil, nil, 0)
-        xpc_dictionary_set_string(message, MessageKey.request, Request.end)
-        xpc_connection_send_message_with_reply(connection, message, DispatchQueue.main) { reply in
-            let replyBox = XPCObjectBox(object: reply)
-            MainActor.assumeIsolated {
-                let reply = replyBox.object
-                guard xpc_get_type(reply) == XPC_TYPE_DICTIONARY else {
-                    completion(nil)
-                    return
+        do {
+            try session.send(TextInputRequest.end) { (result: Result<TextInputEnding, any Error>) in
+                TextInputHelperClient.onMainActor {
+                    completion(try? result.get().string)
                 }
-                completion(xpc_dictionary_get_string(reply, MessageKey.string).map { String(cString: $0) })
             }
+        } catch {
+            #log(.error, "Could not ask the text input helper to let the field go: \(error.localizedDescription, privacy: .public)")
+            completion(nil)
         }
+    }
+
+    /// Lets the session go without reporting the helper gone; the next `begin` opens a new one.
+    func cancel() {
+        sessionGeneration += 1
+        session?.cancel(reason: "The Dock let the text input helper go")
+        session = nil
     }
 
     /// A `CALayerHost` showing the helper's field.
@@ -132,62 +139,102 @@ final class TextInputHelperClient {
         copiedEvent.postToPid(hosting.processIdentifier)
     }
 
-    // MARK: - The connection
+    // MARK: - The session
 
-    private func currentConnection() -> xpc_connection_t {
-        if let connection {
-            return connection
+    /// A request without a reply, to the helper hosting the field; none goes out without a session, as there
+    /// is then no field to update.
+    private func send(_ request: TextInputRequest) {
+        guard let session else { return }
+        do {
+            try session.send(request)
+        } catch {
+            #log(.error, "Could not send a request to the text input helper: \(error.localizedDescription, privacy: .public)")
         }
-        let newConnection = xpc_connection_create_mach_service(TextInputServiceIdentity.machServiceName, DispatchQueue.main, 0)
-        xpc_connection_set_event_handler(newConnection) { event in
-            let eventBox = XPCObjectBox(object: event)
-            MainActor.assumeIsolated {
-                TextInputHelperClient.shared.handle(eventBox.object)
-            }
-        }
-        xpc_connection_resume(newConnection)
-        connection = newConnection
-        return newConnection
     }
 
-    private func handle(_ event: xpc_object_t) {
-        guard xpc_get_type(event) == XPC_TYPE_DICTIONARY else {
-            // The helper exited or was never there; launchd starts it again on the next message.
-            if xpc_equal(event, XPC_ERROR_CONNECTION_INVALID) {
-                #log(.info, "The text input helper is not available")
-                connection = nil
-            } else {
-                #log(.info, "The text input helper went away")
-            }
-            interruptionHandler?()
-            return
+    private func currentSession() -> XPCSession? {
+        if let session {
+            return session
         }
-        guard
-            let requestPointer = xpc_dictionary_get_string(event, MessageKey.request),
-            String(cString: requestPointer) == Request.changed
-        else { return }
-        changeHandler?(Change(
-            string: xpc_dictionary_get_string(event, MessageKey.string).map { String(cString: $0) } ?? "",
-            hasMarkedText: xpc_dictionary_get_bool(event, MessageKey.hasMarkedText),
-            isEditingComplete: xpc_dictionary_get_bool(event, MessageKey.isEditingComplete)
-        ))
-    }
-
-    private static func hosting(from reply: xpc_object_t) -> Hosting? {
-        guard xpc_get_type(reply) == XPC_TYPE_DICTIONARY else {
-            #log(.info, "The text input helper did not answer; the field is edited here")
+        sessionGeneration += 1
+        let generation = sessionGeneration
+        let incomingMessageHandler: @Sendable (TextInputChange) -> (any Encodable)? = { [weak self] change in
+            let client = self
+            TextInputHelperClient.onMainActor {
+                client?.receive(change, sessionGeneration: generation)
+            }
             return nil
         }
-        let contextIdentifier = UInt32(truncatingIfNeeded: xpc_dictionary_get_uint64(reply, MessageKey.contextIdentifier))
-        guard contextIdentifier != 0 else {
+        let cancellationHandler: @Sendable (XPCRichError) -> Void = { [weak self] error in
+            let client = self
+            let reason = error.debugDescription
+            TextInputHelperClient.onMainActor {
+                client?.sessionDidEnd(sessionGeneration: generation, reason: reason)
+            }
+        }
+        do {
+            let newSession = switch destination {
+            case .machService(let name):
+                try XPCSession(
+                    machService: name,
+                    targetQueue: .main,
+                    incomingMessageHandler: incomingMessageHandler,
+                    cancellationHandler: cancellationHandler
+                )
+            case .endpoint(let endpoint):
+                try XPCSession(
+                    endpoint: endpoint,
+                    targetQueue: .main,
+                    incomingMessageHandler: incomingMessageHandler,
+                    cancellationHandler: cancellationHandler
+                )
+            }
+            session = newSession
+            return newSession
+        } catch {
+            #log(.info, "The text input helper is not available: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    private func receive(_ change: Change, sessionGeneration generation: Int) {
+        guard generation == sessionGeneration else { return }
+        changeHandler?(change)
+    }
+
+    /// The helper exited, refused the Dock, or was never there; launchd starts it again for the next session.
+    private func sessionDidEnd(sessionGeneration generation: Int, reason: String) {
+        guard generation == sessionGeneration else { return }
+        session = nil
+        #log(.info, "The text input helper went away: \(reason, privacy: .public)")
+        interruptionHandler?()
+    }
+
+    private static func hosting(from result: Result<TextInputHosting, any Error>) -> Hosting? {
+        let hosting: TextInputHosting
+        do {
+            hosting = try result.get()
+        } catch {
+            #log(.info, "The text input helper did not answer; the field is edited here: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+        guard hosting.contextIdentifier != 0 else {
             #log(.error, "The text input helper could not host the field")
             return nil
         }
-        return Hosting(
-            contextIdentifier: contextIdentifier,
-            processIdentifier: pid_t(truncatingIfNeeded: xpc_dictionary_get_int64(reply, MessageKey.processIdentifier)),
-            windowNumber: Int(xpc_dictionary_get_int64(reply, MessageKey.windowNumber))
-        )
+        return hosting
+    }
+
+    /// Runs `body` on the main actor: right away on the main queue, where the session delivers, after a hop
+    /// anywhere else. Never traps, as a trap here would take the Dock down.
+    private nonisolated static func onMainActor(_ body: @escaping @MainActor @Sendable () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated(body)
+        } else {
+            Task { @MainActor in
+                body()
+            }
+        }
     }
 
     /// `CGEventSetWindowLocation`, which CoreGraphics exports without declaring.
