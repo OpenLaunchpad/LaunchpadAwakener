@@ -13,5 +13,5 @@
 | 0007 | [两个 App 的界面改用 AppKit 重写，不再用 SwiftUI](0007-appkit-rewrite.md) | Implemented |
 | 0008 | [文本输入通道改用系统的 Swift XPC 接口](0008-text-input-swift-xpc.md) | Implemented |
 | 0009 | [在控制面板里显示输入法辅助进程，并自动换掉旧版本](0009-text-input-helper-status.md) | Implemented |
+| 0010 | [SIP 没关时引导用户改用独立版，并一键安装](0010-system-integrity-protection-guide.md) | Implemented |
 | draft | [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md) | In Progress |
-| draft | [SIP 没关时引导用户改用独立版，并一键安装](draft-system-integrity-protection-guide.md) | In Progress |

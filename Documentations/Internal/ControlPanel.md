@@ -43,7 +43,7 @@
 
 **用户点「重启 Dock」，退出的那个 Dock 不算闪退。** 闪退保护（`QuickExitGuard`）把注入后 15 秒内退出的 Dock 算作 payload 弄崩的，连续三次就关掉自动注入。重启按钮先 `prepareForTargetRestart()` 忘掉旧 Dock（连同它的注入时间），再发 `SIGTERM`，所以连按几次不会误关。退出不论是监视器的退出源先看到，还是窗口的状态刷新先发现进程没了，都走同一个 `hostDidExit(_:)` 计数。被忘掉的旧 Dock 在退出之前另记在 `processIdentifiersBeingRestarted` 里，任何注入都跳过它：否则一轮刚好在发信号前跑过的发现会把它当成「漏注入的」，注入一个正在退出的进程，它的退出又被算成一次闪退。别的用户的 Dock（快速切换用户时）发不了信号，就留着不动，也不报错；它仍算在「旧的」那一组里，不会被当成重启后的新 Dock。
 
-**SIP 没关时不注入，引导用户改用独立版。**（提案 [SIP 没关时引导用户改用独立版，并一键安装](../Evolutions/draft-system-integrity-protection-guide.md)）
+**SIP 没关时不注入，引导用户改用独立版。**（提案 [SIP 没关时引导用户改用独立版，并一键安装](../Evolutions/0010-system-integrity-protection-guide.md)）
 - **判断**：App 启动时经 `csr_get_active_config` 读一次内核正在执行的配置，改 SIP 要重启，所以不再重读。只有 `csrutil disable` 写入的那组标志都在才算关了；`csrutil enable --without …` 只放开一部分，照样算没关。读不出来时按「关了」处理，照旧去注入，失败由横幅报告。
 - **没关时**：不登记 daemon（否则会叫用户去登录项批准一个用不上的东西），不登记输入法辅助进程，不开自动注入，启动流程不跑。横幅的第一条原因换成「System Integrity Protection is on」，按钮是「Install Launchpad」或「Open Launchpad」；菜单栏菜单里也有同样的一项。表单只留「登录时启动」一行：SIP 关着时登记过开机启动、后来又打开 SIP 的，要能在这里关掉它。主菜单去掉整理窗口，它要经 Dock 里的 payload 改布局。
 - **安装**：独立版由注入版的 scheme 顺带编出，压成 `Contents/Resources/Launchpad.zip`。直接把 `.app` 放进包里，有被 LaunchServices 登记、被 Spotlight 列成第二个 Launchpad 的风险。安装时用 `ditto` 解到「应用程序」旁边的临时目录，再整个挪进去，中途失败不会留下半个 App；`/Applications` 写不了时退到 `~/Applications`。那里已有同名的别的 App 就报错，不覆盖。
