@@ -79,7 +79,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 **输入法靠一个托管文本框的辅助进程，照 15 的 ecti 服务做**（提案 [用常驻辅助进程给搜索框与改名框接上输入法](../Evolutions/0001-input-method-helper.md)）。Dock 不加载 AppKit，输入法只认真正的文本框和激活状态的进程，所以 App 里多带一个 LaunchAgent `LaunchpadAwakenerTextInput`：
 
 - **启动**：它放在 `Contents/Library/LoginItems/`，App 启动时用 `SMAppService.agent` 注册，不用用户批准。launchd 在 payload 连它的 Mach 服务时才拉起它。它只接受 Dock 的连接（见下文「几处细节」）。
-- **通道**：系统 XPC 框架的 Swift 接口（提案 [文本输入通道改用系统的 Swift XPC 接口](../Evolutions/draft-text-input-swift-xpc.md)）。payload 一侧是 `XPCSession`，辅助进程一侧是 `XPCListener`，都在主队列上收发；消息是 `LaunchpadAwakenerShared` 里的 `Codable` 类型：payload 发 `TextInputRequest`（`begin`、`setString`、`setFocus`、`end`，`begin` 回 `TextInputHosting`，`end` 回 `TextInputEnding`），辅助进程发 `TextInputChange`。消息按发送的先后处理。辅助进程一退出 session 就作废，payload 丢掉它，下一次 `begin` 再建一个，launchd 随之重新拉起辅助进程。
+- **通道**：系统 XPC 框架的 Swift 接口（提案 [文本输入通道改用系统的 Swift XPC 接口](../Evolutions/0008-text-input-swift-xpc.md)）。payload 一侧是 `XPCSession`，辅助进程一侧是 `XPCListener`，都在主队列上收发；消息是 `LaunchpadAwakenerShared` 里的 `Codable` 类型：payload 发 `TextInputRequest`（`begin`、`setString`、`setFocus`、`end`，`begin` 回 `TextInputHosting`，`end` 回 `TextInputEnding`），辅助进程发 `TextInputChange`。消息按发送的先后处理。辅助进程一退出 session 就作废，payload 丢掉它，下一次 `begin` 再建一个，launchd 随之重新拉起辅助进程。
 - **托管**：它在 Dock 图块的 mini view 窗口里放一个 `NSTextField`，那扇窗口不上屏，却能成为 key 窗口。payload 用 `CALayerHost` 显示这扇窗口的图层托管上下文。
 - **转发**：payload 把这些事件复制一份，标上辅助进程的窗口编号与窗口内位置，用 `CGEventPostToPid` 发过去：
   - 搜索框该收的键；正在组字时是所有键；

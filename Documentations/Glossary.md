@@ -100,7 +100,9 @@
 
 嵌在 App 里的 LaunchAgent `LaunchpadAwakenerTextInput`，替 Launchpad 托管搜索框或改名框（一次一个），好让输入法能用；相当于 15 的 Dock 包里的 `com.apple.dock.ecti` 服务。payload 在 Dock 里用 `CALayerHost` 显示它的文本框，把按键与点按转发给它；它不可用时 payload 退回本地编辑。
 
-- **主要出现在**：`LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore/`、`LaunchpadAwakenerPayloadCore/Host/SpringboardRemoteTextField.swift`、[实现说明](Internal/LaunchpadReplica.md)「输入法靠一个托管文本框的辅助进程」
+它一旦被 launchd 拉起就常驻到注销，换了新构建也不会自己重启；控制面板显示它在不在运行、是不是旧版，App 启动时自动换掉被重新构建过的那份。
+
+- **主要出现在**：`LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerTextInputCore/`、`LaunchpadAwakenerPayloadCore/Host/SpringboardRemoteTextField.swift`、`LaunchpadAwakenerAppCore/TextInputHelperState.swift`、[实现说明](Internal/LaunchpadReplica.md)「输入法靠一个托管文本框的辅助进程」、[控制面板实现说明](Internal/ControlPanel.md)「输入法辅助进程看进程表」
 
 ### Unsaved folder（未存的文件夹）
 

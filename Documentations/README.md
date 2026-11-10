@@ -2,8 +2,6 @@
 
 - [Evolutions/README.md](Evolutions/README.md) —— 提案状态总表
 - [Evolutions/draft-launchpad-replica.md](Evolutions/draft-launchpad-replica.md) —— 在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad（In Progress）
-- [Evolutions/draft-text-input-swift-xpc.md](Evolutions/draft-text-input-swift-xpc.md) —— 文本输入通道改用系统的 Swift XPC 接口：`XPCSession`、`XPCListener` 与共用的 `Codable` 消息（In Progress）
-- [Evolutions/draft-text-input-helper-status.md](Evolutions/draft-text-input-helper-status.md) —— 在控制面板里显示输入法辅助进程的运行状态与版本，加「重启」，App 启动时自动换掉旧版本（In Progress）
 - [Evolutions/0001-input-method-helper.md](Evolutions/0001-input-method-helper.md) —— 用常驻辅助进程给搜索框与改名框接上输入法（Implemented）
 - [Evolutions/0002-standalone-launchpad.md](Evolutions/0002-standalone-launchpad.md) —— 不注入 Dock 的独立版 Launchpad：与注入版共用数据层与界面层（Implemented）
 - [Evolutions/0003-app-control-panel.md](Evolutions/0003-app-control-panel.md) —— 照 DockIconOverride 重做注入版 App 的控制面板：状态横幅、payload 通道、daemon 自愈、重启 Dock、菜单栏 App（Implemented）
@@ -11,6 +9,8 @@
 - [Evolutions/0005-launchpad-organizer.md](Evolutions/0005-launchpad-organizer.md) —— 在注入版 App 里整理 Launchpad 的布局：多选移动、文件夹管理、拖动排序、一键整理（Implemented）
 - [Evolutions/0006-objc-runtime-toolbox.md](Evolutions/0006-objc-runtime-toolbox.md) —— 用 FrameworkToolbox 的 ObjCRuntimeToolbox 改写 hook 与私有调用，删掉 HookKit（Implemented）
 - [Evolutions/0007-appkit-rewrite.md](Evolutions/0007-appkit-rewrite.md) —— 两个 App 的界面改用 AppKit 与 UIFoundation、AppKitPlus 重写，不再用 SwiftUI（Implemented）
+- [Evolutions/0008-text-input-swift-xpc.md](Evolutions/0008-text-input-swift-xpc.md) —— 文本输入通道改用系统的 Swift XPC 接口：`XPCSession`、`XPCListener` 与共用的 `Codable` 消息（Implemented）
+- [Evolutions/0009-text-input-helper-status.md](Evolutions/0009-text-input-helper-status.md) —— 在控制面板里显示输入法辅助进程的运行状态与版本，加「重启」，App 启动时自动换掉旧版本（Implemented）
 - [Internal/LaunchpadReplica.md](Internal/LaunchpadReplica.md) —— Launchpad 复刻的实现说明：关键决策、模块结构、验证、新 Dock 构建的适配流程
 - [Internal/StandaloneLaunchpad.md](Internal/StandaloneLaunchpad.md) —— 独立版 Launchpad 的实现说明：宿主接口、Dock 图层类的等价实现、验证
 - [Internal/AppKitInterface.md](Internal/AppKitInterface.md) —— 两个 App 的 AppKit 界面层的实现说明：外壳与模块、分组表单的尺寸、主菜单、登录时启动、只在真机上才看得出的坑

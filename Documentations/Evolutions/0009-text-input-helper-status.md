@@ -1,13 +1,14 @@
-# Draft - 在控制面板里显示输入法辅助进程，并自动换掉旧版本
+# 0009 - 在控制面板里显示输入法辅助进程，并自动换掉旧版本
 
-- **状态**: In Progress
+- **状态**: Implemented
 - **创建日期**: 2026-11-10
 - **最后更新**: 2026-11-10
 - **实现分支**: `feature/text-input-helper-status`，叠在 `feature/text-input-swift-xpc` 上
+- **配套文档**: 同步更新了[控制面板实现说明](../Internal/ControlPanel.md)（「输入法辅助进程看进程表，旧版本自动换掉」与代码地图）、项目 `CLAUDE.md`「改文本输入辅助进程」一条、术语表的「Text input helper」
 
 ## 摘要
 
-App 有两个后台进程：以 root 运行、负责注入的特权 daemon，和以用户身份常驻、替 Launchpad 托管搜索框与改名框的输入法辅助进程（LaunchAgent `LaunchpadAwakenerTextInput`）。控制面板对 daemon 显示状态、能卸载与安装，版本不符时 App 还会自动重装；对辅助进程却只显示「注册了没有」，看不出它在不在运行、是不是旧版本，也没法重启它。重装 daemon 不会碰辅助进程，所以换了新构建之后，旧的辅助进程会一直跑下去，直到注销或手动 `pkill`。[文本输入通道改用系统的 Swift XPC 接口](draft-text-input-swift-xpc.md) 之后，旧辅助进程读不懂新消息，输入法随之失效，用户在开发机上就这样踩到过。这次让面板显示辅助进程的运行状态与版本，加一个「重启」按钮，并让 App 启动时自动换掉旧版本。
+App 有两个后台进程：以 root 运行、负责注入的特权 daemon，和以用户身份常驻、替 Launchpad 托管搜索框与改名框的输入法辅助进程（LaunchAgent `LaunchpadAwakenerTextInput`）。控制面板对 daemon 显示状态、能卸载与安装，版本不符时 App 还会自动重装；对辅助进程却只显示「注册了没有」，看不出它在不在运行、是不是旧版本，也没法重启它。重装 daemon 不会碰辅助进程，所以换了新构建之后，旧的辅助进程会一直跑下去，直到注销或手动 `pkill`。[0008 文本输入通道改用系统的 Swift XPC 接口](0008-text-input-swift-xpc.md) 之后，旧辅助进程读不懂新消息，输入法随之失效，用户在开发机上就这样踩到过。这次让面板显示辅助进程的运行状态与版本，加一个「重启」按钮，并让 App 启动时自动换掉旧版本。
 
 ## 方案
 
@@ -52,6 +53,10 @@ App 有两个后台进程：以 root 运行、负责注入的特权 daemon，和
 
 同一批次更新[控制面板实现说明](../Internal/ControlPanel.md)里辅助进程那一行，以及项目 `CLAUDE.md`「改文本输入辅助进程」一条：App 启动时会自动换掉旧版，面板里也能手动重启。
 
+## 后续
+
+- 面板上这一行和「Restart」按钮的样子没有看过，属于交互验证。
+
 ## 决策日志
 
 | 日期 | 决定 | 理由 |
@@ -64,3 +69,4 @@ App 有两个后台进程：以 root 运行、负责注入的特权 daemon，和
 | 2026-11-10 | 路径用 `realpath` 解析，不用 `URL.resolvingSymlinksInPath()` | 后者把 `/private/var` 写回 `/var`，与 `proc_pidpath` 报的路径对不上，测试里的临时目录正好踩到 |
 | 2026-11-10 | 顺带修 `TargetProcessMonitorTests` 两个 async 测试结束子进程的方式 | 它们在 `await` 之后调用阻塞的 `waitUntilExit()`，换到别的线程后收不到退出通知；新加的真实进程测试与它并行时，20 次里卡死 2 次（采样确认卡在 `waitUntilExit`），基线 20 次 0 次。改为异步轮询子进程被收走，修复后 30 次 0 次。不改就无法加真实进程测试，所以放在这个分支 |
 | 2026-11-10 | 实现完成，待用户看过后收尾 | 全部单元测试通过（App 核心测试新增 23 个），`RunScript.sh` 构建通过、三个切片都在；面板的样子属于交互验证，没有看 |
+| 2026-11-10 | 用户收尾，状态改 Implemented，编号 0009 | 全部单元测试与 `RunScript.sh` 构建通过；控制面板实现说明已同步，术语表的「Text input helper」补上出处，没有新术语 |

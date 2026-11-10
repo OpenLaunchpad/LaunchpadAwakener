@@ -11,6 +11,6 @@
 | 0005 | [在注入版 App 里整理 Launchpad 的布局](0005-launchpad-organizer.md) | Implemented |
 | 0006 | [用 ObjCRuntimeToolbox 改写 hook 与私有调用](0006-objc-runtime-toolbox.md) | Implemented |
 | 0007 | [两个 App 的界面改用 AppKit 重写，不再用 SwiftUI](0007-appkit-rewrite.md) | Implemented |
+| 0008 | [文本输入通道改用系统的 Swift XPC 接口](0008-text-input-swift-xpc.md) | Implemented |
+| 0009 | [在控制面板里显示输入法辅助进程，并自动换掉旧版本](0009-text-input-helper-status.md) | Implemented |
 | draft | [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md) | In Progress |
-| draft | [文本输入通道改用系统的 Swift XPC 接口](draft-text-input-swift-xpc.md) | In Progress |
-| draft | [在控制面板里显示输入法辅助进程，并自动换掉旧版本](draft-text-input-helper-status.md) | In Progress |

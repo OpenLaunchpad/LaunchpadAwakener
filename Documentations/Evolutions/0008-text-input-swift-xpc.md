@@ -1,9 +1,10 @@
-# Draft - 文本输入通道改用系统的 Swift XPC 接口
+# 0008 - 文本输入通道改用系统的 Swift XPC 接口
 
-- **状态**: In Progress
+- **状态**: Implemented
 - **创建日期**: 2026-11-10
 - **最后更新**: 2026-11-10
 - **实现分支**: `feature/text-input-swift-xpc`
+- **配套文档**: 同步更新了 [Launchpad 复刻的实现说明](../Internal/LaunchpadReplica.md) 里讲辅助进程通道与签名的段落、项目 `CLAUDE.md` 的结构表与「改文本输入辅助进程」一条、[已裁决清单](../Internal/ReviewAdjudications.md) 的两条
 
 ## 摘要
 
@@ -63,7 +64,7 @@ payload 与文本输入辅助进程之间的通道（[0001](0001-input-method-he
 1. ✅ **消息类型**：在 `LaunchpadAwakenerShared` 加 `Codable` 消息与回复类型，新建 `LaunchpadAwakenerTextInputCoreTests`，用匿名监听测往返与顺序。旧的字符串常量暂时保留，两端照旧能编。
 2. ✅ **辅助进程**：`TextInputService` 改用 `XPCListener` 与每个 session 上的签名要求，接替 Dock 的规则抽成能单测的类型并补测试；签名要求拒绝测试进程的测试也在这一步。
 3. ✅ **payload**：`TextInputHelperClient` 改用 `XPCSession`，删掉 `MessageKey` 与 `Request` 常量。
-4. ⬜ **文档与验证**：更新 `CLAUDE.md` 与实现说明，跑全部单元测试与 `RunScript.sh` 构建；部署到测试机看日志。文档、单元测试与构建已完成，部署到测试机还没做。
+4. ✅ **文档与验证**：更新 `CLAUDE.md` 与实现说明，跑全部单元测试与 `RunScript.sh` 构建；部署到测试机看日志。文档、单元测试与构建已完成，部署到测试机还没做。
 
 ### 文档
 
@@ -78,6 +79,10 @@ SwiftyXPC 已经在依赖图里，App 与 daemon、App 与 payload 两条通道�
 
 补的办法有两种：在 App 里让每条消息都等到回复再发下一条，还要加超时，防止一条消息没有回复把后面的全卡住；或者先改 SwiftyXPC 的 fork，而 daemon 那条通道也在用这个库。系统接口两样都不用做。
 
+## 后续
+
+- 部署到测试 MacBook（27.2）与 macOS 26 虚拟机，看日志确认注入过的 Dock 通过「系统二进制、签名标识 `com.apple.dock`」这条签名要求、`begin` 拿到托管。落地时还没做。
+
 ## 决策日志
 
 | 日期 | 决定 | 理由 |
@@ -88,3 +93,5 @@ SwiftyXPC 已经在依赖图里，App 与 daemon、App 与 payload 两条通道�
 | 2026-11-10 | 服务类型不标 `@available(macOS 26.0, *)`，只在设签名要求处判断版本，低于 26 拒绝所有连接 | `@Loggable` 给生成的成员写死了 macOS 11 的 `@available`，类上标更高的版本就编不过；判断收在一处，效果相同 |
 | 2026-11-10 | 实现完成，待部署到测试机验证、用户看过后收尾 | 开发机上全部单元测试通过（新增 19 个），`RunScript.sh` 构建通过、三个切片都在，辅助进程只多链接了系统的 `libswiftXPC.dylib` |
 | 2026-11-10 | 部署到测试机留到回家后在 Ultra 上直连做 | 从公司那台部署要经 Mac mini 转发，转发约 10 分钟就断，断在半途会弄坏 MacBook 上的 App |
+| 2026-11-10 | 开发机上新 payload 遇到旧辅助进程，输入法失效 | 用户在自己的机器上换了新构建，12:07 起的旧辅助进程没有重启，读不懂新消息、也不会自行退出，`begin` 每次都没有回复；重装 daemon 不碰它。由 [0009](0009-text-input-helper-status.md) 让 App 启动时自动换掉被重新构建过的辅助进程，面板也能看到并重启它 |
+| 2026-11-10 | 用户收尾，状态改 Implemented，编号 0008 | 开发机上全部单元测试与 `RunScript.sh` 构建通过；测试机上的部署验证还没做，记为后续。实现说明已同步，没有新术语 |
