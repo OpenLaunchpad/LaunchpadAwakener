@@ -59,6 +59,21 @@ final class SpringboardDragSession {
     /// is stored only by the drop.
     var unsavedFolderTarget: (application: LaunchpadApplication, title: String)?
 
+    /// The Dock as a place to drop the icon, asked for once as the drag starts; see
+    /// `SpringboardInterface+DockDropping.swift`.
+    let dockDropTarget: (any SpringboardDockDropTarget)?
+    /// Set while the pointer is on the Dock: the Dock has the icon, which rides above it dimmed to half,
+    /// and nothing in the springboard responds to where it is.
+    var isOverDock = false
+    /// The Dock keeping a gap open for the dragged application; nil off the Dock, for a folder, or where
+    /// the Dock cannot.
+    var dockDrag: (any SpringboardDockDrag)?
+    /// The window above the Dock the icon rides in while on it, made the first time it gets there, and
+    /// the layer in it laid out like ``SpringboardInterface/containerLayer``.
+    var dragWindow: (window: any SpringboardDragWindow, containerLayer: CALayer)?
+    /// What letting go on the Dock did, from the release there until the springboard has put the icon back.
+    var dockDropResult: SpringboardDockDropResult?
+
     var lastLocation: CGPoint
     var lastTimestamp: UInt64
     var hoverTarget: (index: Int, itemLayer: SpringboardItemLayer)?
@@ -80,9 +95,11 @@ final class SpringboardDragSession {
         grabOffset: CGPoint,
         location: CGPoint,
         timestamp: UInt64,
-        origin: SpringboardDragging.Location
+        origin: SpringboardDragging.Location,
+        dockDropTarget: (any SpringboardDockDropTarget)?
     ) {
         self.item = item
+        self.dockDropTarget = dockDropTarget
         self.itemLayer = itemLayer
         switch origin {
         case let .mainPage(originPageIndex, originItemIndex):
@@ -114,6 +131,15 @@ final class SpringboardDragSession {
         springLoadingTask?.cancel()
         edgeTask?.cancel()
         edgeDirection = nil
+    }
+
+    /// Leaves the Dock as it was and takes the window above it away: the drag is over. The icon must have
+    /// left that window already.
+    func endDockInteraction() {
+        dockDrag?.cancel()
+        dockDrag = nil
+        dragWindow?.window.orderOut()
+        dragWindow = nil
     }
 }
 
@@ -177,7 +203,8 @@ extension SpringboardInterface {
             grabOffset: CGPoint(x: frameInContainer.midX - startLocation.x, y: frameInContainer.midY - startLocation.y),
             location: location,
             timestamp: timestamp,
-            origin: origin
+            origin: origin,
+            dockDropTarget: resolveDockDropTarget()
         )
         if isShowingSearchResults {
             leaveSearchForDraggedResult()
@@ -257,6 +284,10 @@ extension SpringboardInterface {
         )
         dragSession.lastLocation = location
         dragSession.lastTimestamp = timestamp
+        // On the Dock the icon is the Dock's; the springboard responds again once it is back.
+        if trackDock(at: location) {
+            return
+        }
         // While the pointer is fast, nothing responds; it does once the pointer slows down or rests.
         if speed >= SpringboardDragging.settlingSpeedThreshold {
             evaluateDragOnceSettled()
@@ -280,7 +311,14 @@ extension SpringboardInterface {
     /// Decides what the dragged icon's position means, in 15's order: leaving the open folder, an edge,
     /// another icon to drop onto, then a new place on the page.
     private func evaluateDrag() {
-        guard let dragSession, !dragSession.isEnding, !dragSession.isWaitingForFolderToClose, !dragSession.isLeavingSearch, !isAnimatingFolder else { return }
+        guard
+            let dragSession,
+            !dragSession.isEnding,
+            !dragSession.isWaitingForFolderToClose,
+            !dragSession.isLeavingSearch,
+            !dragSession.isOverDock,
+            !isAnimatingFolder
+        else { return }
         let cellCenter = dragSession.itemLayer.position
 
         if let folderPanel {
@@ -454,9 +492,10 @@ extension SpringboardInterface {
         performPendingDrop()
     }
 
-    /// Puts the dragged icon back on top of everything, the open folder's panel included.
+    /// Puts the dragged icon back on top of everything, the open folder's panel included. On the Dock it
+    /// rides in the window above the Dock, on top of everything already.
     func keepDraggedIconOnTop() {
-        guard let dragSession else { return }
+        guard let dragSession, !dragSession.isOverDock else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         containerLayer.addSublayer(dragSession.itemLayer)
@@ -616,6 +655,10 @@ extension SpringboardInterface {
 
     func endDrag(at location: CGPoint, timestamp: UInt64) {
         guard let dragSession, !dragSession.isEnding else { return }
+        // The Dock takes a release on it at once, whatever the springboard is still busy with.
+        if dragSession.isOverDock, dragSession.dockDropResult == nil {
+            dropOnDock(at: location)
+        }
         // A release while a folder opens or closes, or while the search goes, waits for it to finish, as
         // 15's did.
         if isAnimatingFolder || dragSession.isWaitingForFolderToClose || dragSession.isLeavingSearch {
@@ -623,6 +666,10 @@ extension SpringboardInterface {
             return
         }
         dragSession.cancelTimers()
+        if let dockDropResult = dragSession.dockDropResult {
+            finishDropOnDock(dockDropResult)
+            return
+        }
 
         if let hoverTarget = dragSession.hoverTarget, let targetItem = hoverTarget.itemLayer.item {
             dragSession.isEnding = true
@@ -725,7 +772,10 @@ extension SpringboardInterface {
     /// Escape, or a drop that changed nothing: everything slides back where it was. A folder the drag
     /// opened closes as usual while the main page is rebuilt from the stored layout. A drop already
     /// animating is left to finish.
-    func cancelDrag() {
+    ///
+    /// - Parameter slidingBack: False for a release on the Dock, after which 15 put the icon back in its
+    ///   place at once (`cancelDrag:0` from `-[ECSBDragCapture leftMouseUp:in:]`, 15.5 `0x1000B65B0`).
+    func cancelDrag(slidingBack: Bool = true) {
         guard let dragSession, !dragSession.isEnding else { return }
         // While a dragged search result leaves the search, the cancel waits until its page is in, as 15's
         // waited (`sub_1000B4388`).
@@ -735,6 +785,8 @@ extension SpringboardInterface {
         }
         dragSession.isEnding = true
         dragSession.cancelTimers()
+        // Off the Dock: an icon that slides back slides in the springboard, under the Dock.
+        leaveDock()
         dragSession.mainPageArrangement = nil
         dragSession.unsavedFolderTarget = nil
         endHover()
@@ -763,7 +815,7 @@ extension SpringboardInterface {
                     guard case .folder(let folder) = itemLayer.item else { return false }
                     return folder.applications.contains { $0.identifier == dragSession.item.identifier }
                 }
-            guard let folderIconLayer else {
+            guard let folderIconLayer, slidingBack else {
                 dragSession.itemLayer.removeFromSuperlayer()
                 finishDrag()
                 return
@@ -795,9 +847,11 @@ extension SpringboardInterface {
             }
         }
         guard
+            slidingBack,
             let homeGrid = sourcePages.currentPageGrid,
             homeGrid.itemLayers.indices.contains(dragSession.sourceItemIndex)
         else {
+            // The rebuilt page shows the icon in its place already.
             dragSession.itemLayer.removeFromSuperlayer()
             finishDrag()
             return
@@ -848,12 +902,16 @@ extension SpringboardInterface {
     /// Ends the drag. One that ended in a folder it opened leaves the main page with its gap until that
     /// folder closes.
     func finishDrag() {
+        // An icon still on the Dock — a search result whose drag ends as the springboard goes — comes back
+        // under the springboard first, to go with everything else rather than with the Dock's window.
+        leaveDock(animated: false)
         if let dragSession, let mainPageArrangement = dragSession.mainPageArrangement, folderPanel != nil {
             mainPagePlaceholder = mainPageArrangement
         }
         // Put down, the icon shakes again if its pages are in jiggle mode.
         dragSession?.itemLayer.isHeldStill = false
         dragSession?.cancelTimers()
+        dragSession?.endDockInteraction()
         dragSession = nil
         applyPendingLayoutIfIdle()
     }

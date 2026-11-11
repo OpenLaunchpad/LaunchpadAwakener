@@ -21,9 +21,13 @@ import LaunchpadAwakenerSpringboardCore
 enum DockBarReference {
     private static weak var cachedDockBar: NSObject?
     private static weak var cachedDockGlobals: NSObject?
+    private static weak var cachedDragController: NSObject?
 
     /// Runtime name of the Dock's dock bar. The same on macOS 26 and 27.
     nonisolated static let dockBarClassName = "DockBar"
+
+    /// Runtime name of the Dock's drag controller. The same on macOS 26 and 27.
+    nonisolated static let dragControllerClassName = "DragController"
 
     /// Runtime names of the Dock's globals object, in the order they are tried.
     ///
@@ -55,6 +59,22 @@ enum DockBarReference {
         )
         cachedDockGlobals = resolvedDockGlobals
         return resolvedDockGlobals
+    }
+
+    /// The Dock's `DragController`; nil when it cannot be found.
+    ///
+    /// A global of its own in the same section as the other two, holding the instance directly, and with
+    /// no accessor anywhere: the Dock's agent keeps it in a Swift ivar without a getter (26.6.2 and 27.2;
+    /// `/Volumes/RE/Dock/27.2/Notes/DragToDock.md`). Only dragging onto the Dock needs it, so it is not part
+    /// of ``reachability``: without it that one feature is off and everything else works.
+    static var dragController: NSObject? {
+        if let cachedDragController { return cachedDragController }
+        let resolvedDragController = findGlobalObject(
+            ofAnyClassNamed: [dragControllerClassName],
+            in: DockGlobalScanner.mainExecutablePointerSlotRegions()
+        )
+        cachedDragController = resolvedDragController
+        return resolvedDragController
     }
 
     /// Which of the globals the replica needs can be reached at this moment.

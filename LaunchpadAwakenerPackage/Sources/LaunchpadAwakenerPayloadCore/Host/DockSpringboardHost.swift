@@ -83,6 +83,11 @@ final class DockSpringboardHost: SpringboardHost {
     func setDockVisibility(_ visibility: SpringboardDockVisibility) {
         DockBarVisibility.shared.apply(visibility)
     }
+
+    /// The Dock, wherever it has every method dragging onto it calls; see ``DockDropTarget``.
+    var dockDropTarget: (any SpringboardDockDropTarget)? {
+        DockDropTarget.isCompatible ? DockDropTarget.shared : nil
+    }
 }
 
 /// The Dock's own `EC*` layer classes, through ``DockLayerFactory``.

@@ -93,6 +93,19 @@ public enum PayloadEntry {
             } else {
                 logger.error("The Dock's visibility controller lacks \(missingVisibilityMembers.joined(separator: ", "), privacy: .public); the Dock is left as it is")
             }
+            let missingDropMethods = DockDropTarget.missingMethodNames
+            if missingDropMethods.isEmpty {
+                logger.info("The Dock's drag events match: an application dragged onto the Dock is kept there")
+            } else {
+                logger.error("The Dock lacks \(missingDropMethods.joined(separator: ", "), privacy: .public); nothing dragged onto the Dock is kept there")
+            }
+            #if DEBUG
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                MainActor.assumeIsolated {
+                    DockDropTarget.logReachability()
+                }
+            }
+            #endif
             LaunchpadServices.start()
             return .installed(hookCount: hooks.count)
         } catch {

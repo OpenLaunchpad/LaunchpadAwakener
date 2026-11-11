@@ -57,6 +57,9 @@ package protocol SpringboardHost: AnyObject, Sendable {
     /// with the whole state wanted, again whenever it may have changed; a host asks the Dock only for what
     /// changed. Does nothing where the Dock is out of reach or covered by the springboard's window.
     func setDockVisibility(_ visibility: SpringboardDockVisibility)
+    /// The Dock as a place to drop an icon dragged out of the springboard, as on macOS 15; nil where the
+    /// Dock cannot take one: covered by the springboard's window, or out of reach.
+    var dockDropTarget: (any SpringboardDockDropTarget)? { get }
 }
 
 /// The host this process chose.
@@ -220,6 +223,57 @@ package protocol SpringboardApplicationUninstaller: AnyObject {
     func uninstall(applicationAt bundleURL: URL, completion: @escaping @MainActor @Sendable (Bool) -> Void)
 }
 
+/// The Dock under an icon dragged out of the springboard, as macOS 15's Launchpad handed a dragged icon to
+/// the Dock (`-[Springboard didDragItem:withEvent:andLayer:]`, 15.5 `0x1000936BC`, and
+/// `didEndDragOfItem:withEvent:andLayer:`, `0x100093AD4`): on the Dock the icon rides above it, dimmed to
+/// half, and the Dock opens a gap for an application, where letting go keeps it.
+@MainActor
+package protocol SpringboardDockDropTarget: AnyObject {
+    /// Whether `globalPoint` — top-left origin, as `CGEvent.location` — is on the Dock.
+    func contains(_ globalPoint: CGPoint) -> Bool
+    /// A transparent window above the Dock, not yet on screen, for the dragged icon to ride in while it is
+    /// on the Dock; nil where none can be made, and the icon stays under the Dock.
+    func makeDragWindow() -> (any SpringboardDragWindow)?
+    /// The pointer brought an application onto the Dock: the Dock opens a gap for it under the pointer, as
+    /// for an application dragged in from the Finder. Nil where it cannot; letting go there then does
+    /// nothing.
+    func beginDrag(ofApplicationAt bundleURL: URL, at globalPoint: CGPoint) -> (any SpringboardDockDrag)?
+}
+
+/// A transparent window above the Dock, covering the display the springboard shows on, that carries the
+/// dragged icon while it is on the Dock. macOS 15 carried every dragged icon in such a window, at the
+/// dragging level (`-[ECSBDragCapture _beginDragOfItemLayerWithEvent:itemFrame:]`, 15.5 `0x1000B4B98`).
+@MainActor
+package protocol SpringboardDragWindow: AnyObject {
+    /// Covers the display; what is put in it is drawn above the Dock.
+    var rootLayer: CALayer { get }
+    func orderIn()
+    func orderOut()
+}
+
+/// An application held over the Dock, the Dock keeping a gap open for it under the pointer.
+@MainActor
+package protocol SpringboardDockDrag: AnyObject {
+    /// The pointer moved, still on the Dock: the gap follows it.
+    func move(to globalPoint: CGPoint)
+    /// Let go on the Dock. The drag is over either way, and the Dock is as it was apart from what the
+    /// result says.
+    func drop(at globalPoint: CGPoint) -> SpringboardDockDropResult
+    /// The pointer left the Dock, the drag was cancelled or the springboard is going: the gap closes and
+    /// the Dock is as it was. Does nothing once the drag is over.
+    func cancel()
+}
+
+/// What letting go of an application on the Dock did.
+package enum SpringboardDockDropResult: Equatable, Sendable {
+    /// The Dock kept the application where it had opened the gap.
+    case kept
+    /// Let go on the Trash, which macOS 15 answered by asking to delete the application.
+    case trash
+    /// Nothing: the Dock had no gap there, or could not take the application.
+    case none
+}
+
 /// A glass behind the pages, kept alive for as long as it shows.
 @MainActor
 package protocol SpringboardGlassBackground: AnyObject {
@@ -360,8 +414,8 @@ package protocol SpringboardInputMethodClient: AnyObject {
 // MARK: - Until a host is chosen
 
 /// The host until one is chosen, as in unit tests: no window, no wallpaper, no glass, no hosted fields or
-/// deletion confirmation, no uninstaller and none of the Dock's resources, a Dock of the default size, and
-/// the replicas of the Dock's layer classes.
+/// deletion confirmation, no uninstaller and none of the Dock's resources, a Dock of the default size that
+/// takes no drops, and the replicas of the Dock's layer classes.
 final class DetachedSpringboardHost: SpringboardHost {
     nonisolated init() {}
 
@@ -426,4 +480,8 @@ final class DetachedSpringboardHost: SpringboardHost {
     }
 
     func setDockVisibility(_ visibility: SpringboardDockVisibility) {}
+
+    var dockDropTarget: (any SpringboardDockDropTarget)? {
+        nil
+    }
 }
