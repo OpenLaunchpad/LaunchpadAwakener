@@ -29,7 +29,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **payload 里不用 AppKit，也不用 `Bundle.module`。** 27.2 的 Dock 不链接 AppKit，字体一律用 Core Text 建，显示器信息用 CoreGraphics 和 Dock 自己的 `DisplayDescriptor`。SwiftPM 生成的 `Bundle.module` 找不到资源时直接 `fatalError`，在注入的框架里就是让 Dock 崩溃，所以 15.5 的 `LaunchPadLayout.plist` 只放在测试资源里，排除名单与默认首页以 Swift 常量随 payload 发布，由测试逐项核对。界面贴图（`ecsb_*`、`ectl_*`）在运行时从 Dock.app 里读，26 与 27 的 Dock.app 都带着这些文件。
 
-**调 Dock 内部方法一律先校验签名。** 系统框架导出的私有类（IconServices、QuartzCore 等）在 `LaunchpadAwakenerPrivateInterfaces` 的头文件里声明后直接调用，不在运行时核对；Dock 不导出任何类，它的调用与 hook 都经 FrameworkToolbox 的 ObjCRuntimeToolbox，选择子与类型编码一律由 Swift 声明推出、参数类型经编译器检查，代码里没有手写的编码：两个 hook 是 `@RuntimeClassHook`；类名固定的类写成 `@RuntimeClassProxy` 协议，构造写成 `init?(…)`、类方法写成 `static func`、卸载的回调写成 `@escaping @convention(block)` 参数；经环境对象拿到的 Swift 类（`IconAppearance`、卸载器等）类名随版本变（环境对象在 26.6.2 叫 `Environment`，27.2 叫 `_TtC8DockCore11Environment`），写成 `@RuntimeObjectProxy` 协议，按对象自己的类核对。`DockHostInterface.requiredMethods` 汇总了界面层要调的 23 个 Dock 方法（各 proxy 的 `methodRequirements`，构造方法也在内），任何一个的类型编码与 Dock 不符，就整批不装 hook；`DockSignatureTests` 在开发机上把推出的编码与 27.2 元数据核对。经对象拿到的类在第一次遇到时校验，失败就降级。两个容易错的地方：`EC*` 类的 `scaleFactor` 都是 `float`（编码 `f`），proxy 里写成 `CGFloat` 编码就对不上；头文件里的 ivar 偏移是编译期的值，运行时会滑动，要用 `ivar_getOffset`。
+**调 Dock 内部方法一律先校验签名。** 系统框架导出的私有类（IconServices、QuartzCore 等）在 `LaunchpadAwakenerPrivateInterfaces` 的头文件里声明后直接调用，不在运行时核对；Dock 不导出任何类，它的调用与 hook 都经 FrameworkToolbox 的 ObjCRuntimeToolbox，选择子与类型编码一律由 Swift 声明推出、参数类型经编译器检查，代码里没有手写的编码：三个 hook 都是 `@RuntimeClassHook`；类名固定的类写成 `@RuntimeClassProxy` 协议，构造写成 `init?(…)`、类方法写成 `static func`、卸载的回调写成 `@escaping @convention(block)` 参数；经环境对象拿到的 Swift 类（`IconAppearance`、卸载器等）类名随版本变（环境对象在 26.6.2 叫 `Environment`，27.2 叫 `_TtC8DockCore11Environment`），写成 `@RuntimeObjectProxy` 协议，按对象自己的类核对。`DockHostInterface.requiredMethods` 汇总了界面层要调的 23 个 Dock 方法（各 proxy 的 `methodRequirements`，构造方法也在内），任何一个的类型编码与 Dock 不符，就整批不装 hook；`DockSignatureTests` 在开发机上把推出的编码与 27.2 元数据核对。经对象拿到的类在第一次遇到时校验，失败就降级。两个容易错的地方：`EC*` 类的 `scaleFactor` 都是 `float`（编码 `f`），proxy 里写成 `CGFloat` 编码就对不上；头文件里的 ivar 偏移是编译期的值，运行时会滑动，要用 `ivar_getOffset`。
 
 **每页一个 Dock 的 `ECGridLayer`，内容变了就换一个新的。** `ECGridLayer` 只在初始化时问一次条目数，之后没有入口能改；15.5 的 `ECSBGridLayer` 是直接改父类 ivar 来增删图标的。这里选择页内条目一变就重建整页网格，代价可以忽略（一页最多几十个图层）。另外三点：`-[ECGridLayer layout]` 不是 `layoutSublayers`，Core Animation 不会自动调，要宿主调用；数据源被弱引用，由 `SpringboardPageGrid` 持有；`makeLayerForLayer:` 在协议上是可选的，实际必须实现。
 
@@ -140,6 +140,13 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **收起时先交还输入，再放退场动画。** 与 15 一样：退场一开始就归还键盘焦点、事件不再拦截，正在退场的窗口另存一份，动画结束后才移出屏幕；此时再打开会先立刻结束旧的那份。点图标启动的放大淡出放在窗口根图层上，不随界面一起淡出。
 
+**开在 Dock 所在的那块屏，显示期间 Dock 不换屏。** 15 的 Launchpad 只开在 Dock 所在的显示器上：`-[Springboard display]`（15.5 `0x100008248`）就是 `[[DockBar display] identifier]`，F4、触发角、Dock 里的图标与捏合都只切换显隐，不看指针在哪；要开在另一块屏，先把 Dock 叫过去（「显示器具有单独的空间」开着时，指针推到那块屏的底边）。复刻照做：宿主报告 Dock 所在的屏（`SpringboardHost.dockDisplayIdentifier`），`SpringboardDisplay` 取它，读不到或那块屏已不在活动显示器里时退回主显示器；窗口、壁纸、尺寸、刘海高度与预渲染的图标都按这块屏取。注入版读 `DockBar.display` 而不是 `realDisplay`：前者在换屏一开始就设好，后者要等旧屏上的 Dock 窗口撤下才跟上。`DisplayDescriptor` 的 `identifier` 单独写成一个 proxy（`DockDisplayIdentity`），不在装 hook 前的那批核对里：对不上时只是选不了屏，界面照旧开在主显示器上。其余几条也照 15：
+
+- 显示期间 Dock 不换屏。指针推屏走的是 `-[DockVisibility forceDockOntoDisplay:]`，15 的这个方法（`0x1000551AC`）在 Launchpad 可见时直接返回；26 与 27 只剩「stack 展开」那一条检查（27.2 `0x100035694`），所以 payload 替换了它，显示时不转给 Dock。
+- 显示器插拔、改分辨率或改排列，立刻不带动画收起：15 的重配置回调（`sub_10010CEB4`）也是不管哪块屏变了都先收起。复刻用 `CGDisplayRegisterReconfigurationCallback`，两版共用。
+- 失去键盘焦点就收起（`-[Springboard lostKeyFocus:]`，`0x10009262C`）。窗口服务器给持有键盘焦点的进程发 CGEvent 类型 21，字段 64 是一个码；15 对 0x1000、0xF102 收起，对 0x4000 不收，搜索框有焦点或有字、正在改名、删除确认开着时也不收（`SpringboardKeyFocus`）。27.2 的 `handleMachMessage:size:` 把每个事件都交给 `handleDockBarEvent:type:`，所以已有的事件 hook 收得到；26.6.2 只在调度中心截获事件时收不到。这几个码 Apple 没有命名，27.2 的 Dock 自己的用法（`-[DockBarNotificationEventHandler handleNotificationEvent:type:]`，`0x1000852A0`）显示 0x1000 是失去焦点、0x4000 是焦点交给了字段 73 里的那个进程。删除确认由辅助进程弹，弹出时它会把键盘拿走，所以那条例外照搬是必要的。
+- Dock 换屏后按新屏的尺寸预渲染图标。图标缓存按像素尺寸分开存，换到尺寸不同的屏时，不预渲染的话第一次打开会先露出 15 留下的旧图标。`forceDockOntoDisplay:` 只是把换屏排进主队列（27.2 与 26.6.2 都是 `dispatch_async`），所以替换实现转给 Dock 之后再往主队列排一个块，轮到它时 `DockBar.display` 已是新屏；没有为此再替换 `-[DockBar setDisplay:]`。显示器重配置后等 1 秒、Dock 安顿好再渲染。
+
 **再次打开回到上次的位置，靠收起时记下来，不是靠留着界面。** 15 的 Launchpad 在 Dock 的整个生命周期里只建一次，收起时只清掉搜索、选中与抖动模式，不动页码，也不关文件夹，所以再打开还在原处。复刻每次打开都重建窗口与界面，于是收起时记下 `SpringboardPosition`（主页的页号，开着的文件夹及其页号），下次打开时先不带动画地摆好，再放进场动画；文件夹开着时进场缩放的是文件夹面板，主页停在 0.95，与 15 相同。几条细则：搜索结果按进入搜索前的页记，因为 15 在退场后清空搜索、无动画回到那一页；正在关闭的文件夹和拖动中还没存进库的文件夹按已关闭记；期间布局变了，文件夹还在就在它现在所在的那页打开，页数少了就退到最后一页，文件夹没了就只回到那一页（`resolved(in:)`）。位置只在内存里，Dock 重启后回到第一页，与 15 相同。
 
 **点 Apps 图标关掉 Launchpad，靠时间先后认出这次点击。** 15 的 Dock 点任何图标都先收起 Launchpad 再执行图标的动作，唯独 Launchpad 图标例外，它自己的动作就是切换。27.2 的 Dock 不告诉 payload 点的是哪个图标，所以点 Dock 一律先收起；而 Apps 图标的动作经 `-[WVExpose exitAndDoWork:]` 排到主队列的下一轮才调 `sendLaunchAppsBrowsing`，那时界面已经收起，于是又被打开，看起来就是「点 Apps 只会打开」。现在点 Dock 收起时记下时刻，此后 0.5 秒内到达的「打开 Apps」请求算作这次点击的，不再打开（`SpringboardEntry`）。没有照 15 按图标类型豁免：那要再依赖 Dock 的命中测试与图标类型两个接口，新构建上多两处可能对不上。代价见「已知降级」。
@@ -157,7 +164,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/
 ├── System/                             # 系统框架的私有接口，两个宿主都能用
 │   ├── QuartzCorePrivate.swift         # CA 私有滤镜与 CABackdropLayer
 │   ├── IconServicesBridge.swift        # IconServices 取图
-│   ├── SkyLightBridge.swift            # 连接、窗口层级、键盘焦点
+│   ├── SkyLightBridge.swift            # 连接、窗口层级、键盘焦点、窗口服务器记的 Dock 矩形
 │   ├── WallpaperSnapshot.swift         # 截壁纸窗口（27 归 WindowManager，26 归 Dock）
 │   ├── SystemPasteboard.swift          # HIServices 的 Pasteboard Manager
 │   └── ApplicationLauncher.swift       # LaunchServices 启动 App
@@ -193,6 +200,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/
     ├── SpringboardPinch.swift          # 15.5 的捏合映射与弹簧（纯计算）
     ├── SpringboardPosition.swift       # 再次打开时回到的页与文件夹，及其在新布局里的换算（纯计算）
     ├── SpringboardEntry.swift          # 「打开 Apps」请求的应答：打开、关闭，或认出点 Apps 图标后不动（纯计算）
+    ├── SpringboardDisplay.swift        # 开在哪块屏：Dock 所在的屏，读不到或已拔掉时退回主屏；显示器的缩放与重配置回调
+    ├── SpringboardKeyFocus.swift       # 失去键盘焦点时 15 收不收起（纯计算）
     ├── SpringboardReplicaLayers.swift  # Dock 的 EC* 图层类的等价实现（独立版用；见独立版实现说明）
     ├── SpringboardReplicaComparison.swift # 开发构建：在 Dock 里把等价图层与 Dock 的类对照
     └── SpringboardSelfCheck.swift      # 开发构建的离屏自检
@@ -206,7 +215,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── DockHostInterface.swift         # 签名清单与校验；WALayerKitWindow 的 proxy 与 init
 │   ├── DockBarReference.swift          # 经全局变量拿 DockBar 与 DockGlobals
 │   ├── DockGlassMaterial.swift         # Dock 自己的液态玻璃（Cmd-Tab 切换器那套控制器）
-│   ├── DockEnvironment.swift           # Dock 的方向、厚度、刘海、图标样式；DockBar 与 DisplayDescriptor 的 proxy
+│   ├── DockEnvironment.swift           # Dock 所在的屏、方向、厚度、刘海、图标样式；DockBar 与 DisplayDescriptor 的 proxy
 │   ├── DockLayerFactory.swift          # ECGridLayer、ECImageGridLayer、ECTextLayer、ECShadowTextLayer、材质
 │   ├── DockApplicationUninstaller.swift # Dock 的卸载器
 │   ├── SpringboardRemoteTextField.swift # 辅助进程托管的搜索框与改名框：CALayerHost 与事件转发
@@ -233,6 +242,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 捏合没有接入 27 的 Dock 手势系统（那里已经没有它），而是读原始 DockSwipe 事件，并且要用户先关掉 Spotlight 的捏合。
 - 背景默认照 15 截壁纸、加三个滤镜；另有 `springboard-background` 设为 `glass` 时的 Dock 液态玻璃，那时 App 的窗口会被模糊进来。
 - 点 Apps 图标关闭 Launchpad，靠「点 Dock 收起后 0.5 秒内的请求」认出这次点击，不是 15 那样按图标类型豁免（原因见上）。
+- 多显示器：提案的第一版只在主显示器上显示，后来照 15 改为开在 Dock 所在的屏，见提案[多显示器：照 macOS 15 开在 Dock 所在的那块屏](../Evolutions/draft-multi-display.md)。
 
 ## 验证
 
@@ -270,6 +280,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 全局扫描（2026-11-11，只在开发机上，不碰 Dock）：单元测试覆盖找到持有目标类实例的那个槽、类不匹配时不误报、堆块小于实例大小时被筛掉、不是堆块的值（小整数、没映射的地址、未对齐的地址）一个都不解引用、多个槽持有同一对象时都报出来且用那个对象、持有不同对象时一个也不用、先扫的段有命中就不看后面的段、区域起点不按指针对齐时仍能找到里面对齐位置上的对象、堆块够大而第一个字根本不是类时既不认错也不把那个野地址交给 ARC、按类名查来的 Objective-C 类也能匹配（Dock 的两个全局走的就是这条路）。另有一条遍历本进程全部已加载镜像的真实 `__DATA` 段、拿一个没有全局持有的类去扫：那些段装满了别处留下的值，跑完不崩就是「三道筛子没有解引用不该碰的内存」的证据。`swift test` 合计 538 个测试通过，`RunScript.sh` 的完整构建与三个架构切片校验通过。
 - **在真实的 Dock 里验证过了**（2026-11-11，用户亲自在一台 27.2（26B123）上运行）：`DockBar` 与 `DockGlobals` 都在 `__DATA,__common` 里，各只有一个槽持有它们——日志是 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`。控制面板开着时每三秒现场扫一次，近百次里每次都只找到那一个槽（那时每扫一次都写一行日志，这之后改成只有答案变化时才写）。
 - **macOS 26 上也验证过了**（2026-11-11，在 26.6.2 的虚拟机里非交互跑的）：注入后两个全局同样各在 `__DATA,__common` 的一个槽里被找到，26 上 `DockGlobals` 是 Objective-C 类，日志写的就是 `Found DockGlobals in __DATA,__common, 1 slot(s)`；同一次注入 23 个方法签名全部吻合、两个 hook 都装上，离屏自检的网格、缩略图、选中材质、壁纸与 97 个图标都与改前一致。玻璃退回模糊是 26 上本来就有的降级（见「已知降级」），与这次改动无关。
+- 多显示器（2026-11-11，只在开发机上，不碰 Dock）：单元测试覆盖选屏（开在 Dock 所在的屏；读不到、或那块屏已拔掉时退回主屏）、重配置回调的判断（Begin 之后的每个回调都算）、失去键盘焦点的判断表（0x1000 与 0xF102 收起，0x4000 等不收，正在输入或删除确认开着时不收）与类型 21 事件的读法、搜索框有字就算正在输入、`forceDockOntoDisplay:` 的替换与 `DisplayDescriptor.identifier` 的编码。`swift test` 合计 554 个测试通过，`RunScript.sh` 的完整构建与三个架构切片校验通过。没有部署到测试机：MacBook 改装了 15，26 虚拟机上当时装着另一项功能等用户验收的构建。多屏的效果、Dock 被拦住不换屏、失焦时 Dock 实际收到哪个码，都要在接着第二块屏的真机上看。
 
 ## 已知降级
 
@@ -286,7 +297,9 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 再次打开的位置不跨 Dock 重启保存（与 15 相同）。
 - Dock 在左右两侧时，满 5 行的文件夹常常不往下多伸那 30 点：15 的公式只在文件夹底边高于 30 点时才伸，侧放 Dock 时底边多半正好是 30。这时文件夹每页的格子比主页的矮 6 点，而界面层按主页的格子算拖动的落点与让位，会偏几点。这是按代码推断的，没有在真机上复现。
 - 文件夹开着时让 Dock 滑走，只在指针不在 Dock 上、Dock 没有键盘焦点时立刻开始，15 与 27.2 的 Dock 都是这样；Dock 藏起来时指针推到屏幕边会不会把它叫回来，没有验证。
-- 只在主显示器上显示。
+- 多显示器只做到 15 的程度：只开在 Dock 所在的那块屏，不同时出现在几块屏上。这套做法还没有在接着第二块屏的真机上验证过。
+- 在另一块屏点别的 App 时，Dock 收到的焦点通知是 0x1000 还是 0x4000 没有实机核对；是 0x4000 时照 15 不收起。每个通知的码都写进 info 日志（`Key focus notification …`）。
+- 图标缓存不清旧尺寸：在尺寸不同的几块屏之间来回换 Dock，Dock 进程里就多存几份图标。
 - 新装 App 的蓝点：从 Launchpad 以外启动后，要到下次打开 Launchpad 才消失，并且依赖 Spotlight 记下的使用时间；关掉 Spotlight 索引时只有从 Launchpad 启动才会清掉。测试版 App 的黄点与屏幕使用时间的沙漏标记没有做。
 - macOS 26 上没有玻璃背景：26 的 `DockGlassMaterialLayerController` 用的是 `configureUsingConfiguration:` 与 `rebuildLayersWithEnvironment:`，签名核对不过，`springboard-background` 设成 `glass` 也退回带 15 三个滤镜的模糊。
 - macOS 26 上透明与着色图标的混合没有与 26 的 Dock 对照过：26 没有 `kCAFilterClearIconBlendMode`，复刻按 27 的映射在透明与浅色着色样式下不加滤镜、深色着色用 Screen，而 26 的 `-[DOCKTileLayer init]` 默认给格子图片的是 Screen。
