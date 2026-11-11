@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 @testable import LaunchpadAwakenerSpringboardCore
+import Metal
 import QuartzCore
 import Testing
 
@@ -62,6 +63,8 @@ struct SpringboardDockDroppingTests {
         static let dockFrame = CGRect(x: 400, y: 862, width: 670, height: 94)
 
         var dropResult = SpringboardDockDropResult.kept
+        /// False where no window above the Dock can be made.
+        var makesDragWindows = true
         private(set) var drags: [RecordingDockDrag] = []
         private(set) var dragWindows: [RecordingDragWindow] = []
 
@@ -70,6 +73,7 @@ struct SpringboardDockDroppingTests {
         }
 
         func makeDragWindow() -> (any SpringboardDragWindow)? {
+            guard makesDragWindows else { return nil }
             let dragWindow = RecordingDragWindow()
             dragWindows.append(dragWindow)
             return dragWindow
@@ -103,9 +107,11 @@ struct SpringboardDockDroppingTests {
 
     // MARK: - The springboard
 
+    private static let screenHeight: CGFloat = 956
+
     private static let metrics = SpringboardMetrics(
         SpringboardMetrics.Input(
-            screenSize: CGSize(width: 1470, height: 956),
+            screenSize: CGSize(width: 1470, height: screenHeight),
             dockOrientation: .bottom,
             dockThickness: 79,
             notchHeight: 0,
@@ -157,20 +163,23 @@ struct SpringboardDockDroppingTests {
 
     private struct Fixture {
         let interface: SpringboardInterface
+        let rootLayer: CALayer
         let dockDropTarget: RecordingDockDropTarget
         let editLog: EditLog
     }
 
     private static func makeFixture(dropResult: SpringboardDockDropResult = .kept, position: SpringboardPosition = .firstPage) -> Fixture {
         let editLog = EditLog()
-        let interface = SpringboardInterface(layout: layout, metrics: metrics, scale: 2, rootLayer: CALayer(), position: position, applyEdit: { editLog.edits.append($0) })
+        let rootLayer = CALayer()
+        rootLayer.frame = CGRect(origin: .zero, size: metrics.input.screenSize)
+        let interface = SpringboardInterface(layout: layout, metrics: metrics, scale: 2, rootLayer: rootLayer, position: position, applyEdit: { editLog.edits.append($0) })
         let dockDropTarget = RecordingDockDropTarget()
         dockDropTarget.dropResult = dropResult
         interface.resolveDockDropTarget = { dockDropTarget }
         interface.screenTopLeft = { rectInContainer in
-            CGPoint(x: rectInContainer.minX, y: 956 - rectInContainer.maxY)
+            CGPoint(x: rectInContainer.minX, y: screenHeight - rectInContainer.maxY)
         }
-        return Fixture(interface: interface, dockDropTarget: dockDropTarget, editLog: editLog)
+        return Fixture(interface: interface, rootLayer: rootLayer, dockDropTarget: dockDropTarget, editLog: editLog)
     }
 
     /// Moves a hundred seconds apart: slow enough for the springboard to respond to every one at once.
@@ -190,6 +199,24 @@ struct SpringboardDockDroppingTests {
         _ = interface.handleMouseDown(at: start, timestamp: 0)
         _ = interface.handleMouseDragged(to: CGPoint(x: start.x + 10, y: start.y), timestamp: time(1))
         return try #require(interface.dragSession)
+    }
+
+    /// Hands `layer` to a renderer drawing off screen and commits it. Core Animation animates changes only
+    /// to a layer it has committed, so from here on `layer` animates as one on screen does.
+    private static func makeRenderer(committing layer: CALayer) throws -> CARenderer {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 64, height: 64, mipmapped: false)
+        textureDescriptor.usage = [.renderTarget, .shaderRead]
+        let texture = try #require(device.makeTexture(descriptor: textureDescriptor))
+        let renderer = CARenderer(mtlTexture: texture, options: nil)
+        renderer.layer = layer
+        renderer.bounds = layer.bounds
+        CATransaction.flush()
+        renderer.beginFrame(atTime: CACurrentMediaTime(), timeStamp: nil)
+        renderer.addUpdate(renderer.bounds)
+        renderer.render()
+        renderer.endFrame()
+        return renderer
     }
 
     // MARK: - On the Dock
@@ -350,6 +377,41 @@ struct SpringboardDockDroppingTests {
         #expect(fixture.dockDropTarget.drags.first?.cancelCount == 1)
     }
 
+    @Test("going while a search result is on the Dock, the icon takes its full opacity at once, not over a fade")
+    func hidingRestoresOpacityAtOnce() throws {
+        let fixture = Self.makeFixture()
+        defer { fixture.interface.tearDown() }
+        let renderer = try Self.makeRenderer(committing: fixture.rootLayer)
+        let dragSession = try Self.pickUp(itemAt: 0, in: fixture.interface)
+        dragSession.isLeavingSearch = true
+        _ = fixture.interface.handleMouseDragged(to: Self.pointOnDock, timestamp: Self.time(2))
+        CATransaction.flush()
+
+        withExtendedLifetime(renderer) {
+            fixture.interface.prepareForHiding()
+            CATransaction.flush()
+        }
+
+        // An icon brightening while everything else fades out shows for a quarter of a second.
+        #expect(dragSession.itemLayer.animation(forKey: "opacity") == nil)
+    }
+
+    @Test("leaving the Dock never puts back an icon that is no longer where the Dock had it")
+    func leavingDockLeavesRemovedIconAlone() throws {
+        let fixture = Self.makeFixture()
+        defer { fixture.interface.tearDown() }
+        fixture.dockDropTarget.makesDragWindows = false
+        let dragSession = try Self.pickUp(itemAt: 0, in: fixture.interface)
+        _ = fixture.interface.handleMouseDragged(to: Self.pointOnDock, timestamp: Self.time(2))
+        #expect(dragSession.isOverDock)
+        #expect(dragSession.dragWindow == nil)
+        dragSession.itemLayer.removeFromSuperlayer()
+
+        fixture.interface.leaveDock()
+
+        #expect(dragSession.itemLayer.superlayer == nil)
+    }
+
     @Test("torn down mid-drag, the springboard leaves no gap and no window behind")
     func tearDownOnDock() throws {
         let fixture = Self.makeFixture()
@@ -405,7 +467,7 @@ struct SpringboardDockDroppingTests {
         homeLayer.layoutIfNeeded()
         let iconFrame = homeLayer.imageLayer.convert(homeLayer.imageLayer.bounds, to: fixture.interface.containerLayer)
         #expect(!iconFrame.isEmpty)
-        #expect(configuration.screenIconCenter == CGPoint(x: iconFrame.midX, y: 956 - iconFrame.midY))
+        #expect(configuration.screenIconCenter == CGPoint(x: iconFrame.midX, y: Self.screenHeight - iconFrame.midY))
     }
 
     @Test("let go on the Trash while a folder is open, the application put back on the main page is asked about")

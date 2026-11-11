@@ -143,6 +143,8 @@ final class DockDropTarget: SpringboardDockDropTarget {
         signature.isPresent ? nil : signature.methodName
     }
 
+    /// Whether the Dock takes drops from the springboard at all: the host offers no drop target otherwise,
+    /// and everything else in the replica goes on working.
     nonisolated static var isCompatible: Bool {
         missingMethodNames.isEmpty
     }

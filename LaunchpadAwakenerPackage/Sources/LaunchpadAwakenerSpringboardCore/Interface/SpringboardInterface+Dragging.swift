@@ -904,7 +904,7 @@ extension SpringboardInterface {
     func finishDrag() {
         // An icon still on the Dock — a search result whose drag ends as the springboard goes — comes back
         // under the springboard first, to go with everything else rather than with the Dock's window.
-        leaveDock()
+        leaveDock(animated: false)
         if let dragSession, let mainPageArrangement = dragSession.mainPageArrangement, folderPanel != nil {
             mainPagePlaceholder = mainPageArrangement
         }

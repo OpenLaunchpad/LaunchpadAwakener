@@ -55,20 +55,25 @@ extension SpringboardInterface {
         }
     }
 
-    /// The pointer left the Dock, or the drag is cancelled: the Dock closes its gap, and the icon is back
-    /// in the springboard at full opacity.
-    func leaveDock() {
+    /// The pointer left the Dock, or the drag is ending: the Dock closes its gap, and an icon still in the
+    /// window above the Dock is back in the springboard, at full opacity — over the usual quarter of a second
+    /// while it is still dragged, at once when the drag ends, so that it goes with everything else.
+    func leaveDock(animated: Bool = true) {
         guard let dragSession, dragSession.isOverDock else { return }
         dragSession.isOverDock = false
         dragSession.dockDrag?.cancel()
         dragSession.dockDrag = nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        if dragSession.itemLayer.superlayer === dragSession.dragWindow?.containerLayer {
+        // Only from that window: an icon put into a page or taken away meanwhile stays where it is.
+        if let windowContainerLayer = dragSession.dragWindow?.containerLayer, dragSession.itemLayer.superlayer === windowContainerLayer {
             containerLayer.addSublayer(dragSession.itemLayer)
         }
         CATransaction.commit()
+        CATransaction.begin()
+        CATransaction.setDisableActions(!animated)
         dragSession.itemLayer.opacity = 1
+        CATransaction.commit()
     }
 
     /// Moves the dragged icon into the window above the Dock, making that window the first time. The
