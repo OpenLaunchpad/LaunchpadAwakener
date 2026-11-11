@@ -13,9 +13,9 @@ package enum SkyLightBridge {
     private typealias SetWindowLevelFunction = @convention(c) (UInt32, UInt32, Int32) -> Int32
     private typealias StealKeyFocusFunction = @convention(c) (UInt32, UInt32) -> Int32
     private typealias ReleaseKeyFocusFunction = @convention(c) (UInt32) -> Int32
-    /// `SLSGetDockRectWithOrientation(connection, &rect, &reason, &orientation)`: returns nothing, writes all
+    /// `SLSGetDockRectWithOrientation(connection, &rectangle, &reason, &orientation)`: returns nothing, writes all
     /// three without checking for null (27.2 `0x182A217AC`).
-    private typealias GetDockRectFunction = @convention(c) (UInt32, UnsafeMutablePointer<CGRect>, UnsafeMutablePointer<UInt32>, UnsafeMutablePointer<UInt32>) -> Void
+    private typealias GetDockRectangleFunction = @convention(c) (UInt32, UnsafeMutablePointer<CGRect>, UnsafeMutablePointer<UInt32>, UnsafeMutablePointer<UInt32>) -> Void
 
     /// The flags macOS 15's `-[Springboard prepareForEnterAnimation]` passed when taking key focus.
     private static let launchpadKeyFocusFlags: UInt32 = 1152
@@ -59,17 +59,17 @@ package enum SkyLightBridge {
     /// The rectangle the window server keeps for the Dock — the one AppKit leaves out of a screen's visible
     /// frame — in global coordinates with a top-left origin. Any process can ask; nil when the function is
     /// missing or the window server has no rectangle.
-    package static var dockRect: CGRect? {
+    package static var dockRectangle: CGRect? {
         guard
             let connectionIdentifier = mainConnectionIdentifier,
-            let getDockRect = resolveFunction(named: "SLSGetDockRectWithOrientation", as: GetDockRectFunction.self)
+            let getDockRectangle = resolveFunction(named: "SLSGetDockRectWithOrientation", as: GetDockRectangleFunction.self)
         else { return nil }
-        var rect = CGRect.zero
+        var rectangle = CGRect.zero
         var reason: UInt32 = 0
         var orientation: UInt32 = 0
-        getDockRect(connectionIdentifier, &rect, &reason, &orientation)
-        guard rect != .zero, rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite else { return nil }
-        return rect
+        getDockRectangle(connectionIdentifier, &rectangle, &reason, &orientation)
+        guard rectangle != .zero, rectangle.minX.isFinite, rectangle.minY.isFinite, rectangle.width.isFinite, rectangle.height.isFinite else { return nil }
+        return rectangle
     }
 
     private static func resolveFunction<FunctionType>(

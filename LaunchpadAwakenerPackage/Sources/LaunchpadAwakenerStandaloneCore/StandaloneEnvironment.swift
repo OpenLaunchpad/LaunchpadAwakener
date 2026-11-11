@@ -36,33 +36,33 @@ enum StandaloneEnvironment {
 
     /// The display the Dock is on, from the rectangle the window server keeps for it; nil when it keeps none.
     static var dockDisplayIdentifier: CGDirectDisplayID? {
-        guard let dockRect = SkyLightBridge.dockRect else { return nil }
+        guard let dockRectangle = SkyLightBridge.dockRectangle else { return nil }
         let displays = SpringboardDisplay.activeDisplays.map { displayIdentifier in
             (identifier: displayIdentifier, bounds: CGDisplayBounds(displayIdentifier))
         }
-        return display(holdingDockRect: dockRect, among: displays)
+        return display(holdingDockRectangle: dockRectangle, among: displays)
     }
 
     /// The display the Dock's rectangle is on: the one holding its centre or, for a Dock hidden past an edge,
     /// the nearest one within the Dock's own length of it. Global coordinates with a top-left origin.
     static func display(
-        holdingDockRect dockRect: CGRect,
+        holdingDockRectangle dockRectangle: CGRect,
         among displays: [(identifier: CGDirectDisplayID, bounds: CGRect)]
     ) -> CGDirectDisplayID? {
-        let center = CGPoint(x: dockRect.midX, y: dockRect.midY)
+        let center = CGPoint(x: dockRectangle.midX, y: dockRectangle.midY)
         if let holdingDisplay = displays.first(where: { $0.bounds.contains(center) }) {
             return holdingDisplay.identifier
         }
         let nearestDisplay = displays.min { distance(from: center, to: $0.bounds) < distance(from: center, to: $1.bounds) }
-        guard let nearestDisplay, distance(from: center, to: nearestDisplay.bounds) <= max(dockRect.width, dockRect.height) else {
+        guard let nearestDisplay, distance(from: center, to: nearestDisplay.bounds) <= max(dockRectangle.width, dockRectangle.height) else {
             return nil
         }
         return nearestDisplay.identifier
     }
 
-    private static func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
-        let horizontalDistance = max(rect.minX - point.x, 0, point.x - rect.maxX)
-        let verticalDistance = max(rect.minY - point.y, 0, point.y - rect.maxY)
+    private static func distance(from point: CGPoint, to rectangle: CGRect) -> CGFloat {
+        let horizontalDistance = max(rectangle.minX - point.x, 0, point.x - rectangle.maxX)
+        let verticalDistance = max(rectangle.minY - point.y, 0, point.y - rectangle.maxY)
         return (horizontalDistance * horizontalDistance + verticalDistance * verticalDistance).squareRoot()
     }
 

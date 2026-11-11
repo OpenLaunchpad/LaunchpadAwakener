@@ -397,9 +397,9 @@ package final class SpringboardController {
         }
     }
 
-    /// The keyboard left: another application took it — say, clicked on another display — or the user called
-    /// up something over the springboard. 15 hid Launchpad then, unless text was being edited or a deletion
-    /// was being confirmed; see ``SpringboardKeyFocus``.
+    /// The window server says the keyboard left: another application took it — clicked on another display,
+    /// say — or something was called up over the springboard. Hides the springboard where 15 hid Launchpad;
+    /// see ``SpringboardKeyFocus``.
     private func handleKeyFocusNotification(code: Int64, otherProcessIdentifier: Int64, interface: SpringboardInterface) {
         let hidesSpringboard = SpringboardKeyFocus.hidesSpringboard(
             notificationCode: code,

@@ -97,9 +97,9 @@ public final class StandaloneLaunchpad {
     public func runSelfCheck() {
         let host = StandaloneSpringboardHost.shared
         let displayIdentifier = SpringboardDisplay.current
-        let dockRectDescription = SkyLightBridge.dockRect.map { NSStringFromRect($0) } ?? "none"
+        let dockRectangleDescription = SkyLightBridge.dockRectangle.map { NSStringFromRect($0) } ?? "none"
         let dockDisplayDescription = host.dockDisplayIdentifier.map { "display \($0)" } ?? "an unknown display"
-        #log(.info, "Self-check (standalone): the window server's Dock rectangle is \(dockRectDescription, privacy: .public), on \(dockDisplayDescription, privacy: .public); the springboard opens on display \(displayIdentifier, privacy: .public) of \(SpringboardDisplay.activeDisplays.count, privacy: .public)")
+        #log(.info, "Self-check (standalone): the window server's Dock rectangle is \(dockRectangleDescription, privacy: .public), on \(dockDisplayDescription, privacy: .public); the springboard opens on display \(displayIdentifier, privacy: .public) of \(SpringboardDisplay.activeDisplays.count, privacy: .public)")
         let dockGeometry = host.dockGeometry(onDisplay: displayIdentifier)
         #log(.info, "Self-check (standalone): Dock \(dockGeometry.orientation.rawValue, privacy: .public) \(dockGeometry.thickness, privacy: .public), notch \(dockGeometry.notchHeight, privacy: .public)")
         if let wallpaper = StandaloneWallpaper.image(onDisplay: displayIdentifier) {

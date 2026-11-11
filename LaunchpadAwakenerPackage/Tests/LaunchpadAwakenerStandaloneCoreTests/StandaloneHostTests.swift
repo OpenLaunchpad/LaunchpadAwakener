@@ -109,20 +109,20 @@ struct StandaloneHostTests {
 
     @Test("the Dock is on the display holding the middle of its rectangle")
     func dockOnTheSecondDisplay() {
-        let dockRect = CGRect(x: 1700, y: 930, width: 990, height: 94)
-        #expect(StandaloneEnvironment.display(holdingDockRect: dockRect, among: Self.builtInAndSidecarDisplays) == 5)
+        let dockRectangle = CGRect(x: 1700, y: 930, width: 990, height: 94)
+        #expect(StandaloneEnvironment.display(holdingDockRectangle: dockRectangle, among: Self.builtInAndSidecarDisplays) == 5)
     }
 
     @Test("a Dock hidden below a display's bottom edge belongs to that display")
     func hiddenDock() {
-        let dockRect = CGRect(x: 200, y: 982, width: 1100, height: 94)
-        #expect(StandaloneEnvironment.display(holdingDockRect: dockRect, among: Self.builtInAndSidecarDisplays) == 1)
+        let dockRectangle = CGRect(x: 200, y: 982, width: 1100, height: 94)
+        #expect(StandaloneEnvironment.display(holdingDockRectangle: dockRectangle, among: Self.builtInAndSidecarDisplays) == 1)
     }
 
     @Test("a rectangle far from every display belongs to none")
     func rectangleOffEveryDisplay() {
-        let dockRect = CGRect(x: 10_000, y: 10_000, width: 990, height: 94)
-        #expect(StandaloneEnvironment.display(holdingDockRect: dockRect, among: Self.builtInAndSidecarDisplays) == nil)
+        let dockRectangle = CGRect(x: 10_000, y: 10_000, width: 990, height: 94)
+        #expect(StandaloneEnvironment.display(holdingDockRectangle: dockRectangle, among: Self.builtInAndSidecarDisplays) == nil)
     }
 
     /// The window server of the machine the tests run on, asked as the standalone app asks it.
@@ -131,8 +131,8 @@ struct StandaloneHostTests {
         .enabled(if: CGMainDisplayID() != kCGNullDirectDisplay)
     )
     func dockDisplayOfThisMachine() throws {
-        let dockRect = try #require(SkyLightBridge.dockRect)
-        let dockDisplay = try #require(StandaloneEnvironment.dockDisplayIdentifier, "the Dock's rectangle \(dockRect) is on no display")
+        let dockRectangle = try #require(SkyLightBridge.dockRectangle)
+        let dockDisplay = try #require(StandaloneEnvironment.dockDisplayIdentifier, "the Dock's rectangle \(dockRectangle) is on no display")
         #expect(SpringboardDisplay.activeDisplays.contains(dockDisplay))
     }
 
@@ -145,15 +145,20 @@ struct StandaloneHostTests {
     )
     @MainActor
     func dockRectangleOrigin() throws {
-        let dockRect = try #require(SkyLightBridge.dockRect)
+        let dockRectangle = try #require(SkyLightBridge.dockRectangle)
         let zeroScreenHeight = try #require(NSScreen.screens.first).frame.height
-        let dockRectFromBottomLeft = CGRect(x: dockRect.minX, y: zeroScreenHeight - dockRect.maxY, width: dockRect.width, height: dockRect.height)
+        let dockRectangleFromBottomLeft = CGRect(
+            x: dockRectangle.minX,
+            y: zeroScreenHeight - dockRectangle.maxY,
+            width: dockRectangle.width,
+            height: dockRectangle.height
+        )
         let dockScreen = try #require(NSScreen.screens.first { screen in
-            screen.frame.contains(CGPoint(x: dockRectFromBottomLeft.midX, y: dockRectFromBottomLeft.midY))
+            screen.frame.contains(CGPoint(x: dockRectangleFromBottomLeft.midX, y: dockRectangleFromBottomLeft.midY))
         })
         #expect(
-            abs(dockScreen.visibleFrame.minY - dockRectFromBottomLeft.maxY) <= 1,
-            "visible frame \(NSStringFromRect(dockScreen.visibleFrame)), the Dock from the bottom left \(NSStringFromRect(dockRectFromBottomLeft))"
+            abs(dockScreen.visibleFrame.minY - dockRectangleFromBottomLeft.maxY) <= 1,
+            "visible frame \(NSStringFromRect(dockScreen.visibleFrame)), the Dock from the bottom left \(NSStringFromRect(dockRectangleFromBottomLeft))"
         )
     }
 
