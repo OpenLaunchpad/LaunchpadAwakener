@@ -6,7 +6,7 @@
 - **最后更新**: 2026-11-11
 - **所属愿景**: 无
 - **关联提案**: 无
-- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；拖动搜索结果在 `feature/drag-to-dock` 上实现、已合进 `main`，分支已删除；拖到 Dock 2026-11-11 在重新建的同名分支 `feature/drag-to-dock` 上实现（worktree `.worktrees/LaunchpadAwakener-DragToDock`）；输入法见提案 0001；选中高亮的修复在 `fix/search-selection-highlight` 上实现、已合进 `main`，分支已删除；删除确认改用真 `NSPopover` 在 `feature/deletion-popover` 上实现（worktree `.worktrees/LaunchpadAwakener-DeletionPopover`）；验证用原型在分支 `experiment/injection-prototype`
+- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；拖动搜索结果在 `feature/drag-to-dock` 上实现、已合进 `main`，分支已删除；拖到 Dock 2026-11-11 在重新建的同名分支 `feature/drag-to-dock` 上实现、已合进 `main`，分支已删除；输入法见提案 0001；选中高亮的修复在 `fix/search-selection-highlight` 上实现、已合进 `main`，分支已删除；删除确认改用真 `NSPopover` 在 `feature/deletion-popover` 上实现（worktree `.worktrees/LaunchpadAwakener-DeletionPopover`）；验证用原型在分支 `experiment/injection-prototype`
 - **配套文档**: [实现说明](../Internal/LaunchpadReplica.md)
 
 ## 摘要
@@ -210,7 +210,7 @@ final class SpringboardController {
    2. ✅ 文件夹里的方向键导航，规则照 15 的 `-[ECSBGroupPager navigate:withEvent:]`。
    3. ✅ 新装 App 名字旁的蓝点，判据与画法照 15 的 `ECFlagLayer`。
    4. ✅ 抖动模式的关闭按钮与删除 App Store 的 App。15 的确认气泡由 `com.apple.dock.ecap` 服务画，27.2 的 Dock.app 里已经没有这个服务，要自己画。2026-11-10 起确认气泡改由辅助进程弹真的 `NSPopover`，见第 8 步。
-   5. ◐ 把图标拖到 Dock 上加入 Dock，拖动搜索结果：2026-11-08 先留作后续项，同日接着做。拖动搜索结果已做：照 15 先退出搜索，再从 App 真正所在的地方接着拖（见决策日志），2026-11-08 在 MacBook 上交互验证。拖到 Dock 暂停，没有写代码（见决策日志）。2026-11-11 用户要求把拖到 Dock 做出来，分三步落地：
+   5. ✅ 把图标拖到 Dock 上加入 Dock，拖动搜索结果：2026-11-08 先留作后续项，同日接着做。拖动搜索结果已做：照 15 先退出搜索，再从 App 真正所在的地方接着拖（见决策日志），2026-11-08 在 MacBook 上交互验证。拖到 Dock 暂停，没有写代码（见决策日志）。2026-11-11 用户要求把拖到 Dock 做出来，分三步落地：
       1. ✅ 界面层与宿主接口：宿主新增 `dockDropTarget`（注入版以外都是 nil）。被拖的图标从拖起就在一扇高于 Dock 的透明窗口里；指针一进 Dock 栏，图标不透明度减半，App 交给 Dock 让出间隙；在 Dock 上时界面自己不让位、不弹开文件夹、不翻页；离开 Dock 复原。在 Dock 上松手，界面照 15 不滑回、直接复原，松在废纸篓上对可删的 App 弹删除确认；Esc、界面收起与拆除都让 Dock 收起间隙。单元测试用假的 Dock 目标驱动真实的界面。
       2. ✅ Dock 一侧（`DockDropTarget`）：不建 CoreDrag，直接往 Dock 的事件队列里排事件。进入时把拖动内容标为「App 的文件 URL」（6）并排 DragEnter，Dock 的动画线程此后每帧按真实指针摆放间隙；每次移动只唤醒动画线程；松手时先停住间隙、在 Dock 主锁内确认间隙的占位图标真在，再排一个新建图标的 DragDrop，四秒后 Dock 自己存进 `persistent-apps`；松在废纸篓上不排放下。每条退出路径都排一次 DragLeave、把内容标志清零。用到的 18 个方法在 26.6.2 与 27.2 签名相同，任何一个不符只停用这一项；`DragController` 照 `DockBar` 的办法按类从全局里认出来。单元测试覆盖签名与调用的顺序、成对。
       3. ✅ 文档与非交互验证：实现说明补了「拖到 Dock 上」一段、目录树、与 15 的差异、验证与已知降级，术语表登记「间隙」。部署到 26.6.2 虚拟机（非交互）：23 个方法签名全部吻合、两个 hook 装上，拖到 Dock 的 18 个方法也吻合，按类扫到 `DragController`，只读检查读到 Dock 栏与废纸篓的矩形，Dock 没有崩溃。真正拖到 Dock 上要交互，留给用户；27 上没有试（MacBook 改装了 15）。
@@ -332,3 +332,4 @@ final class SpringboardController {
 | 2026-11-11 | 拖到 Dock 第二轮自审（只审第一轮的修复）：9 条发现。修 2 条，各带修前失败、修后通过的回归测试：第一轮按审查意见删掉的那个判断其实不能删——没有拖动窗口时 `nil === nil` 成立，已移除的图标会被挂回界面；收起时图标的不透明度带着隐式动画从一半回到全满，在界面淡出时亮一下。另一条「每次结束拖动都调 `leaveDock`、将来可能把已放回网格的图标拉出来」随第一条一起解决：`leaveDock` 只挪确实还在拖动窗口里的图标。另做 2 条整理：测试的屏幕高度改用常量，`isCompatible` 补回说明。4 条记进已裁决清单（1 条不修、3 条误报） | 第二轮后不再审第三轮。同类的「两边都可能为 nil 的 `===` 比较」在整个代码库里查过，只有这一处 |
 | 2026-11-11 | 拖到 Dock 实现完成，待用户看过后收尾（第 6 批第 5 步只差交互验证） | 完整验证：`swift test` 564 个测试全部通过，`RunScript.sh` 完整构建与三个架构切片校验通过，最终构建部署到 26.6.2 虚拟机后非交互复核通过。文档：实现说明、术语表（「间隙」）、已裁决清单与文档索引已同步；项目 `CLAUDE.md` 不需要改（没有新模块、新流程或新的运行规则）；没有给外部调用方的契约，不需要使用指南 |
 | 2026-11-11 | 被拖的图标从拖起就放进 Dock 上方的窗口，整个拖动都在那里，取代「只在 Dock 上时才挪进去」 | 用户在 26 虚拟机里试过后，拿 15.5 虚拟机里原版的录屏对照指出：原版被拖图标始终在 Dock 之上，复刻在指针进入 Dock 栏之前、图标已经压到 Dock 上时被 Dock 盖住。改成 15 的做法；被拖图标与页面之间的几何改为先换算到那扇窗口里的容器（与 Launchpad 的容器布局相同）再用，涉及离开文件夹面板的判断与两处图片飞进缩略图，回归测试在去掉修复时失败、修复后通过。收起时先把图标挪回 Launchpad 的容器，随界面淡出 |
+| 2026-11-11 | 拖到 Dock 收尾，第 6 批第 5 步完成：`feature/drag-to-dock` 合进 `main`，与同时完成的多显示器支持一起推送，分支与 worktree 删除。本提案仍是 In Progress、不取号 | 用户在 26 虚拟机里试过，对照 15 的录屏后改成整个拖动都在 Dock 上方，再看过后认为没问题。第 7 步的捏合仍待用户在真机上试。文档：实现说明「拖到 Dock 上」、术语表「间隙」、已裁决清单都已随实现落地；项目 `CLAUDE.md` 不需要改；没有给外部调用方的契约，不需要使用指南；没有别的新术语 |
