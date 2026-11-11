@@ -263,9 +263,9 @@ public struct DockBuildSummary: Codable, Sendable, Equatable {
 2. ✅ `DockBarReference` 改用扫描器；删掉 `DockBuildProfile` 与 `DockBuildProfileTests`，`MachOImageInspector` 搬到自己的文件；`PayloadHooks.descriptors()` 的闸门只留签名核对。通道类型与 App 一侧同批改（原定的第 2、3 步合成一步：删掉一个类型必然同时牵动通道上引用它的类型，分两次都编译不过）。
 3. ✅ `HookInstallation` 去掉一个状态，`PayloadStatus` 加可达性字段，`DockBuildSummary` 换字段并改为从宿主自己读。
 4. ✅ 控制面板与就绪提示的文案。
-5. ✅ 在真实的 Dock 里验证（27）：用户 2026-11-11 亲自在一台 27.2（26B123）上运行，两个全局都找到了，各在 `__DATA,__common` 的一个槽里——日志 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`；控制面板每次刷新现场扫一遍，近百次都找到。**macOS 26 还没跑**：那台 26.6.2 的虚拟机里装的仍是改动之前的 payload（二进制里还有 `DockBuildProfile`），而 26 上 `DockGlobals` 是 Objective-C 类、查的是另一个类名。
+5. ✅ 在真实的 Dock 里验证：27 由用户 2026-11-11 亲自在一台 27.2（26B123）上运行，两个全局都找到了，各在 `__DATA,__common` 的一个槽里——日志 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`；控制面板每次刷新现场扫一遍，近百次都找到。26 同日在 26.6.2 的虚拟机里非交互跑过：两个全局同样各在一个槽里被找到，`DockGlobals` 走的是 Objective-C 类名那条路，23 个方法签名全部吻合、两个 hook 装上、离屏自检与改前一致。
 6. ✅ 文档同批落地：实现说明拆两段、术语表换条目、项目 `CLAUDE.md` 开头那句、未落地的复刻草案里提到构建档案的那几处、文档索引、控制面板实现说明里一句、已知降级里 `arm64e.x1` 那条。
-7. ✅ 日志降噪（验证之后补的）：重复的「找到了」降到 debug，首次与答案变化时记在默认级别。
+7. ✅ 日志降噪（验证之后补的）：重复的「找到了」降到 debug，首次与答案变化时记在默认级别。26 的虚拟机里核过：`log show` 里一次注入只有那两行，开着 `log stream --level debug` 才看得到控制面板每三秒触发的那一对重复。
 
 **收尾时必须判断两件事**（判断结果写进决策日志，不允许沉默跳过）：
 
@@ -298,3 +298,4 @@ public struct DockBuildSummary: Codable, Sendable, Equatable {
 | 2026-11-11 | 可达性查询不走主线程，也不读那两个属性的缓存 | App 是从 payload 的通道 actor 上问的，跳到主 actor 去复用缓存就会让答案等 Dock 主线程做完手上的事，而 App 给状态请求只有两秒。重新扫一遍只要几十微秒，读的还是同一块内存。 |
 | 2026-11-11 | 27 上在真实的 Dock 里验证通过 | 用户亲自运行后，日志里两个全局各在 `__DATA,__common` 的一个槽里被找到，与调研时从二进制读出的位置一致，重复扫描每次都找到。macOS 26 那条路（Objective-C 类名）还没跑过，虚拟机里装的是改动之前的 payload。 |
 | 2026-11-11 | 重复的「找到了」降到 debug，首次与变化时记在默认级别 | 验证时发现控制面板开着的几分钟里这两行写了近百次：面板每隔几秒问一次状态，每次都现场扫。只在答案变化时写一条即可。级别从 info 换成默认，是因为 info 只留在内存缓冲里——同一次注入的 `Installed 2 hook(s)` 两小时后就查不到了，而这两行恰恰是升级系统后要回头查的。 |
+| 2026-11-11 | 26 上也在真实的 Dock 里验证通过 | 本机构建签名产物，经 Ultra 中转部署进 26.6.2 的虚拟机（部署用的隧道中途断过一次，中转目录可以续传，虚拟机里装着的那份不受影响）。两个全局各在 `__DATA,__common` 的一个槽里被找到，`DockGlobals` 用的是 26 的 Objective-C 类名；23 个方法签名吻合、两个 hook 装上、离屏自检与改前一致。玻璃退回模糊是 26 本来就有的降级，改动之前的 payload 也是这样。 |

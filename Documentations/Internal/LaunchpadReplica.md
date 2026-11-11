@@ -267,7 +267,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认在 27 上的样子。
 
 - 全局扫描（2026-11-11，只在开发机上，不碰 Dock）：单元测试覆盖找到持有目标类实例的那个槽、类不匹配时不误报、堆块小于实例大小时被筛掉、不是堆块的值（小整数、没映射的地址、未对齐的地址）一个都不解引用、多个槽持有同一对象时都报出来且用那个对象、持有不同对象时一个也不用、先扫的段有命中就不看后面的段、区域起点不按指针对齐时仍能找到里面对齐位置上的对象。另有一条遍历本进程全部已加载镜像的真实 `__DATA` 段、拿一个没有全局持有的类去扫：那些段装满了别处留下的值，跑完不崩就是「三道筛子没有解引用不该碰的内存」的证据。`swift test` 合计 488 个测试通过，`RunScript.sh` 的完整构建与三个架构切片校验通过。
-- **在真实的 Dock 里验证过了**（2026-11-11，用户亲自在一台 27.2（26B123）上运行）：`DockBar` 与 `DockGlobals` 都在 `__DATA,__common` 里，各只有一个槽持有它们——日志是 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`。控制面板开着时每三秒现场扫一次，近百次里每次都只找到那一个槽（那时每扫一次都写一行日志，这之后改成只有答案变化时才写）。**macOS 26 上还没验证**：26.6.2 的虚拟机里装的仍是这次改动之前的 payload；26 上 `DockGlobals` 是 Objective-C 类，查的是另一个类名，所以那一条路还没跑过。
+- **在真实的 Dock 里验证过了**（2026-11-11，用户亲自在一台 27.2（26B123）上运行）：`DockBar` 与 `DockGlobals` 都在 `__DATA,__common` 里，各只有一个槽持有它们——日志是 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`。控制面板开着时每三秒现场扫一次，近百次里每次都只找到那一个槽（那时每扫一次都写一行日志，这之后改成只有答案变化时才写）。
+- **macOS 26 上也验证过了**（2026-11-11，在 26.6.2 的虚拟机里非交互跑的）：注入后两个全局同样各在 `__DATA,__common` 的一个槽里被找到，26 上 `DockGlobals` 是 Objective-C 类，日志写的就是 `Found DockGlobals in __DATA,__common, 1 slot(s)`；同一次注入 23 个方法签名全部吻合、两个 hook 都装上，离屏自检的网格、缩略图、选中材质、壁纸与 97 个图标都与改前一致。玻璃退回模糊是 26 上本来就有的降级（见「已知降级」），与这次改动无关。
 
 ## 已知降级
 
@@ -303,7 +304,7 @@ Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)
 
 第二行的类名是 `class_getName` 给的：27 的 `DockGlobals` 是 Swift 类，新的 Objective-C 运行时把它反混淆成「模块.类名」（查找时用的仍是改编名 `_TtC8DockCore11DockGlobals`）。26 上它是 Objective-C 类，那一行写作 `Found DockGlobals in __DATA,__common, 1 slot(s)`。
 
-每一行只在答案变化时写一次，不是每次扫描都写：控制面板开着时每隔几秒就问一次状态，而每次问都现场扫一遍。所以一次 Dock 的生命周期里通常就这两行，重复的那些落在 debug 级（`--debug` 才有）。
+每一行只在答案变化时写一次，不是每次扫描都写：控制面板开着时每隔几秒就问一次状态，而每次问都现场扫一遍。所以一次 Dock 的生命周期里通常就这两行。重复的那些落在 debug 级，而 debug 级默认根本不记录，`log show --debug` 也看不到；要看它们就在扫描发生时开着 `log stream --level debug`（2026-11-11 在 26.6.2 的虚拟机上这样看过，控制面板开着时每三秒一对）。
 
 真正可能被新构建打破的只剩方法签名。安装 hook 之前，复刻会把它要调的全部 Dock 方法按类型编码整批核对，一处不符就一个 hook 都不装，并把实际读到的编码写进日志。所以升级系统后只需要看一眼：
 
