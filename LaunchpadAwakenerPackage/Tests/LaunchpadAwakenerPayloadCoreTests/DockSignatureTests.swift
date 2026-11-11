@@ -29,6 +29,16 @@ struct PayloadHookSignatureTests {
         #expect(descriptor.isInstanceMethod)
         #expect(ObjCTypeEncodingNormalization.matches(descriptor.expectedTypeEncoding, "v24@0:8@16I20"))
     }
+
+    @Test func dockVisibilityHookMatchesTheDock() throws {
+        let descriptor = try #require(DockVisibilityHooks.descriptors().first)
+
+        #expect(DockVisibilityHooks.descriptors().count == 1)
+        #expect(descriptor.className == "DockVisibility")
+        #expect(NSStringFromSelector(descriptor.selector) == "forceDockOntoDisplay:")
+        #expect(descriptor.isInstanceMethod)
+        #expect(ObjCTypeEncodingNormalization.matches(descriptor.expectedTypeEncoding, "v20@0:8I16"))
+    }
 }
 
 /// The selectors `requirements` name and the encodings derived for them, against the ones read from the Dock.

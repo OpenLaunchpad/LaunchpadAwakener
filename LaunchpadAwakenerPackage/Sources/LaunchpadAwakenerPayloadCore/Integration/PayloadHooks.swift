@@ -47,7 +47,7 @@ public enum PayloadHooks {
             #log(.error, "The Dock's methods do not match this payload; installing no hooks")
             return []
         }
-        return SpotlightHooks.descriptors() + DockAppEventHandlerHooks.descriptors()
+        return SpotlightHooks.descriptors() + DockAppEventHandlerHooks.descriptors() + DockVisibilityHooks.descriptors()
     }
 }
 
@@ -90,5 +90,30 @@ struct DockAppEventHandlerHooks {
             if isConsumed { return }
         }
         callOriginal(eventObject, eventType)
+    }
+}
+
+/// The pointer at another display's bottom edge moves the Dock there through
+/// `-[DockVisibility forceDockOntoDisplay:]`, which macOS 15's Dock left at once while Launchpad showed. 26 and
+/// 27 check only for an open stack, so the springboard keeps the Dock on its display itself; otherwise the
+/// Dock moves as usual, and the icons are rendered for where it goes.
+@RuntimeClassHook("DockVisibility")
+struct DockVisibilityHooks {
+    /// `displayIdentifier` is the `CGDirectDisplayID` the Dock is asked to move to.
+    @RuntimeMethodReplacement
+    func forceDockOntoDisplay(_ displayIdentifier: UInt32) {
+        // The Dock asks from its event handling, on the main thread; anything else is left to the Dock.
+        guard Thread.isMainThread else {
+            callOriginal(displayIdentifier)
+            return
+        }
+        let allowsMove = MainActor.assumeIsolated {
+            SpringboardController.shared.allowsDockToChangeDisplay(to: displayIdentifier)
+        }
+        guard allowsMove else { return }
+        callOriginal(displayIdentifier)
+        MainActor.assumeIsolated {
+            SpringboardController.shared.dockWillChangeDisplay(to: displayIdentifier)
+        }
     }
 }

@@ -252,6 +252,30 @@ package final class SpringboardController {
 
     // MARK: - Displays
 
+    /// Whether the Dock may move to `targetDisplay` now: not while the springboard shows, whose window and
+    /// room for the Dock are on the Dock's display. macOS 15's `-[DockVisibility forceDockOntoDisplay:]`
+    /// (15.5 `0x1000551AC`), through which the pointer at another display's bottom edge moves the Dock, returned
+    /// at once while Launchpad was visible; 26 and 27 dropped that check along with Launchpad.
+    package func allowsDockToChangeDisplay(to targetDisplay: CGDirectDisplayID) -> Bool {
+        guard window == nil else {
+            #log(.info, "Kept the Dock on its display while the springboard shows; it was asked to move to display \(targetDisplay, privacy: .public)")
+            return false
+        }
+        return true
+    }
+
+    /// The Dock was asked to move to `targetDisplay`: renders the icons for the display the springboard will
+    /// open on once it has. The Dock moves on the main queue after the call that asked it to (27.2
+    /// `0x100035694` and 26.6.2 `0x10005D800` queue the move), so this queues behind it.
+    package func dockWillChangeDisplay(to targetDisplay: CGDirectDisplayID) {
+        guard targetDisplay != SpringboardDisplay.current else { return }
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                SpringboardController.shared.prefetchIcons(onDisplay: SpringboardDisplay.current)
+            }
+        }
+    }
+
     /// Hears about every display change from Quartz, on the thread that takes the process's window-server
     /// events; the work is done on the main actor. Registered once, for the life of the process.
     private func observeDisplayReconfiguration() {
