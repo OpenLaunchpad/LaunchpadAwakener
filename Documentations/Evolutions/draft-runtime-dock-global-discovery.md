@@ -263,7 +263,7 @@ public struct DockBuildSummary: Codable, Sendable, Equatable {
 2. ✅ `DockBarReference` 改用扫描器；删掉 `DockBuildProfile` 与 `DockBuildProfileTests`，`MachOImageInspector` 搬到自己的文件；`PayloadHooks.descriptors()` 的闸门只留签名核对。通道类型与 App 一侧同批改（原定的第 2、3 步合成一步：删掉一个类型必然同时牵动通道上引用它的类型，分两次都编译不过）。
 3. ✅ `HookInstallation` 去掉一个状态，`PayloadStatus` 加可达性字段，`DockBuildSummary` 换字段并改为从宿主自己读。
 4. ✅ 控制面板与就绪提示的文案。
-5. ⏳ 部署到两台测试机验证：27 用测试 MacBook，26 用 Ultra 上的虚拟机。看日志里找到两个全局的那两行、`Installed 2 hook(s)`，再看 Launchpad 开起来之后 Dock 会滑走、玻璃背景在画。**没做**：会话在公司那台 Mac Studio 上，到测试机要经 Mac mini 转发，整个 App 的 rsync 约 11 分钟而转发撑不过 10 分钟，断在半途会留下一个坏掉的 App（2026-11-10 实测两次都断）。等从 Ultra 直连时做。
+5. ✅ 在真实的 Dock 里验证（27）：用户 2026-11-11 亲自在一台 27.2（26B123）上运行，两个全局都找到了，各在 `__DATA,__common` 的一个槽里——日志 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`；控制面板每次刷新现场扫一遍，近百次都找到。**macOS 26 还没跑**：那台 26.6.2 的虚拟机里装的仍是改动之前的 payload（二进制里还有 `DockBuildProfile`），而 26 上 `DockGlobals` 是 Objective-C 类、查的是另一个类名。
 6. ✅ 文档同批落地：实现说明拆两段、术语表换条目、项目 `CLAUDE.md` 开头那句、未落地的复刻草案里提到构建档案的那几处、文档索引、控制面板实现说明里一句、已知降级里 `arm64e.x1` 那条。
 
 **收尾时必须判断两件事**（判断结果写进决策日志，不允许沉默跳过）：
@@ -295,3 +295,4 @@ public struct DockBuildSummary: Codable, Sendable, Equatable {
 | 2026-11-11 | 报缺失时用可读的类名，不用查找时的改编名 | 提案原说「按查找时用的类名写」。27 上那是 `_TtC8DockCore11DockGlobals`，对看控制面板的人没有意义，改成统一报 `DockGlobals`。 |
 | 2026-11-11 | 代码、测试与文档完成；测试机上的部署验证留到能直连时做 | 单元测试 488 个全部通过，`RunScript.sh` 的完整构建与架构切片校验通过。扫描在真实 Dock 里能否找到那两个全局只能在测试机上证实；从公司那台部署会在半途断开并弄坏测试机上的 App，所以不在用户不知情时试。 |
 | 2026-11-11 | 可达性查询不走主线程，也不读那两个属性的缓存 | App 是从 payload 的通道 actor 上问的，跳到主 actor 去复用缓存就会让答案等 Dock 主线程做完手上的事，而 App 给状态请求只有两秒。重新扫一遍只要几十微秒，读的还是同一块内存。 |
+| 2026-11-11 | 27 上在真实的 Dock 里验证通过 | 用户亲自运行后，日志里两个全局各在 `__DATA,__common` 的一个槽里被找到，与调研时从二进制读出的位置一致，重复扫描每次都找到。macOS 26 那条路（Objective-C 类名）还没跑过，虚拟机里装的是改动之前的 payload。 |
