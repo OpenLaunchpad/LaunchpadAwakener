@@ -68,8 +68,8 @@ final class SpringboardDragSession {
     /// The Dock keeping a gap open for the dragged application; nil off the Dock, for a folder, or where
     /// the Dock cannot.
     var dockDrag: (any SpringboardDockDrag)?
-    /// The window above the Dock the icon rides in while on it, made the first time it gets there, and
-    /// the layer in it laid out like ``SpringboardInterface/containerLayer``.
+    /// The window above the Dock the icon rides in for the whole drag, made as it is picked up, and the
+    /// layer in it laid out like ``SpringboardInterface/containerLayer``; nil where the host offers none.
     var dragWindow: (window: any SpringboardDragWindow, containerLayer: CALayer)?
     /// What letting go on the Dock did, from the release there until the springboard has put the icon back.
     var dockDropResult: SpringboardDockDropResult?
@@ -206,6 +206,7 @@ extension SpringboardInterface {
             origin: origin,
             dockDropTarget: resolveDockDropTarget()
         )
+        carryDraggedIconAboveDock()
         if isShowingSearchResults {
             leaveSearchForDraggedResult()
         }
@@ -322,7 +323,7 @@ extension SpringboardInterface {
         let cellCenter = dragSession.itemLayer.position
 
         if let folderPanel {
-            let iconRect = dragSession.itemLayer.convert(dragSession.itemLayer.iconFrame, to: containerLayer)
+            let iconRect = rectInContainer(dragSession.itemLayer.iconFrame, of: dragSession.itemLayer)
             let panelRect = folderPanel.folderLayer.convert(folderPanel.folderMetrics.panelFrame, to: containerLayer)
             if iconRect.intersects(panelRect) {
                 dragSession.wasInsideFolderPanel = true
@@ -492,10 +493,10 @@ extension SpringboardInterface {
         performPendingDrop()
     }
 
-    /// Puts the dragged icon back on top of everything, the open folder's panel included. On the Dock it
-    /// rides in the window above the Dock, on top of everything already.
+    /// Puts the dragged icon back on top of everything, the open folder's panel included. In the window
+    /// above the Dock it is on top of everything already.
     func keepDraggedIconOnTop() {
-        guard let dragSession, !dragSession.isOverDock else { return }
+        guard let dragSession, dragSession.dragWindow == nil else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         containerLayer.addSublayer(dragSession.itemLayer)
@@ -785,7 +786,7 @@ extension SpringboardInterface {
         }
         dragSession.isEnding = true
         dragSession.cancelTimers()
-        // Off the Dock: an icon that slides back slides in the springboard, under the Dock.
+        // The Dock closes its gap, and the icon is at full opacity again as it goes home.
         leaveDock()
         dragSession.mainPageArrangement = nil
         dragSession.unsavedFolderTarget = nil
@@ -902,8 +903,8 @@ extension SpringboardInterface {
     /// Ends the drag. One that ended in a folder it opened leaves the main page with its gap until that
     /// folder closes.
     func finishDrag() {
-        // An icon still on the Dock — a search result whose drag ends as the springboard goes — comes back
-        // under the springboard first, to go with everything else rather than with the Dock's window.
+        // A drag ending with the icon on the Dock — a search result's, as the springboard goes — leaves the
+        // Dock as it was.
         leaveDock(animated: false)
         if let dragSession, let mainPageArrangement = dragSession.mainPageArrangement, folderPanel != nil {
             mainPagePlaceholder = mainPageArrangement

@@ -17,6 +17,12 @@ enum SpringboardIconFlight {
     /// A copy of `imageLayer`'s image where it is now, in `destinationLayer`'s coordinates. Add it to
     /// `destinationLayer`, then commit it — `CATransaction.flush()` — before it flies.
     static func makeFlyingLayer(copying imageLayer: CALayer, in destinationLayer: CALayer) -> CALayer {
+        makeFlyingLayer(copying: imageLayer, frame: imageLayer.convert(imageLayer.bounds, to: destinationLayer))
+    }
+
+    /// A copy of `imageLayer`'s image at `frame`, given in the coordinates of the layer it is going to be
+    /// added to: for an image in another layer tree, which `convert(_:to:)` does not reach.
+    static func makeFlyingLayer(copying imageLayer: CALayer, frame: CGRect) -> CALayer {
         let flyingLayer = CALayer()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -24,7 +30,7 @@ enum SpringboardIconFlight {
         flyingLayer.contentsGravity = imageLayer.contentsGravity
         flyingLayer.contentsScale = imageLayer.contentsScale
         flyingLayer.compositingFilter = imageLayer.compositingFilter
-        flyingLayer.frame = imageLayer.convert(imageLayer.bounds, to: destinationLayer)
+        flyingLayer.frame = frame
         CATransaction.commit()
         return flyingLayer
     }

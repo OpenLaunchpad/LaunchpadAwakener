@@ -65,6 +65,9 @@ struct SpringboardDockDroppingTests {
         var dropResult = SpringboardDockDropResult.kept
         /// False where no window above the Dock can be made.
         var makesDragWindows = true
+        /// Where the windows' root layers have their origin. A window's root need not share the springboard
+        /// window's, so nothing may reach the dragged icon through the roots.
+        var dragWindowRootBoundsOrigin = CGPoint.zero
         private(set) var drags: [RecordingDockDrag] = []
         private(set) var dragWindows: [RecordingDragWindow] = []
 
@@ -75,6 +78,7 @@ struct SpringboardDockDroppingTests {
         func makeDragWindow() -> (any SpringboardDragWindow)? {
             guard makesDragWindows else { return nil }
             let dragWindow = RecordingDragWindow()
+            dragWindow.rootLayer.bounds = CGRect(origin: dragWindowRootBoundsOrigin, size: CGSize(width: 1470, height: 956))
             dragWindows.append(dragWindow)
             return dragWindow
         }
@@ -221,7 +225,24 @@ struct SpringboardDockDroppingTests {
 
     // MARK: - On the Dock
 
-    @Test("an application dragged onto the Dock is handed to it, riding above the Dock at half opacity")
+    @Test("a picked-up icon rides above the Dock for the whole drag, as 15's did")
+    func ridesAboveDock() throws {
+        let fixture = Self.makeFixture()
+        defer { fixture.interface.tearDown() }
+
+        let dragSession = try Self.pickUp(itemAt: 0, in: fixture.interface)
+        _ = fixture.interface.handleMouseDragged(to: Self.pointAboveDock, timestamp: Self.time(2))
+
+        // Not yet on the Dock, it may already lie partly over it.
+        let dragWindow = try #require(fixture.dockDropTarget.dragWindows.first)
+        #expect(fixture.dockDropTarget.dragWindows.count == 1)
+        #expect(dragWindow.isOrderedIn)
+        #expect(dragSession.itemLayer.superlayer?.superlayer === dragWindow.rootLayer)
+        #expect(dragSession.itemLayer.opacity == 1)
+        #expect(fixture.dockDropTarget.drags.isEmpty)
+    }
+
+    @Test("an application dragged onto the Dock is handed to it at half opacity")
     func applicationOntoDock() throws {
         let fixture = Self.makeFixture()
         defer { fixture.interface.tearDown() }
@@ -234,9 +255,6 @@ struct SpringboardDockDroppingTests {
         #expect(fixture.dockDropTarget.drags.count == 1)
         #expect(dockDrag.bundleURL == Self.calculator.bundleURL)
         #expect(dockDrag.startPoint == Self.globalPointOnDock)
-        let dragWindow = try #require(fixture.dockDropTarget.dragWindows.first)
-        #expect(dragWindow.isOrderedIn)
-        #expect(dragSession.itemLayer.superlayer?.superlayer === dragWindow.rootLayer)
         #expect(dragSession.itemLayer.opacity == 0.5)
     }
 
@@ -256,7 +274,7 @@ struct SpringboardDockDroppingTests {
         #expect(!dragSession.hasRearranged)
     }
 
-    @Test("leaving the Dock closes its gap and brings the icon back into the springboard at full opacity")
+    @Test("leaving the Dock closes its gap and brings the icon back to full opacity, still above the Dock")
     func leavingDock() throws {
         let fixture = Self.makeFixture()
         defer { fixture.interface.tearDown() }
@@ -268,7 +286,7 @@ struct SpringboardDockDroppingTests {
         let dockDrag = try #require(fixture.dockDropTarget.drags.first)
         #expect(dockDrag.cancelCount == 1)
         #expect(!dragSession.isOverDock)
-        #expect(dragSession.itemLayer.superlayer === fixture.interface.containerLayer)
+        #expect(dragSession.itemLayer.superlayer?.superlayer === fixture.dockDropTarget.dragWindows.first?.rootLayer)
         #expect(dragSession.itemLayer.opacity == 1)
     }
 
@@ -329,7 +347,7 @@ struct SpringboardDockDroppingTests {
         #expect(fixture.editLog.edits.isEmpty)
     }
 
-    @Test("Escape on the Dock closes its gap and sends the icon home through the springboard")
+    @Test("Escape on the Dock closes its gap and sends the icon home above everything, as 15's did")
     func escapeOnDock() throws {
         let fixture = Self.makeFixture()
         defer { fixture.interface.tearDown() }
@@ -341,7 +359,8 @@ struct SpringboardDockDroppingTests {
         let dockDrag = try #require(fixture.dockDropTarget.drags.first)
         #expect(dockDrag.cancelCount == 1)
         #expect(dockDrag.drops.isEmpty)
-        #expect(dragSession.itemLayer.superlayer === fixture.interface.containerLayer)
+        #expect(dragSession.itemLayer.superlayer?.superlayer === fixture.dockDropTarget.dragWindows.first?.rootLayer)
+        #expect(dragSession.itemLayer.opacity == 1)
         #expect(fixture.editLog.edits.isEmpty)
     }
 
@@ -349,7 +368,7 @@ struct SpringboardDockDroppingTests {
     func hidingOnDock() throws {
         let fixture = Self.makeFixture()
         defer { fixture.interface.tearDown() }
-        _ = try Self.pickUp(itemAt: 0, in: fixture.interface)
+        let dragSession = try Self.pickUp(itemAt: 0, in: fixture.interface)
         _ = fixture.interface.handleMouseDragged(to: Self.pointOnDock, timestamp: Self.time(2))
 
         fixture.interface.prepareForHiding()
@@ -357,6 +376,8 @@ struct SpringboardDockDroppingTests {
         let dockDrag = try #require(fixture.dockDropTarget.drags.first)
         #expect(dockDrag.cancelCount == 1)
         #expect(dockDrag.drops.isEmpty)
+        // Under the springboard, which fades out as it goes.
+        #expect(dragSession.itemLayer.superlayer === fixture.interface.containerLayer)
     }
 
     @Test("going while a search result on the Dock still leaves the search, the icon fades with the springboard")
@@ -532,7 +553,36 @@ struct SpringboardDockDroppingTests {
 
         #expect(!dragSession.isOverDock)
         #expect(dragSession.itemLayer.opacity == 1)
+        #expect(dragSession.itemLayer.superlayer === fixture.interface.containerLayer)
         // Below the pages the icon takes the page's last place, as it always has.
         #expect(dragSession.currentIndex == 2)
+    }
+
+    @Test("let go on another application, the dragged image flies into the new folder from where it is above the Dock")
+    func flightStartsAtDraggedImage() throws {
+        let fixture = Self.makeFixture()
+        defer { fixture.interface.tearDown() }
+        fixture.dockDropTarget.dragWindowRootBoundsOrigin = CGPoint(x: 50, y: 30)
+        let dragSession = try Self.pickUp(itemAt: 0, in: fixture.interface)
+        let targetLayer = try #require(fixture.interface.mainPages.currentPageGrid?.itemLayers.last)
+        targetLayer.layoutIfNeeded()
+        let targetIconFrame = targetLayer.convert(targetLayer.iconFrame, to: fixture.interface.containerLayer)
+        // The cell's centre over the target's image, which is what holds an icon over another.
+        let pointOverTarget = CGPoint(x: targetIconFrame.midX - dragSession.grabOffset.x, y: targetIconFrame.midY - dragSession.grabOffset.y)
+        _ = fixture.interface.handleMouseDragged(to: pointOverTarget, timestamp: Self.time(2))
+        try #require(dragSession.hoverTarget?.itemLayer === targetLayer)
+        let windowContainerLayer = try #require(dragSession.dragWindow?.containerLayer)
+        let draggedImageLayer = dragSession.itemLayer.imageLayer
+        let draggedImageFrame = draggedImageLayer.convert(draggedImageLayer.bounds, to: windowContainerLayer)
+
+        _ = fixture.interface.handleMouseUp(at: pointOverTarget, timestamp: Self.time(3))
+
+        // The dragged image's copy is the last layer added to the new folder's icon, and flies a tenth of a
+        // second after the target's.
+        let draggedFlight = try #require(targetLayer.sublayers?.last)
+        let expectedFrame = targetLayer.convert(draggedImageFrame, from: fixture.interface.containerLayer)
+        #expect(abs(draggedFlight.frame.minX - expectedFrame.minX) < 0.5)
+        #expect(abs(draggedFlight.frame.minY - expectedFrame.minY) < 0.5)
+        #expect(abs(draggedFlight.frame.width - expectedFrame.width) < 0.5)
     }
 }
