@@ -88,6 +88,30 @@ struct DockGlobalScannerTests {
         #expect(slotAddresses == [section.slotAddress(17)])
     }
 
+    /// A class looked up by name at run time, which is the only way the payload gets at the Dock's.
+    ///
+    /// ``DockBarReference`` has no declaration of `DockBar` to hand over; it asks `NSClassFromString`,
+    /// and what comes back is a plain Objective-C class. A Swift metatype of such a class need not be
+    /// the class itself — the runtime keeps a wrapper around it — so the scanner has to compare the
+    /// address of the class object rather than the bits of the metatype. Comparing the bits left every
+    /// test here passing while the Dock on macOS 26 found neither of its globals (2026-11-11).
+    @Test("an object of a class looked up by name is found, as in the Dock")
+    func findsAnObjectOfAClassLookedUpByName() throws {
+        let classLookedUpByName: AnyClass = try #require(NSClassFromString("NSObject"))
+        let object = NSObject()
+        let section = StandInSection(slotCount: 64)
+        section.put(object, inSlot: 5)
+
+        let outcome = DockGlobalScanner.findGlobal(holdingInstanceOf: classLookedUpByName, in: [section.region])
+
+        guard case .found(let foundObject, let slotAddresses) = outcome else {
+            Issue.record("Expected the slot to be found, got \(outcome)")
+            return
+        }
+        #expect(foundObject === object)
+        #expect(slotAddresses == [section.slotAddress(5)])
+    }
+
     @Test("an instance of another class is not mistaken for one")
     func ignoresAnInstanceOfAnotherClass() {
         let unrelated = UnrelatedStandIn(identifier: 1)
@@ -137,6 +161,35 @@ struct DockGlobalScannerTests {
 
         let section = StandInSection(slotCount: 8)
         section.putNonHeapValue(UInt(bitPattern: tooSmall), inSlot: 3)
+
+        let outcome = DockGlobalScanner.findGlobal(holdingInstanceOf: StandInSingleton.self, in: [section.region])
+
+        #expect(isNotFound(outcome))
+    }
+
+    /// A heap block big enough to be an instance, whose first word is not a class at all.
+    ///
+    /// This is what the data sections of a live process are full of: a block that passes the size sieve
+    /// while its first word holds a number, a length or a float — anything but an isa. The class read
+    /// off such a block is a garbage address, so the comparison against the class being looked for has
+    /// to stay a comparison of addresses. An earlier version compared them as `AnyClass`, and `===`
+    /// converts both sides to `AnyObject`: ARC then released that garbage address and took the process
+    /// down in `swift_unknownObjectRelease` — met once in a parallel test run, through
+    /// ``scanningEveryLoadedImageIsSafe()``, before this test pinned it to one block.
+    ///
+    /// The first word is deliberately an address in the first page, which is never mapped, so a release
+    /// of it faults immediately rather than quietly corrupting somebody's retain count. Reaching the
+    /// end of this test is the assertion, as in ``rejectsValuesThatAreNotObjects()``.
+    @Test("a heap block whose first word is not a class is rejected without being released")
+    func rejectsAHeapBlockWhoseFirstWordIsNotAClass() {
+        let instanceSize = class_getInstanceSize(StandInSingleton.self)
+        let block = malloc(instanceSize)!
+        defer { free(block) }
+        #expect(malloc_size(block) >= instanceSize, "the premise of this test is that the block passes the size sieve")
+        block.storeBytes(of: UInt(0x20), as: UInt.self)
+
+        let section = StandInSection(slotCount: 8)
+        section.putNonHeapValue(UInt(bitPattern: block), inSlot: 2)
 
         let outcome = DockGlobalScanner.findGlobal(holdingInstanceOf: StandInSingleton.self, in: [section.region])
 

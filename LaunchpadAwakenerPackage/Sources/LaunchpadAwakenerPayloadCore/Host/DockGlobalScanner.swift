@@ -79,8 +79,16 @@ enum DockGlobalScanner {
     static func findGlobal(holdingInstanceOf targetClass: AnyClass, in regions: [PointerSlotRegion]) -> Outcome {
         let className = String(cString: class_getName(targetClass))
         let minimumInstanceSize = class_getInstanceSize(targetClass)
+        // The address of the class object itself, which is what an instance's isa holds. `AnyClass` is
+        // a Swift metatype, and for an Objective-C class the runtime keeps a wrapper around the class
+        // and hands that out as the metatype — so taking the metatype's bits would compare an address
+        // no isa ever holds. That left the Dock on macOS 26 finding neither of its globals, since both
+        // are looked up by name and arrive as plain Objective-C classes. Bridging to `AnyObject` is
+        // what gives back the class object, and handing a class to ARC is safe — a class is immortal,
+        // unlike the candidates below, which is why they stay plain addresses.
+        let targetClassAddress = Unmanaged.passUnretained(targetClass as AnyObject).toOpaque()
         for region in regions {
-            let hits = hits(holdingInstanceOf: targetClass, minimumInstanceSize: minimumInstanceSize, in: region)
+            let hits = hits(holdingInstanceOfClassAt: targetClassAddress, minimumInstanceSize: minimumInstanceSize, in: region)
             guard let firstHit = hits.first else { continue }
             let slotAddresses = hits.map(\.slotAddress)
             guard hits.allSatisfy({ $0.object === firstHit.object }) else {
@@ -134,7 +142,7 @@ enum DockGlobalScanner {
     /// Address and object are collected together so nothing downstream has to re-read a slot and cope
     /// with it having been nil after all.
     private static func hits(
-        holdingInstanceOf targetClass: AnyClass,
+        holdingInstanceOfClassAt targetClassAddress: UnsafeRawPointer,
         minimumInstanceSize: Int,
         in region: PointerSlotRegion
     ) -> [Hit] {
@@ -150,7 +158,7 @@ enum DockGlobalScanner {
             slotOffset += slotSize
             guard
                 let candidate = slotAddress.loadUnaligned(as: UnsafeRawPointer?.self),
-                isInstance(candidate, of: targetClass, minimumInstanceSize: minimumInstanceSize)
+                isInstance(candidate, ofClassAt: targetClassAddress, minimumInstanceSize: minimumInstanceSize)
             else { continue }
             // Proven to be an instance of targetClass just above, so handing it to ARC is safe here.
             hits.append(
@@ -165,7 +173,7 @@ enum DockGlobalScanner {
 
     // MARK: - Deciding whether a candidate is an object at all
 
-    /// Whether `candidate` is an instance of `targetClass`.
+    /// Whether `candidate` is an instance of the class at `targetClassAddress`.
     ///
     /// Three sieves, none of which touches memory it has not already proven it may touch:
     ///
@@ -176,39 +184,47 @@ enum DockGlobalScanner {
     ///    one `zone->size(zone, pointer)`, and those compare address ranges rather than dereferencing
     ///    anything (libmalloc `malloc.c`, `malloc_size` and `_find_registered_zone`). A non-zero answer
     ///    also proves the pointer is the *start* of a block rather than somewhere inside one.
-    /// 3. The class read off the front of that block equals `targetClass`. Only the two class pointers
-    ///    are compared — the candidate is never messaged.
+    /// 3. The class read off the front of that block is at `targetClassAddress`. Only the two
+    ///    addresses are compared — the candidate is never messaged, and nothing read out of it is ever
+    ///    handed to ARC.
     private static func isInstance(
         _ candidate: UnsafeRawPointer,
-        of targetClass: AnyClass,
+        ofClassAt targetClassAddress: UnsafeRawPointer,
         minimumInstanceSize: Int
     ) -> Bool {
         guard UInt(bitPattern: candidate) % UInt(MemoryLayout<UnsafeRawPointer>.alignment) == 0 else { return false }
         guard malloc_size(candidate) >= minimumInstanceSize else { return false }
-        return classOfRawPointer?(candidate) === targetClass
+        return classOfRawPointer?(candidate) == targetClassAddress
     }
 
-    /// `object_getClass`, typed to take a raw pointer.
+    /// `object_getClass`, typed to take and give back plain addresses.
     ///
-    /// Swift imports `object_getClass` as taking `Any?`, and reaching it through `Unmanaged` would hand
-    /// ARC a reference to a candidate that has not been proven to be an object yet — `takeUnretainedValue`
-    /// returns an owned value, so the compiler is free to retain it, and retaining a non-object reads a
-    /// garbage isa. Calling the C entry point through a function pointer keeps every candidate a plain
-    /// address until its class has been compared.
+    /// Both ends have to stay out of ARC's way. Swift imports `object_getClass` as taking `Any?`, and
+    /// reaching it through `Unmanaged` would hand ARC a reference to a candidate that has not been
+    /// proven to be an object yet — `takeUnretainedValue` returns an owned value, so the compiler is
+    /// free to retain it, and retaining a non-object reads a garbage isa.
     ///
-    /// `AnyClass` is a metatype and so outside ARC; returning it inserts no retain. Nil only if libobjc
-    /// somehow lacks the symbol, in which case nothing is ever found rather than wrongly found.
+    /// The answer comes back as an address rather than as `AnyClass` for the same reason: comparing two
+    /// `AnyClass` values with `===` converts both to `AnyObject`, which ARC retains and releases, and
+    /// the "class" read off a block that is not an object at all is a garbage address. Releasing that
+    /// took the process down in `swift_unknownObjectRelease` — seen once while scanning every loaded
+    /// image, and pinned to one block by `rejectsAHeapBlockWhoseFirstWordIsNotAClass`. As addresses,
+    /// both sides are just numbers. The class being looked for is turned into an address once in
+    /// ``findGlobal(holdingInstanceOf:in:)``, where doing so is safe.
+    ///
+    /// Nil only if libobjc somehow lacks the symbol, in which case nothing is ever found rather than
+    /// wrongly found.
     ///
     /// Looked up once. `RTLD_DEFAULT` searches every image in the process and `dlfcn.h` calls that
     /// expensive, which is why this is a `static let` rather than something each candidate pays for.
-    private static let classOfRawPointer: (@convention(c) (UnsafeRawPointer?) -> AnyClass?)? = {
+    private static let classOfRawPointer: (@convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?)? = {
         // RTLD_DEFAULT: a pointer constant that no Swift overlay re-exports, so it is spelled out.
         let defaultSearchOrder = UnsafeMutableRawPointer(bitPattern: -2)
         guard let symbol = dlsym(defaultSearchOrder, "object_getClass") else {
             #log(.error, "object_getClass is not available; no global can be found")
             return nil
         }
-        return unsafeBitCast(symbol, to: (@convention(c) (UnsafeRawPointer?) -> AnyClass?).self)
+        return unsafeBitCast(symbol, to: (@convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?).self)
     }()
 
     // MARK: - The host's own data sections
