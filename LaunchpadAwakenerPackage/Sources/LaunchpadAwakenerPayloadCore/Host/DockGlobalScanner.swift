@@ -84,20 +84,44 @@ enum DockGlobalScanner {
             guard let firstHit = hits.first else { continue }
             let slotAddresses = hits.map(\.slotAddress)
             guard hits.allSatisfy({ $0.object === firstHit.object }) else {
-                #log(
-                    .error,
-                    "\(region.name, privacy: .public) holds \(hits.count, privacy: .public) slots with different \(className, privacy: .public) instances; using none of them"
-                )
+                let answer = "ambiguous in \(region.name), \(hits.count) slots"
+                // `#log` reads its level where it expands, so the quiet repeat has to be its own call.
+                if loggedAnswers.updateAnswer(answer, forName: className) != answer {
+                    #log(
+                        .error,
+                        "\(region.name, privacy: .public) holds \(hits.count, privacy: .public) slots with different \(className, privacy: .public) instances; using none of them"
+                    )
+                } else {
+                    #log(
+                        .debug,
+                        "\(region.name, privacy: .public) holds \(hits.count, privacy: .public) slots with different \(className, privacy: .public) instances; using none of them"
+                    )
+                }
                 return .ambiguous(slotAddresses: slotAddresses)
             }
-            #log(
-                .info,
-                "Found \(className, privacy: .public) in \(region.name, privacy: .public), \(slotAddresses.count, privacy: .public) slot(s)"
-            )
+            let answer = "found in \(region.name), \(slotAddresses.count) slot(s)"
+            if loggedAnswers.updateAnswer(answer, forName: className) != answer {
+                #log(
+                    .default,
+                    "Found \(className, privacy: .public) in \(region.name, privacy: .public), \(slotAddresses.count, privacy: .public) slot(s)"
+                )
+            } else {
+                #log(
+                    .debug,
+                    "Found \(className, privacy: .public) in \(region.name, privacy: .public), \(slotAddresses.count, privacy: .public) slot(s)"
+                )
+            }
             return .found(object: firstHit.object, slotAddresses: slotAddresses)
         }
+        // Recorded, so that the find which follows an empty answer counts as news again. Not logged
+        // here: the caller knows which class names it tried and reports that itself.
+        loggedAnswers.updateAnswer("not found", forName: className)
         return .notFound
     }
+
+    /// What was logged last time about each class, so that a control panel that refreshes every few
+    /// seconds does not write the same line every time. See ``LoggedAnswers``.
+    private static let loggedAnswers = LoggedAnswers()
 
     /// One slot that holds an instance of the class being looked for.
     private struct Hit {

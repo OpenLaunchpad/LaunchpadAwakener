@@ -267,7 +267,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认在 27 上的样子。
 
 - 全局扫描（2026-11-11，只在开发机上，不碰 Dock）：单元测试覆盖找到持有目标类实例的那个槽、类不匹配时不误报、堆块小于实例大小时被筛掉、不是堆块的值（小整数、没映射的地址、未对齐的地址）一个都不解引用、多个槽持有同一对象时都报出来且用那个对象、持有不同对象时一个也不用、先扫的段有命中就不看后面的段、区域起点不按指针对齐时仍能找到里面对齐位置上的对象。另有一条遍历本进程全部已加载镜像的真实 `__DATA` 段、拿一个没有全局持有的类去扫：那些段装满了别处留下的值，跑完不崩就是「三道筛子没有解引用不该碰的内存」的证据。`swift test` 合计 488 个测试通过，`RunScript.sh` 的完整构建与三个架构切片校验通过。
-- **在真实的 Dock 里验证过了**（2026-11-11，用户亲自在一台 27.2（26B123）上运行）：`DockBar` 与 `DockGlobals` 都在 `__DATA,__common` 里，各只有一个槽持有它们——日志是 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`。控制面板开着时每三秒现场扫一次，近百次里每次都只找到那一个槽。**macOS 26 上还没验证**：26.6.2 的虚拟机里装的仍是这次改动之前的 payload；26 上 `DockGlobals` 是 Objective-C 类，查的是另一个类名，所以那一条路还没跑过。
+- **在真实的 Dock 里验证过了**（2026-11-11，用户亲自在一台 27.2（26B123）上运行）：`DockBar` 与 `DockGlobals` 都在 `__DATA,__common` 里，各只有一个槽持有它们——日志是 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`。控制面板开着时每三秒现场扫一次，近百次里每次都只找到那一个槽（那时每扫一次都写一行日志，这之后改成只有答案变化时才写）。**macOS 26 上还没验证**：26.6.2 的虚拟机里装的仍是这次改动之前的 payload；26 上 `DockGlobals` 是 Objective-C 类，查的是另一个类名，所以那一条路还没跑过。
 
 ## 已知降级
 
@@ -294,7 +294,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 
 payload 不认 Dock 的构建号，也不带任何按构建登记的地址。它要的两个全局变量在第一次用到时现找（见上文「关键设计决策」），所以 macOS 26 与 27 的任何 Dock 构建——包括还没发布的——装上就能用，升级系统当天不需要做任何事。
 
-这是日志里应该看到的两行，`--info` 才有：
+这是日志里应该看到的两行，默认级别，不加 `--info` 也看得到：
 
 ```
 Found DockBar in __DATA,__common, 1 slot(s)
@@ -303,6 +303,8 @@ Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)
 
 第二行的类名是 `class_getName` 给的：27 的 `DockGlobals` 是 Swift 类，新的 Objective-C 运行时把它反混淆成「模块.类名」（查找时用的仍是改编名 `_TtC8DockCore11DockGlobals`）。26 上它是 Objective-C 类，那一行写作 `Found DockGlobals in __DATA,__common, 1 slot(s)`。
 
+每一行只在答案变化时写一次，不是每次扫描都写：控制面板开着时每隔几秒就问一次状态，而每次问都现场扫一遍。所以一次 Dock 的生命周期里通常就这两行，重复的那些落在 debug 级（`--debug` 才有）。
+
 真正可能被新构建打破的只剩方法签名。安装 hook 之前，复刻会把它要调的全部 Dock 方法按类型编码整批核对，一处不符就一个 hook 都不装，并把实际读到的编码写进日志。所以升级系统后只需要看一眼：
 
 ```bash
@@ -310,6 +312,8 @@ ssh JH@192.168.50.13 '/usr/bin/log show --info --last 5m --predicate '"'"'subsys
 ```
 
 `Checked N Dock method(s), 0 mismatch(es)` 加 `Installed 2 hook(s)` 就是好的。有 mismatch，或者两行 `Found …` 里缺了一行，才进入下一节。
+
+这两行是 info 级，只留在内存缓冲里：隔一两个小时再查就已经没有了（2026-11-11 实测，注入过了两小时就查不到，而同一次注入的 `Found …` 与 `Channel to the app is open` 还在）。要看它们就在打开 Launchpad 之后尽快查，或者重启一次 Dock 再查。
 
 **2026-11-08 曾经为 26.0 到 27.2 的 24 个正式构建各登记过一条构建档案**（去重后 16 个二进制），每条都要下完整更新包、取出 Dock、建 IDA 库、从反汇编里读出两个全局变量的地址。那套流程连同它维护的表一起取消了，取而代之的是运行时扫描；留在下面的是其中仍然用得上的部分——只在要核对一个构建的方法签名时才需要。
 
