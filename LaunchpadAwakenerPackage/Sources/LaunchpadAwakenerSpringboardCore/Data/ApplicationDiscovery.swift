@@ -104,12 +104,30 @@ package enum ApplicationDiscovery {
         if isTrue(informationDictionary["LSBackgroundOnly"]) {
             return nil
         }
-        var title = FileManager.default.displayName(atPath: applicationURL.path)
+        var title = displayNameLock.withLock {
+            FileManager.default.displayName(atPath: applicationURL.path)
+        }
         if title.hasSuffix(".app") {
             title.removeLast(".app".count)
         }
         return DiscoveredApplication(url: applicationURL, bundleIdentifier: bundleIdentifier, title: title)
     }
+
+    /// Held across the display-name lookup above, because several of those at once deadlock the process.
+    ///
+    /// `FileManager.displayName(atPath:)` makes LaunchServices register a bundle it has not seen
+    /// before, and that registration is a synchronous XPC call with no deadline of its own. With one in
+    /// flight on every thread of the Swift concurrency pool, the answers stop coming and not one of them
+    /// ever returns: a parallel test run met this twice on 2026-11-11 — 74 and 42 minutes before it was
+    /// killed, while the same lookup made from another process still answered in under a second — and
+    /// `concurrentDiscoveriesAllFinish` reproduces it with sixteen discoveries at once.
+    ///
+    /// `NSLock` rather than `Mutex`: what it guards is an inter-process round trip, which is not what
+    /// the brief critical sections of an unfair lock are for. The cost is nothing outside the tests —
+    /// discovery is a single serial pass over the directories, so the lock is never contended, and a
+    /// bundle LaunchServices already knows is answered out of its database. Registering one it has
+    /// never seen is what takes time: about 20 ms, measured over the 192 fresh bundles of the test.
+    private static let displayNameLock = NSLock()
 
     private static func isTrue(_ informationValue: Any?) -> Bool {
         switch informationValue {
