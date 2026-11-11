@@ -73,6 +73,17 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **打开的文件夹是另一个翻页器。** 15 的 `ECSBGroupLayer` 本身就是 `ECPagerLayer`，所以主界面与文件夹共用 `SpringboardPagedGrids`（滚动层、页码、跟手、回弹、滚轮停顿）。面板只是一层白色 97%、不透明度一半的圆角矩形，不模糊身后：15 虽然建了 `CABackdropLayer` 并给了模糊 30、饱和度 1.8，但设在 `backgroundFilters` 上，backdrop 并不执行。macOS 15.5 虚拟机里打开文件夹时，正在淡出的主网格透过面板清晰可见，只被白色冲淡；同一台虚拟机里程序坞的 backdrop 照常模糊，可见不是虚拟机做不了模糊。面板看起来像毛玻璃，靠的是身后本来就模糊的壁纸背景。开合动画里动的是面板的形状，承载内容的容器始终铺满，靠遮罩裁出面板。开合时照 15 只动格子里的图片与标题：打开前把第一页每张图片缩到文件夹图标对应的缩略图上、标题放到图片下方并隐藏，页面随一个缩到文件夹单元格上的容器平移；打开时这些都在同一个事务里用隐式动画回到原位，与面板保持同一节奏。关闭反过来，且始终收第一页。三处容易做错：不能缩放整个格子（标题会跟着缩小）；不能用显式的线性动画（与面板的默认缓动不同步）；Dock 的 `ECGridLayer` 默认裁剪格子，要照 15 的 `ECSBGridLayer` 关掉，否则缩略图上的图片会被页面边缘裁掉。动画期间格子的图片与标题暂停排版（`isPictureAndTitleLayoutSuspended`，相当于 15 的 `disableLayout`），否则动画开始前的一次排版会把它们放回原位。这些动作都在 macOS 15.5 虚拟机里和真机录屏逐帧对照过。
 
+**拖到 Dock 上：往 Dock 自己的事件队列里排事件，不经 CoreDrag。** 15 的 Launchpad 在指针进入 Dock 栏（`-[DockBar inBarRect]`）时把被拖图标的不透明度减半，为 App 建一个 CoreDrag（拖动内容是 App 的文件 URL），喂给 Dock 的拖放跟踪（`-[DockBar injectIntoCoreDragTrackingProcWithMessage:window:refCon:theDrag:]`），Dock 照常让出[间隙](../Glossary.md#dock-gap间隙)；在 Dock 上松手，Dock 收下这个 App，Launchpad 按「取消、不滑回」把图标直接放回原格；松在废纸篓上则对可删的 App 弹删除确认（15.5 逆向笔记 4.9、4.9.1）。26 与 27 上照搬不了：inject 方法的签名里含 HIServices 的整个 `OpaqueCoreDrag` 结构，26.6.2 与 27.2 不同，同一个声明过不了两版的签名核对；27.2 上「在内移动」的消息还会把 Dock 的全局指针卡在 (-1,-1)。逆向确认间隙与放下本来就是 Dock 事件队列里的事件，由动画线程每帧处理，所以复刻直接排这些事件（`DockDropTarget`；逆向见 `/Volumes/RE/Dock/27.2/Notes/DragToDock.md` 与 `/Volumes/RE/Dock/26.6.2/Notes/DragToDock.md`）：
+
+- **进入**：把 `DragController` 的拖动内容标成 6（2 = 文件 URL，4 = App），在 `accessingLockedEventQueue:` 里排 DragEnter。此后 Dock 的动画线程每帧按真实指针摆放间隙；拖 App 时只在 App 区让出间隙，访达之前、文稿区与废纸篓上都不让。
+- **移动**：只唤醒动画线程（`wakeup`，外加 `updateLastMouseEventTimestampToNow` 保持每秒 60 帧）。线程等不到自己的事件就会睡下，而 Launchpad 开着时指针的事件都归复刻。
+- **松手**：先 `setFDragging:NO` 停住间隙，再确认间隙真的在。`dummyTileInDock` 会误报：指针直接落到某个图标正中时它为真，Dock 却没有让出间隙，这时放下，App 会被插到 App 区末尾。所以按占位图标（`dummyTile`）自己的位置，在 Dock 主锁内调 `findTileAtLocation:checkExactBounds:NO shouldLock:YES`，找到的必须正是它；这是唯一一个带锁读 Dock 图标列表的入口，跨了一帧就再查一次。不按松手点查：间隙落后于指针、刚张开时还在变宽，指针常在相邻的图标上。确认后用 `+[DOCKFileTileFactory tileForDock:url:bookmark:nil]` 建图标、排 DragDrop。已在 Dock 里的 App 按书签认出，原图标挪进间隙；只因运行而出现的图标转成常驻。保存是 Dock 自己的 `makeDirty`：四秒后才写 `persistent-apps`，这期间 Dock 被杀，这次添加就丢了，与 Dock 收下 Finder 的拖放相同。
+- **废纸篓**：松手点在 `[[DockBar trashTile] axFrame]` 里就不排放下（Dock 收下落在废纸篓上的 App 会把它移进废纸篓），可删的 App 弹复刻自己的删除确认。
+- **退出**：离开栏、松手之后、Esc、Launchpad 收起、界面拆除，每次拖动只收尾一次：排 DragLeave（不论指针在哪都会合上间隙；DragEnter 还没处理时它直接撤掉那个 DragEnter），再把内容标志清零。漏了前者，Dock 会留下一个永久的空位；漏了后者，下一次从 Finder 拖进来的文稿会被当成 App。Dock 对两者都没有超时复原，所以收尾集中在 `DockApplicationDrag` 一处，单元测试锁住顺序与成对。
+- **不调的**：`startDragWithProcess:` 的参数是指向结构体的指针，宏推不出它的编码，它在 27.2 上还会装切换空间的屏幕边缘热区；`endDragForcingTrashRedraw:` 在没有 start 时也会无条件复位窗口拖动与 Exposé 的全局状态。间隙与放下这条路只读内容标志，两个都用不着。
+- **图标在 Dock 上时挪进一扇高于 Dock 的透明窗口**（`DockDragWindow`，层级 500，即 15 的拖动窗口所在的 `kCGDraggingWindowLevel`），离开 Dock 再挪回 Launchpad 的窗口：Launchpad 的窗口在 27 层、Dock 的窗口被抬到 29 层，不挪的话图标会被 Dock 盖住。只在 Dock 上时这样做，因为拖动的其余部分（悬停的命中、放进文件夹时图片飞进缩略图）要在同一棵图层树里换算坐标。图标在 Dock 上时界面自己不让位、不弹开文件夹、不翻页：否则停在 Dock 上会被悬停计时弹开文件夹，页面也会把图标排到页末，而松手时它却归了 Dock。
+- 用到的 18 个方法在 26.6.2 与 27.2 签名相同，payload 启动时另成一批核对，不符只停用这一项；`DragController` 照 `DockBar` 的办法按类从全局里认出来（同在 `__DATA,__common`），第一次拖到 Dock 时才扫。独立版的窗口盖住了 Dock，不支持拖到 Dock。
+
 **Launchpad 开着时 Dock 一直露着，文件夹开着时 Dock 滑走。** 15 显示 Launchpad 时，给 Dock 的显隐控制器 `DockVisibility` 设一个显示覆盖（`setOverrideShowType:1`），开了自动隐藏的 Dock 也会露出来。文件夹面板一开始打开，它就调 `forceDockHiddenWithReason:`，Dock 借自己的自动隐藏滑走，默认大小下约 0.24 秒。面板一开始关闭、或 Launchpad 开始退场时撤销这个隐藏，显示覆盖则等退场动画结束才撤（`-[Springboard groupShownForItem:atIndex:]`、`groupHiddenForItem:`，15.5 `0x100093500`、`0x1000935A4`）。5 行的文件夹面板底边正好落在给 Dock 留的那条线上，靠的就是这一步。复刻起初漏了它：27 的玻璃 Dock 比 15 的高，面板于是压进了 Dock 底下。现在的分工是：界面层记录文件夹是否开着（`isFolderOpen`，从面板开始打开到开始关闭）；控制器把它与显示、退场合成 `SpringboardDockVisibility` 交给宿主；注入版的 `DockBarVisibility` 只在状态变了时调 Dock。
 - 撤销一个 Dock 没登记过的原因，Dock 会抛异常、直接崩溃。所以只在拿过的那个对象上撤销，撤销前先读 `_dockForceHiddenReasons` 确认原因还在，原因也用自己的字符串 `LaunchpadAwakener-ShowGroup`。
 - 重新显示时，先不撤上一次的显示覆盖、显示完再设（`finishHiding(updatingDockVisibility:)`）。否则开了自动隐藏的 Dock 会先开始滑走，再被叫回来。
@@ -153,7 +164,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 ```
 LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/
 ├── Hosting/
-│   └── SpringboardHost.swift           # 宿主接口：窗口、图层工厂、Dock 几何、图标样式、壁纸、玻璃、托管文本框、托管的删除确认、卸载器；选定宿主的 SpringboardHostSystem
+│   └── SpringboardHost.swift           # 宿主接口：窗口、图层工厂、Dock 几何、图标样式、壁纸、玻璃、托管文本框、托管的删除确认、卸载器、拖到 Dock 时的放下目标；选定宿主的 SpringboardHostSystem
 ├── System/                             # 系统框架的私有接口，两个宿主都能用
 │   ├── QuartzCorePrivate.swift         # CA 私有滤镜与 CABackdropLayer
 │   ├── IconServicesBridge.swift        # IconServices 取图
@@ -174,6 +185,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/
     ├── SpringboardInputEvent*.swift    # 事件的跨线程表示，及从 CGEvent 的换算
     ├── SpringboardInterface.swift      # 页面、搜索、选中、点击、文件夹开合与改名、背景（ECSBSpringboard + ECSBLayer）
     ├── SpringboardInterface+Dragging.swift # 拖动整理（ECSBDragCapture 与各 DragState）
+    ├── SpringboardInterface+DockDropping.swift # 拖到 Dock 上：交给 Dock、在 Dock 上方带着图标、松手不滑回与废纸篓
     ├── SpringboardInterface+FolderMaking.swift # 拖到图标上建文件夹、放进文件夹、未存的文件夹与解散
     ├── SpringboardInterface+Deleting.swift # 抖动模式的关闭按钮、删除确认（问谁、怎么答、何时撤）与删除
     ├── SpringboardDeletionPanel.swift  # 辅助进程弹不出 popover 时自己画的删除确认；按键的读法
@@ -209,6 +221,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 │   ├── DockEnvironment.swift           # Dock 的方向、厚度、刘海、图标样式；DockBar 与 DisplayDescriptor 的 proxy
 │   ├── DockLayerFactory.swift          # ECGridLayer、ECImageGridLayer、ECTextLayer、ECShadowTextLayer、材质
 │   ├── DockApplicationUninstaller.swift # Dock 的卸载器
+│   ├── DockDropTarget.swift            # 拖到 Dock：往 Dock 的事件队列里排进入、放下、离开，松手前确认间隙
+│   ├── DockDragWindow.swift            # 图标在 Dock 上时所在的 500 层透明窗口
 │   ├── SpringboardRemoteTextField.swift # 辅助进程托管的搜索框与改名框：CALayerHost 与事件转发
 │   ├── SpringboardRemoteDeletionConfirmation.swift # 辅助进程弹的删除确认：图标编成 PNG，转达按钮、失败与关闭
 │   └── TextInputHelperClient.swift     # 经 XPCSession 连文本输入辅助进程；给它发键鼠事件，请它弹、关删除确认
@@ -229,7 +243,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 触控板翻页用滚动事件自带的阶段判断开始与结束。三指轻扫照 15 读导航轻扫事件（手势事件，字段 110 为 16），每个方向有效的事件翻一页，不看阶段（`-[ECPagerLayer gesture:]`）；只有触控板设成「用三指轻扫」在页面间切换时系统才会发出这种事件，Dock 是否收得到还要用户在真机上确认（开发构建会把每个导航轻扫写进日志）。
 - 15.5 的 `LaunchPadLayout.plist` 没有作为资源随 payload 发布，改为 Swift 常量（原因见上）。
 - 文件夹改名同样经辅助进程接输入法；光标、选区、复制粘贴、撤销与 Esc 都照 15 的文本框（Esc 按当前文字提交）。
-- 拖到 Dock 上不支持（第 6 批的后续项，见提案）；拖动时文件夹不额外加一行。
+- 拖动时文件夹不额外加一行。
+- 拖到 Dock 不经 CoreDrag，往 Dock 的事件队列里直接排事件（原因见上）；被拖的图标只在 Dock 上时才挪进 Dock 上方的窗口，15 整个拖动都在那一层；图标在 Dock 上时界面不让位、不弹开文件夹、不翻页，15 是否也这样没有查证。
 - 捏合没有接入 27 的 Dock 手势系统（那里已经没有它），而是读原始 DockSwipe 事件，并且要用户先关掉 Spotlight 的捏合。
 - 背景默认照 15 截壁纸、加三个滤镜；另有 `springboard-background` 设为 `glass` 时的 Dock 液态玻璃，那时 App 的窗口会被模糊进来。
 - 点 Apps 图标关闭 Launchpad，靠「点 Dock 收起后 0.5 秒内的请求」认出这次点击，不是 15 那样按图标类型豁免（原因见上）。
@@ -265,7 +280,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
   - 搜「q」后点空白处收起，「q」留在桌面上方。
   - 修复（窗口设成完全透明）只有单元测试，没有在实机上看过：MacBook 被拿去装 macOS 15 了。
 - 删除确认改用辅助进程弹的 `NSPopover`（2026-11-10）：单元测试覆盖消息经真实 XPC 往返、Dock 一侧客户端（弹出的回答、按钮回报、关闭请求、辅助进程退出）、界面层的状态（问辅助进程要的内容与图标中心、按钮与按键都关掉它、一次只问一个、弹不出时退回自己画的、辅助进程退出时按取消、收起时撤下、答过之后迟到的按钮不算）、辅助进程里锚点的位置与 popover 的内容排版（与 nib 的框一致：问句 (82, 40, 308×34)，删除按钮右边缘 388）。之前先在 15.5 虚拟机里放了带空收据的「可删测试」，用户截到了原版的气泡。部署到 26.6.2 虚拟机（非交互）：认出 Dock 2427.6、23 个方法签名全部吻合、两个 hook 装上；同样放了「可删测试」后，对账把它加进第 2 页，自检报卸载器 69 个 App 里 1 个可删，正是它。用户在 26 虚拟机里看到 popover 照预期上屏、位置与内容都对，但「删除」没有画成默认按钮；锚点改成 nonactivating panel 后重新部署，单元测试锁住锚点的这几项（改前先失败）。改后用户看过，删除是蓝色的默认按钮，日志记的是 popover 窗口 `key true, application active true`。开发构建 20 秒没有输入就收起 Launchpad，点 popover 不算输入，所以那里的气泡最多停 20 秒。用户随后点「删除」：第一下就生效，半秒后卸载器删掉了 `/Applications/可删测试.app`，布局随即从 69 个 App 变成 68 个。27 上的样子没有试（MacBook 改装了 15）。
-- 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认在 27 上的样子。
+- 拖到 Dock（2026-11-11）：单元测试用假的 Dock 目标驱动真实的界面——进入时交给 Dock、不透明度减半并挪进 Dock 上方的窗口，在 Dock 上不让位，离开、Esc、收起、拆除都让 Dock 合上间隙，在 Dock 上松手不滑回、不写库，松在废纸篓上对可删的 App 弹删除确认；另用记录调用的假 Dock 锁住进入、移动、放下、离开的顺序与成对（放下排在离开之前，废纸篓上与没有间隙时不排放下，每次拖动只收尾一次）；签名测试记下 18 个方法的编码，与 26.6.2、27.2 的声明逐个对过。部署到 26.6.2 虚拟机（非交互）：23 个方法签名全部吻合、两个 hook 装上，拖到 Dock 的 18 个方法也吻合，`Found DragController in __DATA,__common, 1 slot(s)`；开发构建的只读检查读到 Dock 栏 (34, 752, 1212×74) 与废纸篓 (1190, 752, 48×64)，Dock 没有崩溃。真把 App 拖到 Dock 上属于交互操作，没有做；27 上没有试（MacBook 改装了 15）。
+- 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认在 27 上的样子；拖到 Dock（间隙是否跟手、松手后 App 是否进了 Dock 并在重启 Dock 后还在、废纸篓上的删除确认、Esc 与收起后 Dock 没有留下空位）。
 
 - 全局扫描（2026-11-11，只在开发机上，不碰 Dock）：单元测试覆盖找到持有目标类实例的那个槽、类不匹配时不误报、堆块小于实例大小时被筛掉、不是堆块的值（小整数、没映射的地址、未对齐的地址）一个都不解引用、多个槽持有同一对象时都报出来且用那个对象、持有不同对象时一个也不用、先扫的段有命中就不看后面的段、区域起点不按指针对齐时仍能找到里面对齐位置上的对象、堆块够大而第一个字根本不是类时既不认错也不把那个野地址交给 ARC、按类名查来的 Objective-C 类也能匹配（Dock 的两个全局走的就是这条路）。另有一条遍历本进程全部已加载镜像的真实 `__DATA` 段、拿一个没有全局持有的类去扫：那些段装满了别处留下的值，跑完不崩就是「三道筛子没有解引用不该碰的内存」的证据。`swift test` 合计 538 个测试通过，`RunScript.sh` 的完整构建与三个架构切片校验通过。
 - **在真实的 Dock 里验证过了**（2026-11-11，用户亲自在一台 27.2（26B123）上运行）：`DockBar` 与 `DockGlobals` 都在 `__DATA,__common` 里，各只有一个槽持有它们——日志是 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`。控制面板开着时每三秒现场扫一次，近百次里每次都只找到那一个槽（那时每扫一次都写一行日志，这之后改成只有答案变化时才写）。
@@ -287,6 +303,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - Dock 在左右两侧时，满 5 行的文件夹常常不往下多伸那 30 点：15 的公式只在文件夹底边高于 30 点时才伸，侧放 Dock 时底边多半正好是 30。这时文件夹每页的格子比主页的矮 6 点，而界面层按主页的格子算拖动的落点与让位，会偏几点。这是按代码推断的，没有在真机上复现。
 - 文件夹开着时让 Dock 滑走，只在指针不在 Dock 上、Dock 没有键盘焦点时立刻开始，15 与 27.2 的 Dock 都是这样；Dock 藏起来时指针推到屏幕边会不会把它叫回来，没有验证。
 - 只在主显示器上显示。
+- 拖到 Dock：指针进入 Dock 栏之前，压在 Dock 上的那部分图标仍被 Dock 盖住（15 整个拖动都在 Dock 上方）。没有 15 那种悬停在 Dock 图标上的效果（弹开堆栈、悬停进 App Exposé），那些来自复刻不发的「在内移动」消息。开着放大时，松手后 Dock 可能一直放大到下一次鼠标移动（逆向推断，没有验证）。独立版不支持拖到 Dock：它的窗口盖住了 Dock。
 - 新装 App 的蓝点：从 Launchpad 以外启动后，要到下次打开 Launchpad 才消失，并且依赖 Spotlight 记下的使用时间；关掉 Spotlight 索引时只有从 Launchpad 启动才会清掉。测试版 App 的黄点与屏幕使用时间的沙漏标记没有做。
 - macOS 26 上没有玻璃背景：26 的 `DockGlassMaterialLayerController` 用的是 `configureUsingConfiguration:` 与 `rebuildLayersWithEnvironment:`，签名核对不过，`springboard-background` 设成 `glass` 也退回带 15 三个滤镜的模糊。
 - macOS 26 上透明与着色图标的混合没有与 26 的 Dock 对照过：26 没有 `kCAFilterClearIconBlendMode`，复刻按 27 的映射在透明与浅色着色样式下不加滤镜、深色着色用 Screen，而 26 的 `-[DOCKTileLayer init]` 默认给格子图片的是 Screen。
@@ -315,6 +332,8 @@ ssh JH@192.168.50.13 '/usr/bin/log show --last 5m --predicate '"'"'subsystem == 
 
 `Checked N Dock method(s), 0 mismatch(es)` 加 `Installed 2 hook(s)` 就是好的。有 mismatch，或者两行 `Found …` 里缺了一行，才进入下一节。
 
+拖到 Dock 用到的 18 个方法另成一批核对（`DockDropTarget.requiredMethods`），对上时是 info 级的 `The Dock's drag events match`，不符时只停用这一项，默认级别多一行 `The Dock lacks …; nothing dragged onto the Dock is kept there`，同样照下一节核对。它要的 `DragController` 第一次拖到 Dock 时才扫，找到时日志是 `Found DragController in __DATA,__common, 1 slot(s)`。
+
 这四行都是默认级别，留在日志库里，所以上面的命令不必加 `--info`，隔几天回头查也还在。在 2026-11-11 之前它们是 info 级，而 info 只留在内存缓冲里：那时注入过了两小时就查不到了（实测，同一次注入的 `Channel to the app is open` 还在），所以改成了默认级别。
 
 **2026-11-08 曾经为 26.0 到 27.2 的 24 个正式构建各登记过一条构建档案**（去重后 16 个二进制），每条都要下完整更新包、取出 Dock、建 IDA 库、从反汇编里读出两个全局变量的地址。那套流程连同它维护的表一起取消了，取而代之的是运行时扫描；留在下面的是其中仍然用得上的部分——只在要核对一个构建的方法签名时才需要。
@@ -324,7 +343,7 @@ ssh JH@192.168.50.13 '/usr/bin/log show --last 5m --predicate '"'"'subsystem == 
 1. 取那个构建的 Dock。`/Volumes/Firmwares/macOS/` 存着 26.0 到 27.2 的全部完整更新包（`<版本>_<build>_universal.zip`，只给特定机型的构建以机型命名）。更新的版本用 `ipsw download appledb --os macOS --type ota --release --json` 查出 `active_url` 与 `sha256`，`aria2c` 开 16 个连接下载，再用 `openssl dgst -sha256` 核对（`aria2c` 自带的校验是单线程的，17 GB 要十几分钟）。旧包所在的 CDN 节点慢，一个包十几 MiB/s，多个包要并行下。
 2. 取出 Dock：`ipsw ota extract <包> --pattern 'System/Library/CoreServices/Dock\.app/Contents/(MacOS/Dock|Info\.plist|version\.plist)$' --confirm --output <目录>`，约一分钟。`TMPDIR` 与输出目录要在同一个卷上，否则最后一步改名报 `cross-device link`。先比 arm64e 切片的 UUID（`dwarfdump --uuid`）：和已经核对过的某个构建相同，就不必再往下走。
 3. 把新 Dock 放进 `/Volumes/RE/Dock/<版本>/`，用 reverse-engineering skill 的脚本导出头文件，用 `idax binary --arch arm64e` 建 IDA 库（27 的 Dock 另有 `arm64e.x1` 切片，不加 `--arch` 会选错）。
-4. 核对签名：用 `ipsw class-dump <Dock> --arch arm64e --re -V` 导出声明，把复刻用到的类（`WALayerKitWindow`、`WAWindow`、`DockBar`、`DisplayDescriptor`、`EC*` 图层、`Spotlight`、`DockAppEventHandler`、玻璃的四个类、`IconAppearance`、`Environment`、卸载器与 `CALayer` 的分类）和同一大版本里已核对过的构建逐个对照。26.0 到 27.2 里不同的只有复刻没用到的方法。
+4. 核对签名：用 `ipsw class-dump <Dock> --arch arm64e --re -V` 导出声明，把复刻用到的类（`WALayerKitWindow`、`WAWindow`、`DockBar`、`DisplayDescriptor`、`EC*` 图层、`Spotlight`、`DockAppEventHandler`、玻璃的四个类、`IconAppearance`、`Environment`、卸载器与 `CALayer` 的分类，以及拖到 Dock 的 `DockAnimationThread`、`DockEventQueue`、`DragController`、`DOCKFileTileFactory`、`Tile`）和同一大版本里已核对过的构建逐个对照。26.0 到 27.2 里不同的只有复刻没用到的方法。
 5. 部署到同一大版本的测试机，看日志里 `Checked N Dock method(s), M mismatch(es)`：日志会写出不符的那几个的新编码，逐个核对后改对应 proxy 协议或 hook 方法的 Swift 类型（编码由它推出；init 的签名直接改字符串），并更新 `DockSignatureTests` 里记的编码。
 
 两行 `Found …` 里缺了一行时，要查的是另一回事：那个构建把单例放在了扫描没覆盖的地方，或者 Dock 还没建好它。先在测试机上多等一会儿再看一次日志；确实一直找不到，就在那个构建的 IDA 库里看 `-[DockBarSystemDefinedEventHandler handleSystemDefinedEvent:type:]` 处理 Launchpad 键（系统定义事件子类型 9、键码 104）的分支，顺着向一个全局发 `keyFocusController`（那是 `DockBar`）、向另一个发 `slowMotionAllowed`（那是 `DockGlobals`）的两处 `ADRL` 加 `LDR`，确认那两个地址落在哪一节——`DockGlobalScanner` 扫的是 `__DATA` 的 `__common`、`__bss`、`__data`。

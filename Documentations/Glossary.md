@@ -18,6 +18,12 @@
 
 按英文名 / 标识符字母序排列。
 
+### Dock gap（间隙）
+
+拖着东西停在 Dock 上时，Dock 在自己的图标之间让出的空位：它往图标列表里插一个占位图标（`dummyTile`），每帧按指针挪动，放下时新图标顶替它。拖 App 时只在 App 区出现（访达之后、分隔条之前）。Dock 的 `dummyTileInDock` 标志会误报——指针直接落到某个图标正中时它为真，却没有让出空位——所以复刻松手前在 Dock 的锁内确认占位图标真在图标列表里，才让 Dock 收下 App。
+
+- **主要出现在**：`LaunchpadAwakenerPayloadCore/Host/DockDropTarget.swift`、`LaunchpadAwakenerSpringboardCore/Interface/SpringboardInterface+DockDropping.swift`、[实现说明](Internal/LaunchpadReplica.md)「拖到 Dock 上」
+
 ### DockGlobalScanner（全局扫描）
 
 在宿主自己的可写数据段里按「这个槽持有的对象是什么类」认出一个全局变量的做法。扫 Dock 可执行文件 `__DATA` 段的 `__common`、`__bss`、`__data` 三节，逐个指针槽过三道筛子：非空且按指针对齐、`malloc_size` 认得它且块不小于目标类的实例、读出的类正好等于目标类。复刻靠它拿到持有 `DockBar` 与 `DockGlobals` 的那两个全局；这两个全局在二进制里没有符号，也没有任何导出的路径通向它们。
@@ -34,7 +40,7 @@
 
 ### Host（宿主）
 
-画 Launchpad 的那个进程，以及它提供给界面层的那组能力（`SpringboardHost`）：窗口、图层类、Dock 的几何、图标样式、壁纸、玻璃、托管文本框、输入法、卸载器，以及读 15 的资源（贴图、语言）用的 Dock 包。Dock 里的宿主由 payload 提供，用 Dock 自己的类；独立版 App 是另一个宿主。每个进程启动时选定一次（`SpringboardHostSystem.bootstrap(host:)`），界面层只经它拿这些东西。不要和注入时的「目标进程」混用：目标进程只说注入到哪，宿主说的是界面层靠谁画。
+画 Launchpad 的那个进程，以及它提供给界面层的那组能力（`SpringboardHost`）：窗口、图层类、Dock 的几何、图标样式、壁纸、玻璃、托管文本框、输入法、卸载器、拖到 Dock 时的放下目标，以及读 15 的资源（贴图、语言）用的 Dock 包。Dock 里的宿主由 payload 提供，用 Dock 自己的类；独立版 App 是另一个宿主。每个进程启动时选定一次（`SpringboardHostSystem.bootstrap(host:)`），界面层只经它拿这些东西。不要和注入时的「目标进程」混用：目标进程只说注入到哪，宿主说的是界面层靠谁画。
 
 - **主要出现在**：`LaunchpadAwakenerSpringboardCore/Hosting/SpringboardHost.swift`、`LaunchpadAwakenerPayloadCore/Host/DockSpringboardHost.swift`、[实现说明](Internal/LaunchpadReplica.md)「模块结构」
 
