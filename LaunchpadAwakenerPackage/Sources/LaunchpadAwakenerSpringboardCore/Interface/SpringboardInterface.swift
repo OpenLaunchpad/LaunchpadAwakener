@@ -124,6 +124,10 @@ final class SpringboardInterface {
     var deletabilityByBundlePath: [String: Bool] = [:]
     /// Set while an icon is being dragged; see `SpringboardInterface+Dragging.swift`.
     var dragSession: SpringboardDragSession?
+    /// The Dock as a place to drop a dragged icon: the host's, replaced in tests. Asked once per drag.
+    var resolveDockDropTarget: () -> (any SpringboardDockDropTarget)? = {
+        SpringboardHostSystem.host.dockDropTarget
+    }
 
     /// Fires once a press on an icon has been held long enough to switch jiggle mode.
     private var longPressTask: Task<Void, Never>?
@@ -330,6 +334,9 @@ final class SpringboardInterface {
         mainPages.tearDown()
         folderPanel?.pages.tearDown()
         dragSession?.cancelTimers()
+        // A gap the Dock holds open, or the window above it, would outlive the springboard.
+        dragSession?.itemLayer.removeFromSuperlayer()
+        dragSession?.endDockInteraction()
         containerLayer.removeFromSuperlayer()
     }
 

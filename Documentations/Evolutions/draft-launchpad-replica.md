@@ -3,10 +3,10 @@
 - **状态**: In Progress
 - **作者**: JH
 - **创建日期**: 2026-11-05
-- **最后更新**: 2026-11-10
+- **最后更新**: 2026-11-11
 - **所属愿景**: 无
 - **关联提案**: 无
-- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；拖动搜索结果在 `feature/drag-to-dock` 上实现、已合进 `main`，分支已删除（拖到 Dock 暂停，没有代码）；输入法见提案 0001；选中高亮的修复在 `fix/search-selection-highlight` 上实现、已合进 `main`，分支已删除；删除确认改用真 `NSPopover` 在 `feature/deletion-popover` 上实现（worktree `.worktrees/LaunchpadAwakener-DeletionPopover`）；验证用原型在分支 `experiment/injection-prototype`
+- **实现分支 / PR**: `feature/launchpad-replica`（worktree `.worktrees/LaunchpadAwakener-LaunchpadReplica`）；第 6 批已做完的部分在 `feature/daily-gaps` 上实现、已合进 `main`，分支已删除；拖动搜索结果在 `feature/drag-to-dock` 上实现、已合进 `main`，分支已删除；拖到 Dock 2026-11-11 在重新建的同名分支 `feature/drag-to-dock` 上实现（worktree `.worktrees/LaunchpadAwakener-DragToDock`）；输入法见提案 0001；选中高亮的修复在 `fix/search-selection-highlight` 上实现、已合进 `main`，分支已删除；删除确认改用真 `NSPopover` 在 `feature/deletion-popover` 上实现（worktree `.worktrees/LaunchpadAwakener-DeletionPopover`）；验证用原型在分支 `experiment/injection-prototype`
 - **配套文档**: [实现说明](../Internal/LaunchpadReplica.md)
 
 ## 摘要
@@ -210,7 +210,10 @@ final class SpringboardController {
    2. ✅ 文件夹里的方向键导航，规则照 15 的 `-[ECSBGroupPager navigate:withEvent:]`。
    3. ✅ 新装 App 名字旁的蓝点，判据与画法照 15 的 `ECFlagLayer`。
    4. ✅ 抖动模式的关闭按钮与删除 App Store 的 App。15 的确认气泡由 `com.apple.dock.ecap` 服务画，27.2 的 Dock.app 里已经没有这个服务，要自己画。2026-11-10 起确认气泡改由辅助进程弹真的 `NSPopover`，见第 8 步。
-   5. ◐ 把图标拖到 Dock 上加入 Dock，拖动搜索结果：2026-11-08 先留作后续项，同日接着做。拖动搜索结果已做：照 15 先退出搜索，再从 App 真正所在的地方接着拖（见决策日志），2026-11-08 在 MacBook 上交互验证。拖到 Dock 暂停，没有写代码（见决策日志）。
+   5. ◐ 把图标拖到 Dock 上加入 Dock，拖动搜索结果：2026-11-08 先留作后续项，同日接着做。拖动搜索结果已做：照 15 先退出搜索，再从 App 真正所在的地方接着拖（见决策日志），2026-11-08 在 MacBook 上交互验证。拖到 Dock 暂停，没有写代码（见决策日志）。2026-11-11 用户要求把拖到 Dock 做出来，分三步落地：
+      1. ✅ 界面层与宿主接口：宿主新增 `dockDropTarget`（注入版以外都是 nil）。指针一进 Dock 栏，被拖的图标挪进一扇高于 Dock 的透明窗口、不透明度减半，App 交给 Dock 让出间隙；在 Dock 上时界面自己不让位、不弹开文件夹、不翻页；离开 Dock 复原。在 Dock 上松手，界面照 15 不滑回、直接复原，松在废纸篓上对可删的 App 弹删除确认；Esc、界面收起与拆除都让 Dock 收起间隙。单元测试用假的 Dock 目标驱动真实的界面。
+      2. Dock 一侧：照逆向结论在 payload 里接上 Dock 的拖放跟踪与放下，方法签名先核对、不符就整个功能停用。
+      3. 文档与非交互验证：实现说明、术语表、部署到 26 虚拟机看签名与 hook。
    6. ✅ 搜索框与改名框的完整文本编辑（光标、选区、复制粘贴、撤销已做；输入法由文本输入辅助进程接上，见提案 [0001 用常驻辅助进程给搜索框与改名框接上输入法](0001-input-method-helper.md)）：搜索框的光标与选区、输入法、复制粘贴、撤销。15 用 `com.apple.dock.ecti` 服务里的真 `NSTextField`，27.2 里这个服务也没有了，方案先逆向再定。
    7. 捏合要用户关掉 Spotlight 的捏合后在真机上试，agent 做不了，留给用户。
    8. ✅ 删除确认改用真的 `NSPopover`（2026-11-10 用户对照 15.5 后要求），照 15 的 ecap 服务由文本输入辅助进程弹出：
@@ -316,3 +319,8 @@ final class SpringboardController {
 | 2026-11-10 | 删除确认的锚点窗口改成 nonactivating panel | 用户在 26 虚拟机里看到 popover 正常弹出，但「删除」没有画成默认按钮。逆向 26.6 的 AppKit：popover 窗口弹出时照抄锚点窗口是否 nonactivating，不是活跃 App 的进程里只有 nonactivating 窗口能成为 key，而默认按钮只在 key 窗口里画成强调色；15 的锚点 mini view 窗口同样自称 nonactivating。改后 popover 窗口经辅助进程覆写的 `_stealKeyFocusWithOptions:` 成为 key，不动 Dock 的键盘焦点 |
 | 2026-11-10 | 删除确认改用真 `NSPopover` 收尾，第 6 批第 8 步完成：快进进 `main` 并推送，`feature/deletion-popover` 与它的 worktree 删除。本提案仍是 In Progress、不取号 | 用户在 26 虚拟机里看过改后的 popover，又从它真删了一个 App，之后要求收尾。第 6 批第 5 步的拖到 Dock 仍暂停，第 7 步的捏合仍待用户在真机上试。文档：实现说明改写了「删除 App」并补了辅助进程的新职责、目录树、验证与已知降级；项目 `CLAUDE.md` 同步了辅助进程的职责、消息文件与 15 虚拟机里造可删 App 的办法；术语表「抖动模式」一条更正了「复刻没做删除」的旧说法。没有给外部调用方的契约，不需要使用指南；没有新术语 |
 | 2026-11-11 | 两个全局变量改为运行时按类扫出来，构建档案与构建白名单一并取消 | 档案每条都要人工下固件包、建 IDA 库、从反汇编里读地址，漏一条整个功能就不生效（26.7 上发生过），而且它以 arm64e 切片的 UUID 为键，27 的 Dock.app 有两个切片两个 UUID。调研确认两个全局在 26 与 27 上都落在极小的 `__DATA,__common` 段里，可以按持有的对象是不是目标类的实例认出来；那个判断本身就是定义，不需要表来背书。细节与取舍见提案[在运行时找出 Dock 的两个全局变量，取消构建白名单](0011-runtime-dock-global-discovery.md) |
+| 2026-11-11 | 拖到 Dock 恢复实现，在 `feature/drag-to-dock` 上做（第 6 批第 5 步） | 用户要求把这一项做出来，并由 agent 一路做完：方案由 agent 起草、用户事前未审阅。2026-11-08 暂停的原因（没有交互验证不该往 Dock 的拖动状态里注入）仍在，所以 Dock 一侧的每个方法先核对签名，交互验证留给用户 |
+| 2026-11-11 | 图标在 Dock 上时挪进一扇高于 Dock 的透明窗口，离开 Dock 再挪回 Launchpad 的窗口 | Launchpad 的窗口在 27 层、Dock 的窗口被抬到 29 层，图标留在 Launchpad 的窗口里会被 Dock 盖住。15 整个拖动都在拖动层级（500）的窗口里；复刻只在 Dock 上时这样做，因为拖动的其余部分（悬停的命中、放进文件夹时图片飞进缩略图）要在同一棵图层树里换算坐标 |
+| 2026-11-11 | 指针在 Dock 上时，界面不让位、不弹开文件夹、不翻页 | 没有查证 15 是否也这样，按「Dock 上的图标归 Dock」处理：否则停在 Dock 上会被悬停计时弹开文件夹，页面也会把图标排到页末，而松手时它却交给了 Dock |
+| 2026-11-11 | 松在废纸篓上照 15 对可删的 App 弹删除确认，绝不交给 Dock 收下 | 15 的 `didEndDragOfItem` 先看是否在废纸篓上；Dock 自己收下落在废纸篓上的 App 会把 App 移进废纸篓。复刻用已有的删除确认与卸载器，不可删的 App 只是放回原处 |
+| 2026-11-11 | 在 Dock 上松手时 Dock 立刻收下，界面那一侧照旧等文件夹开合或退出搜索结束再复原 | 用户松手时就该看到 App 进了 Dock；界面的复原依赖页面与文件夹的状态，沿用已有的等待规则 |

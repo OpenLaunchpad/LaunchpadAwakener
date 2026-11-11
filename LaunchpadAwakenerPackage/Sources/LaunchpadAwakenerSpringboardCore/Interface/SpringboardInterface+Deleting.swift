@@ -29,20 +29,24 @@ final class SpringboardDeletionQuestion {
 /// Deleting an application from jiggle mode, as macOS 15's Launchpad did for applications the Dock's
 /// uninstaller takes — in practice those from the App Store.
 extension SpringboardInterface {
-    /// Tells an icon about to jiggle whether it gets a close box, asking the Dock's uninstaller once per
-    /// application and showing.
+    /// Tells an icon about to jiggle whether it gets a close box.
     func prepareCloseBox(for itemLayer: SpringboardItemLayer) {
-        guard case .application(let application) = itemLayer.item, let bundleURL = application.bundleURL else {
+        guard case .application(let application) = itemLayer.item else {
             itemLayer.isDeletable = false
             return
         }
+        itemLayer.isDeletable = canDelete(application)
+    }
+
+    /// Whether the Dock's uninstaller takes the application, asked once per application and showing.
+    func canDelete(_ application: LaunchpadApplication) -> Bool {
+        guard let bundleURL = application.bundleURL else { return false }
         if let isDeletable = deletabilityByBundlePath[bundleURL.path] {
-            itemLayer.isDeletable = isDeletable
-            return
+            return isDeletable
         }
         let isDeletable = SpringboardHostSystem.host.applicationUninstaller?.canUninstall(applicationAt: bundleURL) ?? false
         deletabilityByBundlePath[bundleURL.path] = isDeletable
-        itemLayer.isDeletable = isDeletable
+        return isDeletable
     }
 
     /// Asks whether to delete the application whose close box was let go on: 15's popover under the
