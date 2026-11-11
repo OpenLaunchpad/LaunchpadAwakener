@@ -21,6 +21,17 @@ struct SpringboardDisplayTests {
         #expect(SpringboardDisplay.displayToShowOn(dockDisplay: 3, activeDisplays: [1], mainDisplay: 1) == 1)
     }
 
+    /// Quartz calls before a change with only the begin flag, and after it with what changed — nothing at
+    /// all for a display that stayed as it was. The springboard goes on any of the calls after.
+    @Test("a reconfiguration callback before a change is not the change; every one after it is")
+    func reconfigurationCallbacks() {
+        #expect(!SpringboardDisplay.reportsFinishedReconfiguration(.beginConfigurationFlag))
+        #expect(SpringboardDisplay.reportsFinishedReconfiguration(.addFlag))
+        #expect(SpringboardDisplay.reportsFinishedReconfiguration(.removeFlag))
+        #expect(SpringboardDisplay.reportsFinishedReconfiguration([.setModeFlag, .desktopShapeChangedFlag]))
+        #expect(SpringboardDisplay.reportsFinishedReconfiguration([]))
+    }
+
     /// Read from the machine the tests run on, which has at least its main display.
     @Test(
         "every active display has a size and a scale, the main display among them",

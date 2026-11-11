@@ -51,10 +51,17 @@ package final class SpringboardController {
     private var visibilitySpring: SpringboardVisibilitySpring?
     private var springTimer: DispatchSourceTimer?
 
+    /// How long after the displays change the icons for the display the springboard opens on are rendered:
+    /// the Dock settles on its display from its own reconfiguration callback, in no set order with this one.
+    private static let displayChangeSettlingDelay: TimeInterval = 1
+    /// Bumped on every display change, so only the last of a burst renders icons.
+    private var displayChangeGeneration = 0
+
     private init() {
         SpringboardIconProvider.shared.iconDidBecomeAvailable = { bundleURL in
             SpringboardController.shared.interface?.iconDidBecomeAvailable(forApplicationAt: bundleURL)
         }
+        observeDisplayReconfiguration()
     }
 
     package var isVisible: Bool {
@@ -241,6 +248,45 @@ package final class SpringboardController {
                 labelLineHeight: SpringboardTypography.lineHeight(of: SpringboardTypography.labelFont)
             )
         )
+    }
+
+    // MARK: - Displays
+
+    /// Hears about every display change from Quartz, on the thread that takes the process's window-server
+    /// events; the work is done on the main actor. Registered once, for the life of the process.
+    private func observeDisplayReconfiguration() {
+        let result = CGDisplayRegisterReconfigurationCallback({ _, flags, _ in
+            guard SpringboardDisplay.reportsFinishedReconfiguration(flags) else { return }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    SpringboardController.shared.displaysDidChange()
+                }
+            }
+        }, nil)
+        if result != .success {
+            #log(.error, "Could not watch for display changes: error \(result.rawValue, privacy: .public)")
+        }
+    }
+
+    /// A display came or went, or one changed its mode or place. As in macOS 15, whose Dock hid Launchpad on
+    /// the first callback after a change (15.5 `sub_10010CEB4`, `setVisible:NO reason:@"display reconfig"`)
+    /// whichever display it was, the springboard goes at once: its window may be on a display that is gone or
+    /// no longer its size. Once the Dock has settled on a display, the icons are rendered for it.
+    private func displaysDidChange() {
+        if window != nil {
+            hide(reason: "the displays changed", animated: false)
+        } else {
+            finishHiding()
+        }
+        displayChangeGeneration += 1
+        let scheduledGeneration = displayChangeGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.displayChangeSettlingDelay) {
+            MainActor.assumeIsolated {
+                let controller = SpringboardController.shared
+                guard controller.displayChangeGeneration == scheduledGeneration else { return }
+                controller.prefetchIcons(onDisplay: SpringboardDisplay.current)
+            }
+        }
     }
 
     // MARK: - Input

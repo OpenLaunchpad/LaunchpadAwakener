@@ -43,4 +43,11 @@ package enum SpringboardDisplay {
         guard let displayMode = CGDisplayCopyDisplayMode(displayIdentifier), displayMode.width > 0 else { return 2 }
         return CGFloat(displayMode.pixelWidth) / CGFloat(displayMode.width)
     }
+
+    /// Whether a display reconfiguration callback with `flags` reports a change that has happened, rather
+    /// than one about to begin. Quartz calls once for every display before a change, with only
+    /// `beginConfigurationFlag`, and once for every display added, removed or online after it.
+    package static func reportsFinishedReconfiguration(_ flags: CGDisplayChangeSummaryFlags) -> Bool {
+        !flags.contains(.beginConfigurationFlag)
+    }
 }
