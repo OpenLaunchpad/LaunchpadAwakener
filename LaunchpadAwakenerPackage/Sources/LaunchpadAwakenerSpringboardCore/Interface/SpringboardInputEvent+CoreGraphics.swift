@@ -60,8 +60,21 @@ extension SpringboardInputEvent {
                 )
             )
         default:
-            kind = Self.gestureKind(of: event, eventType: eventType) ?? .other(eventType: eventType)
+            kind = Self.keyFocusKind(of: event, eventType: eventType)
+                ?? Self.gestureKind(of: event, eventType: eventType)
+                ?? .other(eventType: eventType)
         }
+    }
+
+    /// A key focus notification: CGEvent type 21, its code in field 64 and, for focus given to another
+    /// process, that process in field 73 — the fields the 27.2 Dock's
+    /// `-[DockBarNotificationEventHandler handleNotificationEvent:type:]` (`0x1000852A0`) reads.
+    private static func keyFocusKind(of event: CGEvent, eventType: UInt32) -> Kind? {
+        guard eventType == SpringboardKeyFocus.notificationEventType else { return nil }
+        return .keyFocusNotification(
+            code: event.getIntegerValueField(unsafeBitCast(SpringboardKeyFocus.codeField, to: CGEventField.self)),
+            otherProcessIdentifier: event.getIntegerValueField(unsafeBitCast(SpringboardKeyFocus.otherProcessField, to: CGEventField.self))
+        )
     }
 
     /// The DockSwipe fields the Dock's own gesture code reads (`-[DOCKGestureEvent initWithEvent:display:gesture:]`);

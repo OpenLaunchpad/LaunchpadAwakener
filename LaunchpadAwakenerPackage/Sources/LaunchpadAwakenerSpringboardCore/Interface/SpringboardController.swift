@@ -388,9 +388,28 @@ package final class SpringboardController {
             return false
         case .mouseDown, .mouseUp, .mouseDragged:
             return !isInsideDockBar(inputEvent.location)
+        case let .keyFocusNotification(code, otherProcessIdentifier):
+            handleKeyFocusNotification(code: code, otherProcessIdentifier: otherProcessIdentifier, interface: interface)
+            // The Dock has its own use for these.
+            return false
         case .mouseMoved, .other, .dockSwipe, .systemGestureCancelled:
             return false
         }
+    }
+
+    /// The keyboard left: another application took it — say, clicked on another display — or the user called
+    /// up something over the springboard. 15 hid Launchpad then, unless text was being edited or a deletion
+    /// was being confirmed; see ``SpringboardKeyFocus``.
+    private func handleKeyFocusNotification(code: Int64, otherProcessIdentifier: Int64, interface: SpringboardInterface) {
+        let hidesSpringboard = SpringboardKeyFocus.hidesSpringboard(
+            notificationCode: code,
+            isEditingText: interface.isEditingText,
+            isAskingToDelete: interface.deletionQuestion != nil
+        )
+        #log(.info, "Key focus notification 0x\(String(code, radix: 16), privacy: .public), other process \(otherProcessIdentifier, privacy: .public): \(hidesSpringboard ? "hiding" : "staying", privacy: .public)")
+        guard hidesSpringboard else { return }
+        // Whoever took the keyboard keeps it.
+        hide(reason: "lost key focus", returningToPreviousApplication: false)
     }
 
     private func perform(_ action: SpringboardInterface.Action) {

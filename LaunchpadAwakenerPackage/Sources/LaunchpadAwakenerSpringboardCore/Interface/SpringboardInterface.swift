@@ -87,6 +87,11 @@ final class SpringboardInterface {
     }
     /// Called whenever ``isFolderOpen`` changes; set by the controller, which tells the host.
     var folderOpennessDidChange: (@MainActor () -> Void)?
+    /// Whether text is being edited, as macOS 15's `-[ECSBSpringboard activeTextInputLayer]` (15.5 `0x1000F286C`)
+    /// had it: the search field has the focus or text in it, or a folder's name is being edited.
+    var isEditingText: Bool {
+        searchFieldLayer.hasFocus || !searchText.isEmpty || renaming != nil
+    }
     private var reportedFolderOpenness = false
     /// The open folder's name while it is being renamed, with the selection.
     private var renaming: SpringboardFieldEditor?
