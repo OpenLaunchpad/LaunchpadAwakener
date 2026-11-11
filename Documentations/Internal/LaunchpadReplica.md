@@ -142,7 +142,7 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 **开在 Dock 所在的那块屏，显示期间 Dock 不换屏。** 15 的 Launchpad 只开在 Dock 所在的显示器上：`-[Springboard display]`（15.5 `0x100008248`）就是 `[[DockBar display] identifier]`，F4、触发角、Dock 里的图标与捏合都只切换显隐，不看指针在哪；要开在另一块屏，先把 Dock 叫过去（「显示器具有单独的空间」开着时，指针推到那块屏的底边）。复刻照做：宿主报告 Dock 所在的屏（`SpringboardHost.dockDisplayIdentifier`），`SpringboardDisplay` 取它，读不到或那块屏已不在活动显示器里时退回主显示器；窗口、壁纸、尺寸、刘海高度与预渲染的图标都按这块屏取。注入版读 `DockBar.display` 而不是 `realDisplay`：前者在换屏一开始就设好，后者要等旧屏上的 Dock 窗口撤下才跟上。`DisplayDescriptor` 的 `identifier` 单独写成一个 proxy（`DockDisplayIdentity`），不在装 hook 前的那批核对里：对不上时只是选不了屏，界面照旧开在主显示器上。其余几条也照 15：
 
-- 显示期间 Dock 不换屏。指针推屏走的是 `-[DockVisibility forceDockOntoDisplay:]`，15 的这个方法（`0x1000551AC`）在 Launchpad 可见时直接返回；26 与 27 只剩「stack 展开」那一条检查（27.2 `0x100035694`），所以 payload 替换了它，显示时不转给 Dock。
+- 显示期间 Dock 不换屏。指针推屏走的是 `-[DockVisibility forceDockOntoDisplay:]`，15 的这个方法（`0x1000551AC`）在 Launchpad 可见时直接返回；26 与 27 只剩「stack 展开」那一条检查（27.2 `0x100035694`），所以 payload 替换了它，显示时不转给 Dock。这个 hook 单独成一批，在打开与接管事件的主批装好之后再装：哪天它对不上，只是显示期间 Dock 又能换屏，界面照常可用。
 - 显示器插拔、改分辨率或改排列，立刻不带动画收起：15 的重配置回调（`sub_10010CEB4`）也是不管哪块屏变了都先收起。复刻用 `CGDisplayRegisterReconfigurationCallback`，两版共用。
 - 失去键盘焦点就收起（`-[Springboard lostKeyFocus:]`，`0x10009262C`）。窗口服务器给持有键盘焦点的进程发 CGEvent 类型 21，字段 64 是一个码；15 对 0x1000、0xF102 收起，对 0x4000 不收，搜索框有焦点或有字、正在改名、删除确认开着时也不收（`SpringboardKeyFocus`）。27.2 的 `handleMachMessage:size:` 把每个事件都交给 `handleDockBarEvent:type:`，所以已有的事件 hook 收得到；26.6.2 只在调度中心截获事件时收不到。这几个码 Apple 没有命名，27.2 的 Dock 自己的用法（`-[DockBarNotificationEventHandler handleNotificationEvent:type:]`，`0x1000852A0`）显示 0x1000 是失去焦点、0x4000 是焦点交给了字段 73 里的那个进程。删除确认由辅助进程弹，弹出时它会把键盘拿走，所以那条例外照搬是必要的。
 - Dock 换屏后按新屏的尺寸预渲染图标。图标缓存按像素尺寸分开存，换到尺寸不同的屏时，不预渲染的话第一次打开会先露出 15 留下的旧图标。`forceDockOntoDisplay:` 只是把换屏排进主队列（27.2 与 26.6.2 都是 `dispatch_async`），所以替换实现转给 Dock 之后再往主队列排一个块，轮到它时 `DockBar.display` 已是新屏；没有为此再替换 `-[DockBar setDisplay:]`。显示器重配置后等 1 秒、Dock 安顿好再渲染。
@@ -326,7 +326,7 @@ Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)
 ssh JH@192.168.50.13 '/usr/bin/log show --last 5m --predicate '"'"'subsystem == "com.MxIris.LaunchpadAwakener"'"'"''
 ```
 
-`Checked N Dock method(s), 0 mismatch(es)` 加 `Installed 2 hook(s)` 就是好的。有 mismatch，或者两行 `Found …` 里缺了一行，才进入下一节。
+`Checked N Dock method(s), 0 mismatch(es)` 加 `Installed 2 hook(s)` 就是好的；随后的 `Installed 1 optional hook(s)` 是显示期间把 Dock 留在原屏的那一个，换成 `Optional hooks not installed` 时只是少了这一项。有 mismatch，或者两行 `Found …` 里缺了一行，才进入下一节。
 
 这四行都是默认级别，留在日志库里，所以上面的命令不必加 `--info`，隔几天回头查也还在。在 2026-11-11 之前它们是 info 级，而 info 只留在内存缓冲里：那时注入过了两小时就查不到了（实测，同一次注入的 `Channel to the app is open` 还在），所以改成了默认级别。
 

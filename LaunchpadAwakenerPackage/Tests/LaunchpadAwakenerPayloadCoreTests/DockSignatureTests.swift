@@ -30,6 +30,18 @@ struct PayloadHookSignatureTests {
         #expect(ObjCTypeEncodingNormalization.matches(descriptor.expectedTypeEncoding, "v24@0:8@16I20"))
     }
 
+    /// Keeping the Dock on its display is something the springboard can do without, so a Dock that changed
+    /// that method must still get the hooks that open the springboard: an atomic batch that held all of them
+    /// would install none.
+    @Test func keepingTheDockOnItsDisplayIsABatchOfItsOwn() {
+        let requiredClassNames = PayloadHooks.springboardDescriptors().map(\.className)
+
+        #expect(requiredClassNames.contains("Spotlight"))
+        #expect(requiredClassNames.contains("DockAppEventHandler"))
+        #expect(!requiredClassNames.contains("DockVisibility"))
+        #expect(PayloadHooks.optionalDescriptors().map(\.className) == ["DockVisibility"])
+    }
+
     @Test func dockVisibilityHookMatchesTheDock() throws {
         let descriptor = try #require(DockVisibilityHooks.descriptors().first)
 

@@ -144,6 +144,8 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 
 安装是原子的：任何一个描述符校验失败，整批都不装，payload 保持加载但什么也不做，并留一条日志。**不要为了让 hook 装上而放宽校验** —— 装了一半的宿主进程混合运行着 hook 过和没 hook 过的行为，那是谁都没设计过的状态。
 
+Launchpad 离了也能用的功能（比如显示期间把 Dock 留在原屏），hook 放进 `PayloadHooks.optionalDescriptors()`：主批装好之后另成一批原子安装，对不上只失去那项功能、留一条日志，「没有它」是事先想好的状态。打开 Launchpad 与接管事件的 hook 只能放主批。
+
 ## 两条注入路径
 
 默认 `dlopen`。目标的沙箱配置禁止 `file-map-executable` 时（部分 Apple 守护进程如此）改用
