@@ -14,5 +14,5 @@
 | 0008 | [文本输入通道改用系统的 Swift XPC 接口](0008-text-input-swift-xpc.md) | Implemented |
 | 0009 | [在控制面板里显示输入法辅助进程，并自动换掉旧版本](0009-text-input-helper-status.md) | Implemented |
 | 0010 | [SIP 没关时引导用户改用独立版，并一键安装](0010-system-integrity-protection-guide.md) | Implemented |
+| 0011 | [在运行时找出 Dock 的两个全局变量，取消构建白名单](0011-runtime-dock-global-discovery.md) | Implemented |
 | draft | [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md) | In Progress |
-| draft | [在运行时找出 Dock 的两个全局变量，取消构建白名单](draft-runtime-dock-global-discovery.md) | Accepted |
