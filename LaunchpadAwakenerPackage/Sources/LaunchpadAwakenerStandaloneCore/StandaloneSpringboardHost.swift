@@ -29,8 +29,12 @@ final class StandaloneSpringboardHost: SpringboardHost {
         StandaloneEnvironment.dockBundle
     }
 
-    var dockGeometry: SpringboardDockGeometry {
-        StandaloneEnvironment.dockGeometry
+    var dockDisplayIdentifier: CGDirectDisplayID? {
+        StandaloneEnvironment.dockDisplayIdentifier
+    }
+
+    func dockGeometry(onDisplay displayIdentifier: CGDirectDisplayID) -> SpringboardDockGeometry {
+        StandaloneEnvironment.dockGeometry(onDisplay: displayIdentifier)
     }
 
     var iconStyle: SpringboardIconStyle? {

@@ -17,9 +17,10 @@ enum SpringboardSelfCheck {
     /// The Dock's glass may only be asked for once the Dock is up.
     private static let glassCheckDelay: TimeInterval = 5
 
-    static func runOnce(layout: LaunchpadLayout, metrics: SpringboardMetrics, scale: CGFloat) {
+    static func runOnce(layout: LaunchpadLayout, metrics: SpringboardMetrics, scale: CGFloat, displayIdentifier: CGDirectDisplayID) {
         guard !hasRun, !layout.pages.isEmpty else { return }
         hasRun = true
+        logDisplays(showingOn: displayIdentifier)
         let detachedRootLayer = CALayer()
         detachedRootLayer.frame = CGRect(origin: .zero, size: metrics.input.screenSize)
         let interface = SpringboardInterface(layout: layout, metrics: metrics, scale: scale, rootLayer: detachedRootLayer, backgroundStyle: nil, applyEdit: { _ in })
@@ -57,7 +58,7 @@ enum SpringboardSelfCheck {
 
         // Only the size is logged; the image stays in the Dock.
         let captureStartDate = Date()
-        let wallpaperImage = host.wallpaperImage(onDisplay: CGMainDisplayID())
+        let wallpaperImage = host.wallpaperImage(onDisplay: displayIdentifier)
         let captureMilliseconds = Int(Date().timeIntervalSince(captureStartDate) * 1000)
         if let wallpaperImage {
             #log(.info, "Self-check: wallpaper captured, \(wallpaperImage.width, privacy: .public)×\(wallpaperImage.height, privacy: .public) pixels in \(captureMilliseconds, privacy: .public) ms; background filters \(QuartzCorePrivate.desktopBackgroundFilters()?.count ?? 0, privacy: .public)")
@@ -71,6 +72,18 @@ enum SpringboardSelfCheck {
                 checkGlassOncePerBuild(frame: detachedRootLayer.frame, scale: scale)
             }
         }
+    }
+
+    /// Every display the springboard could open on, where the host says the Dock is, and the display chosen.
+    private static func logDisplays(showingOn displayIdentifier: CGDirectDisplayID) {
+        let displayDescriptions = SpringboardDisplay.activeDisplays.map { activeDisplay in
+            let bounds = CGDisplayBounds(activeDisplay)
+            let scale = SpringboardDisplay.backingScaleFactor(of: activeDisplay)
+            let mainMark = CGDisplayIsMain(activeDisplay) != 0 ? " main" : ""
+            return "\(activeDisplay)\(mainMark) \(Int(bounds.width))×\(Int(bounds.height)) at (\(Int(bounds.minX)), \(Int(bounds.minY))) scale \(scale)"
+        }
+        let dockDisplayDescription = SpringboardHostSystem.host.dockDisplayIdentifier.map { "display \($0)" } ?? "an unknown display"
+        #log(.info, "Self-check: displays \(displayDescriptions.joined(separator: "; "), privacy: .public); the Dock is on \(dockDisplayDescription, privacy: .public), the springboard opens on display \(displayIdentifier, privacy: .public)")
     }
 
     /// Asks the Dock for its glass off screen and logs the layers it made. Runs once per payload build:

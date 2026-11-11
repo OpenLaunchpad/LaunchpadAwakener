@@ -81,6 +81,8 @@ package struct SpringboardInputEvent: Sendable {
         case navigationSwipe(NavigationSwipe)
         /// The system called a gesture off (type 29, field 110 = 60).
         case systemGestureCancelled
+        /// The window server telling the process about its key focus; see ``SpringboardKeyFocus``.
+        case keyFocusNotification(code: Int64, otherProcessIdentifier: Int64)
         /// Gestures, system-defined keys and everything else.
         case other(eventType: UInt32)
     }

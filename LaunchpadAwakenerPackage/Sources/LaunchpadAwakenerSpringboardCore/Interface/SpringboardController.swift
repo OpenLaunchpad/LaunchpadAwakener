@@ -51,10 +51,17 @@ package final class SpringboardController {
     private var visibilitySpring: SpringboardVisibilitySpring?
     private var springTimer: DispatchSourceTimer?
 
+    /// How long after the displays change the icons for the display the springboard opens on are rendered:
+    /// the Dock settles on its display from its own reconfiguration callback, in no set order with this one.
+    private static let displayChangeSettlingDelay: TimeInterval = 1
+    /// Bumped on every display change, so only the last of a burst renders icons.
+    private var displayChangeGeneration = 0
+
     private init() {
         SpringboardIconProvider.shared.iconDidBecomeAvailable = { bundleURL in
             SpringboardController.shared.interface?.iconDidBecomeAvailable(forApplicationAt: bundleURL)
         }
+        observeDisplayReconfiguration()
     }
 
     package var isVisible: Bool {
@@ -83,15 +90,15 @@ package final class SpringboardController {
         // The Dock is told once the new springboard is up: letting it go here only to hold it again a
         // moment later would start it sliding.
         finishHiding(updatingDockVisibility: false)
-        let displayIdentifier = CGMainDisplayID()
+        let displayIdentifier = SpringboardDisplay.current
         guard let newWindow = SpringboardHostSystem.host.makeWindow(onDisplay: displayIdentifier) else {
-            #log(.error, "Could not create the springboard window")
+            #log(.error, "Could not create the springboard window on display \(displayIdentifier, privacy: .public)")
             updateDockVisibility()
             return
         }
         SpringboardIconProvider.shared.refreshIconStyle()
         clearRecentlyAddedMarksOfLaunchedApplications()
-        let metrics = Self.metrics(forScreenSize: newWindow.displayBounds.size)
+        let metrics = Self.metrics(onDisplay: displayIdentifier)
         let backgroundStyle = SpringboardHostSystem.host.offersGlassBackground ? SpringboardPreferences.backgroundStyle : .wallpaper
         // 15 captured the wallpaper afresh each time it opened.
         let wallpaperImage = backgroundStyle == .wallpaper ? SpringboardHostSystem.host.wallpaperImage(onDisplay: displayIdentifier) : nil
@@ -134,7 +141,7 @@ package final class SpringboardController {
         case .glass:
             newInterface.background?.isGlass == true ? "the Dock's glass, variant \(SpringboardPreferences.glassVariant)" : "the stand-in blur"
         }
-        #log(.info, "Shown (\(reason, privacy: .public)) on \(newInterface.position.description, privacy: .public) over \(backgroundDescription, privacy: .public): \(newInterface.geometryDescription, privacy: .public)")
+        #log(.info, "Shown (\(reason, privacy: .public)) on display \(displayIdentifier, privacy: .public) at \(newInterface.position.description, privacy: .public) over \(backgroundDescription, privacy: .public): \(newInterface.geometryDescription, privacy: .public)")
         #if DEBUG
         SpringboardSelfCheck.logShownBackground(of: newInterface, rootLayer: newWindow.rootLayer)
         #endif
@@ -202,24 +209,36 @@ package final class SpringboardController {
     func updateLayout(_ newLayout: LaunchpadLayout) {
         layout = newLayout
         interface?.replaceLayout(newLayout)
-        let displayIdentifier = CGMainDisplayID()
-        let metrics = Self.metrics(forScreenSize: CGDisplayBounds(displayIdentifier).size)
-        let scale = Self.backingScaleFactor(of: displayIdentifier)
-        let iconProvider = SpringboardIconProvider.shared
-        iconProvider.refreshIconStyle()
-        let bundleURLs = newLayout.applications.compactMap(\.bundleURL)
-        iconProvider.prefetchIcons(forApplicationsAt: bundleURLs, pointSide: metrics.iconSide, scale: scale)
-        #log(.info, "Prefetching \(bundleURLs.count, privacy: .public) icon(s) at \(Int(metrics.iconSide), privacy: .public) points")
+        let displayIdentifier = SpringboardDisplay.current
+        prefetchIcons(onDisplay: displayIdentifier)
         #if DEBUG
-        SpringboardSelfCheck.runOnce(layout: newLayout, metrics: metrics, scale: scale)
+        SpringboardSelfCheck.runOnce(
+            layout: newLayout,
+            metrics: Self.metrics(onDisplay: displayIdentifier),
+            scale: SpringboardDisplay.backingScaleFactor(of: displayIdentifier),
+            displayIdentifier: displayIdentifier
+        )
         #endif
     }
 
-    private static func metrics(forScreenSize screenSize: CGSize) -> SpringboardMetrics {
-        let dockGeometry = SpringboardHostSystem.host.dockGeometry
+    /// Renders the icons at the size they take on `displayIdentifier`, ahead of the springboard opening there:
+    /// for every new layout, and once the Dock has moved to another display or the displays have changed.
+    /// Icons already rendered at that size are not rendered again.
+    package func prefetchIcons(onDisplay displayIdentifier: CGDirectDisplayID) {
+        let metrics = Self.metrics(onDisplay: displayIdentifier)
+        let scale = SpringboardDisplay.backingScaleFactor(of: displayIdentifier)
+        let iconProvider = SpringboardIconProvider.shared
+        iconProvider.refreshIconStyle()
+        let bundleURLs = layout.applications.compactMap(\.bundleURL)
+        iconProvider.prefetchIcons(forApplicationsAt: bundleURLs, pointSide: metrics.iconSide, scale: scale)
+        #log(.info, "Prefetching \(bundleURLs.count, privacy: .public) icon(s) at \(Int(metrics.iconSide), privacy: .public) points, scale \(scale, privacy: .public), for display \(displayIdentifier, privacy: .public)")
+    }
+
+    private static func metrics(onDisplay displayIdentifier: CGDirectDisplayID) -> SpringboardMetrics {
+        let dockGeometry = SpringboardHostSystem.host.dockGeometry(onDisplay: displayIdentifier)
         return SpringboardMetrics(
             SpringboardMetrics.Input(
-                screenSize: screenSize,
+                screenSize: CGDisplayBounds(displayIdentifier).size,
                 dockOrientation: dockGeometry.orientation,
                 dockThickness: dockGeometry.thickness,
                 notchHeight: dockGeometry.notchHeight,
@@ -231,9 +250,67 @@ package final class SpringboardController {
         )
     }
 
-    private static func backingScaleFactor(of displayIdentifier: CGDirectDisplayID) -> CGFloat {
-        guard let displayMode = CGDisplayCopyDisplayMode(displayIdentifier), displayMode.width > 0 else { return 2 }
-        return CGFloat(displayMode.pixelWidth) / CGFloat(displayMode.width)
+    // MARK: - Displays
+
+    /// Whether the Dock may move to `targetDisplay` now: not while the springboard shows, whose window and
+    /// room for the Dock are on the Dock's display. macOS 15's `-[DockVisibility forceDockOntoDisplay:]`
+    /// (15.5 `0x1000551AC`), through which the pointer at another display's bottom edge moves the Dock, returned
+    /// at once while Launchpad was visible; 26 and 27 dropped that check along with Launchpad.
+    package func allowsDockToChangeDisplay(to targetDisplay: CGDirectDisplayID) -> Bool {
+        guard window == nil else {
+            #log(.info, "Kept the Dock on its display while the springboard shows; it was asked to move to display \(targetDisplay, privacy: .public)")
+            return false
+        }
+        return true
+    }
+
+    /// The Dock was asked to move to `targetDisplay`: renders the icons for the display the springboard will
+    /// open on once it has. The Dock moves on the main queue after the call that asked it to (27.2
+    /// `0x100035694` and 26.6.2 `0x10005D800` queue the move), so this queues behind it.
+    package func dockWillChangeDisplay(to targetDisplay: CGDirectDisplayID) {
+        guard targetDisplay != SpringboardDisplay.current else { return }
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                SpringboardController.shared.prefetchIcons(onDisplay: SpringboardDisplay.current)
+            }
+        }
+    }
+
+    /// Hears about every display change from Quartz, on the thread that takes the process's window-server
+    /// events; the work is done on the main actor. Registered once, for the life of the process.
+    private func observeDisplayReconfiguration() {
+        let result = CGDisplayRegisterReconfigurationCallback({ _, flags, _ in
+            guard SpringboardDisplay.reportsFinishedReconfiguration(flags) else { return }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    SpringboardController.shared.displaysDidChange()
+                }
+            }
+        }, nil)
+        if result != .success {
+            #log(.error, "Could not watch for display changes: error \(result.rawValue, privacy: .public)")
+        }
+    }
+
+    /// A display came or went, or one changed its mode or place. As in macOS 15, whose Dock hid Launchpad on
+    /// the first callback after a change (15.5 `sub_10010CEB4`, `setVisible:NO reason:@"display reconfig"`)
+    /// whichever display it was, the springboard goes at once: its window may be on a display that is gone or
+    /// no longer its size. Once the Dock has settled on a display, the icons are rendered for it.
+    private func displaysDidChange() {
+        if window != nil {
+            hide(reason: "the displays changed", animated: false)
+        } else {
+            finishHiding()
+        }
+        displayChangeGeneration += 1
+        let scheduledGeneration = displayChangeGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.displayChangeSettlingDelay) {
+            MainActor.assumeIsolated {
+                let controller = SpringboardController.shared
+                guard controller.displayChangeGeneration == scheduledGeneration else { return }
+                controller.prefetchIcons(onDisplay: SpringboardDisplay.current)
+            }
+        }
     }
 
     // MARK: - Input
@@ -311,9 +388,28 @@ package final class SpringboardController {
             return false
         case .mouseDown, .mouseUp, .mouseDragged:
             return !isInsideDockBar(inputEvent.location)
+        case let .keyFocusNotification(code, otherProcessIdentifier):
+            handleKeyFocusNotification(code: code, otherProcessIdentifier: otherProcessIdentifier, interface: interface)
+            // The Dock has its own use for these.
+            return false
         case .mouseMoved, .other, .dockSwipe, .systemGestureCancelled:
             return false
         }
+    }
+
+    /// The window server says the keyboard left: another application took it — clicked on another display,
+    /// say — or something was called up over the springboard. Hides the springboard where 15 hid Launchpad;
+    /// see ``SpringboardKeyFocus``.
+    private func handleKeyFocusNotification(code: Int64, otherProcessIdentifier: Int64, interface: SpringboardInterface) {
+        let hidesSpringboard = SpringboardKeyFocus.hidesSpringboard(
+            notificationCode: code,
+            isEditingText: interface.isEditingText,
+            isAskingToDelete: interface.deletionQuestion != nil
+        )
+        #log(.info, "Key focus notification 0x\(String(code, radix: 16), privacy: .public), other process \(otherProcessIdentifier, privacy: .public): \(hidesSpringboard ? "hiding" : "staying", privacy: .public)")
+        guard hidesSpringboard else { return }
+        // Whoever took the keyboard keeps it.
+        hide(reason: "lost key focus", returningToPreviousApplication: false)
     }
 
     private func perform(_ action: SpringboardInterface.Action) {

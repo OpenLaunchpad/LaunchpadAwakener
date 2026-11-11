@@ -2,7 +2,7 @@
 
 在 macOS 26 与 27 的 Dock 里复刻 macOS 15 的 Launchpad：一个注入 Dock 的 payload，加上负责注入的 App 与特权 daemon。macOS 26 与 27 的任何 Dock 构建都直接工作：复刻要的两个全局变量在运行时按它们持有的对象的类认出来，不按构建记地址（见实现说明「关键设计决策」）。升级系统后只需确认日志里方法签名没有不符的。工程由 [InjectionScaffold](https://github.com/Mx-Iris/InjectionScaffold) 生成，方案见提案 [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](Documentations/Evolutions/draft-launchpad-replica.md)。
 
-另有一个不注入 Dock 的独立版 App「Launchpad」：自己开一扇盖住整块主屏幕（连 Dock 与菜单栏）的窗口，画同一套 Launchpad，不需要关 SIP。两版共用 Launchpad 本身的代码，方案见提案 [不注入 Dock 的独立版 Launchpad](Documentations/Evolutions/0002-standalone-launchpad.md)，实现见[独立版实现说明](Documentations/Internal/StandaloneLaunchpad.md)。
+另有一个不注入 Dock 的独立版 App「Launchpad」：自己开一扇盖住 Dock 所在那块屏幕（连 Dock 与菜单栏）的窗口，画同一套 Launchpad，不需要关 SIP。两版共用 Launchpad 本身的代码，方案见提案 [不注入 Dock 的独立版 Launchpad](Documentations/Evolutions/0002-standalone-launchpad.md)，实现见[独立版实现说明](Documentations/Internal/StandaloneLaunchpad.md)。
 
 ## 只在测试机上运行
 
@@ -143,6 +143,8 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 `RuntimeMethodInspector.typeEncoding(forClassNamed:selector:isInstanceMethod:)` 读出来，把替换方法的 Swift 参数与返回类型写成能推出它的类型（`I` 是 `UInt32`，`f` 是 `Float`，`B` 是 `Bool`），并把编码记进 `DockSignatureTests`。宏从这一个声明推出选择子、编码与 block，安装时再与宿主的实际编码比对：类型写错就整批不装，而不是在调用时破坏寄存器、让宿主进程崩溃 —— 崩的是别人的进程，用户不会想到是这个工具。返回对象的 alloc、copy、mutableCopy、new、init 族方法不能这样替换，宏会在编译期报错。
 
 安装是原子的：任何一个描述符校验失败，整批都不装，payload 保持加载但什么也不做，并留一条日志。**不要为了让 hook 装上而放宽校验** —— 装了一半的宿主进程混合运行着 hook 过和没 hook 过的行为，那是谁都没设计过的状态。
+
+Launchpad 离了也能用的功能（比如显示期间把 Dock 留在原屏），hook 放进 `PayloadHooks.optionalDescriptors()`：主批装好之后另成一批原子安装，对不上只失去那项功能、留一条日志，「没有它」是事先想好的状态。打开 Launchpad 与接管事件的 hook 只能放主批。
 
 ## 两条注入路径
 

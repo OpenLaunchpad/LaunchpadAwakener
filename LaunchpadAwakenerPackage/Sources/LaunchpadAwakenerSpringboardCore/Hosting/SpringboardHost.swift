@@ -26,8 +26,11 @@ package protocol SpringboardHost: AnyObject, Sendable {
     /// "Untitled". Nil leaves the images out and the words in English.
     nonisolated var resourceBundle: Bundle? { get }
 
-    /// The room the Dock takes at the edge of the screen, and the camera housing at the top.
-    var dockGeometry: SpringboardDockGeometry { get }
+    /// The display the Dock is on; nil where the host cannot tell. The springboard opens there, as macOS 15's
+    /// did; see ``SpringboardDisplay``.
+    var dockDisplayIdentifier: CGDirectDisplayID? { get }
+    /// The room the Dock takes at the edge of the display, and the camera housing at the top of it.
+    func dockGeometry(onDisplay displayIdentifier: CGDirectDisplayID) -> SpringboardDockGeometry
     /// The style application icons are drawn in; nil draws the default style.
     var iconStyle: SpringboardIconStyle? { get }
     /// Deletes applications; nil keeps close boxes out of jiggle mode.
@@ -435,7 +438,11 @@ final class DetachedSpringboardHost: SpringboardHost {
         nil
     }
 
-    var dockGeometry: SpringboardDockGeometry {
+    var dockDisplayIdentifier: CGDirectDisplayID? {
+        nil
+    }
+
+    func dockGeometry(onDisplay displayIdentifier: CGDirectDisplayID) -> SpringboardDockGeometry {
         .standard
     }
 

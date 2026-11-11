@@ -28,11 +28,15 @@ final class DockSpringboardHost: SpringboardHost {
         Bundle.main
     }
 
-    var dockGeometry: SpringboardDockGeometry {
+    var dockDisplayIdentifier: CGDirectDisplayID? {
+        DockEnvironment.dockDisplayIdentifier
+    }
+
+    func dockGeometry(onDisplay displayIdentifier: CGDirectDisplayID) -> SpringboardDockGeometry {
         SpringboardDockGeometry(
             orientation: DockEnvironment.dockOrientation,
             thickness: DockEnvironment.dockThickness,
-            notchHeight: DockEnvironment.notchHeight
+            notchHeight: DockEnvironment.notchHeight(onDisplay: displayIdentifier)
         )
     }
 

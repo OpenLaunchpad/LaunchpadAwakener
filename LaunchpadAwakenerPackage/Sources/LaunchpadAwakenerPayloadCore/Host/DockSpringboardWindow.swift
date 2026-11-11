@@ -51,7 +51,7 @@ final class DockSpringboardWindow: SpringboardWindow {
 
         self.displayIdentifier = displayIdentifier
         self.displayBounds = displayBounds
-        self.backingScaleFactor = Self.backingScaleFactor(of: displayIdentifier)
+        self.backingScaleFactor = SpringboardDisplay.backingScaleFactor(of: displayIdentifier)
         self.rootLayer = rootLayer
         self.window = window
         self.connectionIdentifier = connectionIdentifier
@@ -125,10 +125,5 @@ final class DockSpringboardWindow: SpringboardWindow {
                 onConnection: connectionIdentifier
             )
         }
-    }
-
-    private static func backingScaleFactor(of displayIdentifier: CGDirectDisplayID) -> CGFloat {
-        guard let displayMode = CGDisplayCopyDisplayMode(displayIdentifier), displayMode.width > 0 else { return 2 }
-        return CGFloat(displayMode.pixelWidth) / CGFloat(displayMode.width)
     }
 }

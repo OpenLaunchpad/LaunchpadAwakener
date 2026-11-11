@@ -154,8 +154,9 @@ final class DockDropTarget: SpringboardDockDropTarget {
         return dockBar.inBarRect?.contains(globalPoint) ?? false
     }
 
+    /// On the display the springboard shows on: the Dock's, which keeps still while the springboard shows.
     func makeDragWindow() -> (any SpringboardDragWindow)? {
-        DockDragWindow(displayIdentifier: CGMainDisplayID())
+        DockDragWindow(displayIdentifier: SpringboardDisplay.current)
     }
 
     func beginDrag(ofApplicationAt bundleURL: URL, at globalPoint: CGPoint) -> (any SpringboardDockDrag)? {

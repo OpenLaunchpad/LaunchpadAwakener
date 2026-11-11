@@ -24,7 +24,8 @@ import LaunchpadAwakenerSpringboardCore
 ///    the encoding from that one declaration, and installation compares the encoding with the live
 ///    method, so a wrong type refuses the whole batch instead of corrupting registers at call time.
 ///    `host` is the receiver; `callOriginal(…)` forwards to the Dock's own implementation.
-/// 4. Add the container's `descriptors()` to ``descriptors()`` below, and its expected encoding to
+/// 4. Add the container's `descriptors()` to ``descriptors()`` below — or to ``optionalDescriptors()``
+///    when the springboard can do without what it does — and its expected encoding to
 ///    `PayloadHookSignatureTests`, which checks it against the value read from the Dock.
 ///
 /// A method in the alloc, copy, mutableCopy, new or init family that returns an object cannot be
@@ -47,7 +48,19 @@ public enum PayloadHooks {
             #log(.error, "The Dock's methods do not match this payload; installing no hooks")
             return []
         }
-        return SpotlightHooks.descriptors() + DockAppEventHandlerHooks.descriptors()
+        return springboardDescriptors()
+    }
+
+    /// The hooks the springboard cannot work without: every way into it, and every event it takes.
+    static func springboardDescriptors() -> [RuntimeMethodHook.Descriptor] {
+        SpotlightHooks.descriptors() + DockAppEventHandlerHooks.descriptors()
+    }
+
+    /// The hooks the springboard can do without, installed as a batch of their own once ``descriptors()`` is
+    /// in: a Dock whose method no longer matches loses only what the hook does, not the springboard. Keeping
+    /// the Dock on its display while the springboard shows is one; without it the Dock moves as 26 and 27 let it.
+    public static func optionalDescriptors() -> [RuntimeMethodHook.Descriptor] {
+        DockVisibilityHooks.descriptors()
     }
 }
 
@@ -90,5 +103,30 @@ struct DockAppEventHandlerHooks {
             if isConsumed { return }
         }
         callOriginal(eventObject, eventType)
+    }
+}
+
+/// The pointer at another display's bottom edge moves the Dock there through
+/// `-[DockVisibility forceDockOntoDisplay:]`, which macOS 15's Dock left at once while Launchpad showed. 26 and
+/// 27 check only for an open stack, so the springboard keeps the Dock on its display itself; otherwise the
+/// Dock moves as usual, and the icons are rendered for where it goes.
+@RuntimeClassHook("DockVisibility")
+struct DockVisibilityHooks {
+    /// `displayIdentifier` is the `CGDirectDisplayID` the Dock is asked to move to.
+    @RuntimeMethodReplacement
+    func forceDockOntoDisplay(_ displayIdentifier: UInt32) {
+        // The Dock asks from its event handling, on the main thread; anything else is left to the Dock.
+        guard Thread.isMainThread else {
+            callOriginal(displayIdentifier)
+            return
+        }
+        let allowsMove = MainActor.assumeIsolated {
+            SpringboardController.shared.allowsDockToChangeDisplay(to: displayIdentifier)
+        }
+        guard allowsMove else { return }
+        callOriginal(displayIdentifier)
+        MainActor.assumeIsolated {
+            SpringboardController.shared.dockWillChangeDisplay(to: displayIdentifier)
+        }
     }
 }

@@ -29,6 +29,28 @@ struct PayloadHookSignatureTests {
         #expect(descriptor.isInstanceMethod)
         #expect(ObjCTypeEncodingNormalization.matches(descriptor.expectedTypeEncoding, "v24@0:8@16I20"))
     }
+
+    /// Keeping the Dock on its display is something the springboard can do without, so a Dock that changed
+    /// that method must still get the hooks that open the springboard: an atomic batch that held all of them
+    /// would install none.
+    @Test func keepingTheDockOnItsDisplayIsABatchOfItsOwn() {
+        let requiredClassNames = PayloadHooks.springboardDescriptors().map(\.className)
+
+        #expect(requiredClassNames.contains("Spotlight"))
+        #expect(requiredClassNames.contains("DockAppEventHandler"))
+        #expect(!requiredClassNames.contains("DockVisibility"))
+        #expect(PayloadHooks.optionalDescriptors().map(\.className) == ["DockVisibility"])
+    }
+
+    @Test func dockVisibilityHookMatchesTheDock() throws {
+        let descriptor = try #require(DockVisibilityHooks.descriptors().first)
+
+        #expect(DockVisibilityHooks.descriptors().count == 1)
+        #expect(descriptor.className == "DockVisibility")
+        #expect(NSStringFromSelector(descriptor.selector) == "forceDockOntoDisplay:")
+        #expect(descriptor.isInstanceMethod)
+        #expect(ObjCTypeEncodingNormalization.matches(descriptor.expectedTypeEncoding, "v20@0:8I16"))
+    }
 }
 
 /// The selectors `requirements` name and the encodings derived for them, against the ones read from the Dock.
@@ -83,6 +105,11 @@ struct DockProxySignatureTests {
         #expect(DockDisplayDescriptorImplementation.runtimeClassName == "DisplayDescriptor")
         expectRequirements(DockDisplayDescriptorImplementation.methodRequirements, toMatch: [
             "notchBounds": "{CGRect={CGPoint=dd}{CGSize=dd}}16@0:8",
+        ])
+        // Checked on first use rather than before the hooks: without it only the choice of display goes.
+        #expect(DockDisplayIdentityImplementation.runtimeClassName == "DisplayDescriptor")
+        expectRequirements(DockDisplayIdentityImplementation.methodRequirements, toMatch: [
+            "identifier": "I16@0:8",
         ])
     }
 

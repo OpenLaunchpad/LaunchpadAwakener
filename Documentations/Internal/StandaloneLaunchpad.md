@@ -6,7 +6,7 @@
 
 ## 背景与目标
 
-独立版是一个普通的 App，自己开一扇盖住整块主屏幕的窗口，画出与注入版相同的 macOS 15 Launchpad，不注入 Dock、不需要关 SIP。两版共用 `LaunchpadAwakenerSpringboardCore` 里的布局库与界面层；界面层要的窗口、图层类、壁纸、图标样式这些，经宿主接口 `SpringboardHost` 向各自的宿主要（见[术语表](../Glossary.md)「Host（宿主）」）。
+独立版是一个普通的 App，自己开一扇盖住 Dock 所在那块屏幕的窗口，画出与注入版相同的 macOS 15 Launchpad，不注入 Dock、不需要关 SIP。两版共用 `LaunchpadAwakenerSpringboardCore` 里的布局库与界面层；界面层要的窗口、图层类、壁纸、图标样式这些，经宿主接口 `SpringboardHost` 向各自的宿主要（见[术语表](../Glossary.md)「Host（宿主）」）。
 
 注入版的包里带着一份压缩的独立版（`Contents/Resources/Launchpad.zip`）。SIP 没关时注入版不注入，控制面板一键把它装进「应用程序」并打开，见[控制面板的实现说明](ControlPanel.md)。
 
@@ -28,6 +28,8 @@
 
 **焦点：打开时激活自己，退场一开始就把自己藏起来交还。** `orderIn` 先 `NSApp.activate()` 再 `makeKeyAndOrderFront`；从别的 App 按快捷键打开时，这一刻 App 还没激活、窗口不是 key，等激活完成 AppKit 会让它成为 key、内容视图仍是第一响应者，不用另外处理。`releaseKeyFocus` 调 `NSApp.hide(nil)`：与 Command-H 一样，系统随即激活之前那个 App，这正是 15「退场一开始就交还输入」的效果；窗口设了 `canHide = false`，不随 App 藏起来，留到退场动画结束才撤下。起初用的是 `NSApp.deactivate()`，在 27 上它不交出激活——退场时这扇窗口还在最前面，App 照样是前台，菜单栏还是它的；下次显示前先 `unhideWithoutActivation()`。两种收起不交还：从界面里打开了 App（那个 App 自己拿焦点，再交给之前的 App 会抢它的），以及打开设置（焦点留给设置窗口），宿主接口为此给 `releaseKeyFocus` 加了 `returningToPreviousApplication`，注入版不看它。代价是设置窗口开着时收起界面，设置窗口会随 App 一起藏起来，下次打开 App 时再出现。App 失去激活（Cmd-Tab、点到别处）就收起；点 Dock 图标走 `applicationShouldHandleReopen` 打开；登录时由「打开时登录」启动的那一次不打开，等第一次点图标（看打开事件的 `keyAELaunchedAsLogInItem`）。
 
+**Dock 在哪块屏，问窗口服务器。** 两版都照 15 开在 Dock 所在的那块屏（见[注入版实现说明](LaunchpadReplica.md)「开在 Dock 所在的那块屏」）。独立版读不到 Dock 的 `DockBar`，改问窗口服务器给 Dock 记的矩形——`SLSGetDockRectWithOrientation`，AppKit 正是用它从屏幕的可用区域里扣掉 Dock——取矩形中心所在的屏；Dock 藏到边外、中心不在任何屏上时，取离中心最近、且不超过 Dock 自身长度的那块屏；都没有就用主显示器。矩形是左上角原点的全局坐标：单块屏上光看「落在哪块屏」分不出两种原点，所以有一条测试在开发机上把它换成 AppKit 坐标，核对它正好接在 Dock 那块屏可用区域的下沿。刘海高度取那块屏的 `safeAreaInsets.top`。显示期间拦不住 Dock 换屏，但窗口本来就盖着 Dock，换了也只是界面留在原屏，下次打开才跟过去；显示器一变就收起这一条是两版共用的。
+
 **壁纸绝不申请权限。** 截壁纸窗口要「录屏」权限，所以只在 `CGPreflightScreenCaptureAccess()` 为真时才截——这个函数只查询、不弹窗；截的是 Dock 自己的壁纸窗口时要传 Dock 的进程号，不再是本进程。否则读 `NSWorkspace.desktopImageURL(for:)` 的文件：动态 HEIC 按 XMP 里 `apple_desktop:` 的日程取当前那一张——`apr` 与 `solar` 的 `ap` 按浅色、深色取，`h24` 按一天中的时刻取「已过去的最后一个时刻」，天亮前取前一天最后一张。读不出图（视频壁纸之类）就是 15 的径向渐变。
 
 **图标样式照 Dock 的表自己建。** `+[SLSIconAppearanceConfiguration fetchCurrentIconAppearanceConfiguration]` 读主题、明暗、着色色名与自定义色，按 27.2 Dock 的表设 `ISImageDescriptor` 的 `appearance`、`appearanceVariant`、`background`；着色的两种样式另设 `tintColor`：色名 2…9 用 `-[IFColor initWithSystemColor:appearance:contrast:vibrancy:]`（与 Dock 拿到同一个颜色），10 用自定义色，0 跟随 `AppleAccentColor`。这些类由 SkyLight、IconServices、IconFoundation 导出，在 `LaunchpadAwakenerPrivateInterfaces` 的头文件里声明后直接调用，运行时不再核对；声明在 26.6.2 与 27.2 上核对过，`StandaloneIconStyleTests` 会在开发机上把它们实际调用一遍。
@@ -36,7 +38,7 @@
 
 **布局库各用各的，首次从注入版的库导入。** 库在 `~/Library/Application Support/LaunchpadAwakener/Standalone/Launchpad.db`；第一次启动时注入版的库存在就从它导入，否则从 15 的旧库。注入版的库沿用 15 的表，所以用的是同一个导入器，页、文件夹、顺序与新装标记都带过来（单元测试 `injectedLibraryImports`）。15 的 `springboard-*` 偏好照样从 `com.apple.dock` 读。独立版自己在 `/Applications` 里，按启动器的规矩从两边的布局里拿掉（见注入版实现说明「App 只在确实卸载时才从布局里删除」）。
 
-**输入法经窗口的内容视图接，字照共用的画法画。** 注入版的输入法靠辅助进程里的真 `NSTextField`；独立版是普通 App，窗口本身就拿得到键盘，于是内容视图遵循 `NSTextInputClient`、做第一响应者，AppKit 自动给它一个 `NSTextInputContext`。没有照搬辅助进程的做法（把真文本框放进同进程的另一扇窗口、经 `CALayerHost` 贴进界面）：一个进程同时只有一扇 key 窗口，那扇窗口还得用 AppKit 私有的 `_contextForLayerHosting` 才贴得进来。宿主多了一项 `inputMethod`，界面层在原来转交托管文本框的几个地方，把按键先交给它：改名时与组字时是每个键，搜索框里只是会打字的键（方向键、删除、回车这些照旧走界面层自己的 15 规则）；Shift 这类修饰键也给它，输入法靠它切换中英文。输入法回调界面层（`SpringboardInputMethodClient`）：打出的字照打字插入，组字中的文字记在编辑模型里（`SpringboardTextEditing.markedText`），显示时代替选区、加下划线，不算进文字，所以搜索不会搜半个拼音，撤销也跳过它。按下鼠标、改名结束、界面收起时，组字中的文字照文本框的规矩当作打出的字收下。候选窗的位置取光标图层在容器里的位置：容器从主显示器左下角起排，正好就是 Cocoa 的屏幕坐标。内容视图还要实现 `windowLevel()`、报出窗口的层级 27，候选窗才出现在界面上方：不报时输入法把候选窗放在浮动窗口之上一层，被界面盖住（`NSTextView` 自己会报，所以注入版的辅助进程不用管）。
+**输入法经窗口的内容视图接，字照共用的画法画。** 注入版的输入法靠辅助进程里的真 `NSTextField`；独立版是普通 App，窗口本身就拿得到键盘，于是内容视图遵循 `NSTextInputClient`、做第一响应者，AppKit 自动给它一个 `NSTextInputContext`。没有照搬辅助进程的做法（把真文本框放进同进程的另一扇窗口、经 `CALayerHost` 贴进界面）：一个进程同时只有一扇 key 窗口，那扇窗口还得用 AppKit 私有的 `_contextForLayerHosting` 才贴得进来。宿主多了一项 `inputMethod`，界面层在原来转交托管文本框的几个地方，把按键先交给它：改名时与组字时是每个键，搜索框里只是会打字的键（方向键、删除、回车这些照旧走界面层自己的 15 规则）；Shift 这类修饰键也给它，输入法靠它切换中英文。输入法回调界面层（`SpringboardInputMethodClient`）：打出的字照打字插入，组字中的文字记在编辑模型里（`SpringboardTextEditing.markedText`），显示时代替选区、加下划线，不算进文字，所以搜索不会搜半个拼音，撤销也跳过它。按下鼠标、改名结束、界面收起时，组字中的文字照文本框的规矩当作打出的字收下。候选窗的位置取光标图层在容器里的位置：容器从它所在那块屏的左下角起排，加上那块屏在 Cocoa 屏幕坐标里的原点，就是候选窗要的位置。内容视图还要实现 `windowLevel()`、报出窗口的层级 27，候选窗才出现在界面上方：不报时输入法把候选窗放在浮动窗口之上一层，被界面盖住（`NSTextView` 自己会报，所以注入版的辅助进程不用管）。
 
 **看门狗经窗口服务器撤窗口。** 一扇在一切之上、不再响应的全屏窗口会让整台机器没法用。后台线程每秒向主线程打一次招呼，超过 3 秒没回应就调 SkyLight 的 `SLSOrderWindow` 把窗口移出屏幕——这一步不经 AppKit，主线程卡住时也做得到——每次显示最多做一次，并记一条 fault 日志。开发构建 20 秒无输入自动收起、Esc、退回开关这些保险与注入版共用。
 
@@ -57,7 +59,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerStandaloneCore/
 ├── StandaloneLaunchpad.swift              # 启动、显示与收起、登录时打开、--self-check；App 的 delegate
 ├── StandaloneSpringboardHost.swift        # 独立版的宿主
 ├── StandaloneSpringboardWindow.swift      # 盖住全屏的窗口，事件交给控制器
-├── StandaloneEnvironment.swift            # Dock 的偏好与几何、布局库的位置与首次导入
+├── StandaloneEnvironment.swift            # Dock 所在的屏、Dock 的偏好与几何、布局库的位置与首次导入
 ├── StandaloneWallpaper.swift              # 壁纸：已允许录屏才截，否则读文件；动态壁纸取当前那一张
 ├── StandaloneIconStyle.swift              # 由 SkyLight 的图标外观配置建 ISImageDescriptor
 ├── StandaloneInputMethod.swift            # 系统输入法：遵循 NSTextInputClient 的内容视图
@@ -82,6 +84,7 @@ LaunchpadAwakenerStandalone/main.swift     # App 外壳：建 delegate 并运行
 - 2026-11-08 在 MacBook（27.2）上用 `--self-check` 启动独立版：从注入版的库导入 4 页、6 个文件夹、149 个 App（与注入版一致），Dock 在下方、留 79 点，壁纸取自文件（5517×3327，没有录屏权限、也没有弹窗），图标样式 1（与 Dock 的相同），窗口铺满 1739×1080、层级 27、所有空间可见；共用的离屏自检里等价网格的格子与 Dock 版逐项相同，207 个图标零失败，15 秒后自行退出，什么也没上屏。
 - 2026-11-08 经用户同意在 MacBook（27.2）上做了交互验证，测试前备份了独立版的布局库、测后还原：界面盖住菜单栏与 Dock；Esc 收起后前台立刻回到之前的 App（访达）；搜索框与改名框用拼音组字，组字带下划线、候选窗在框下方的界面之上，空格上屏后搜到「日历」、文件夹改名为「测试」；从界面里打开 Safari 后前台是 Safari；Dock 图标菜单的「Settings…」打开设置窗口，录下 F13，从访达按 F13 打开界面并能直接打字，再按一次收起、前台回到访达。测出并修好了三处：收起后焦点不交还、候选窗被界面盖住、设置窗口打不开。
 - 2026-11-08 用户看出独立版的搜索框没复刻完：没有圆角底和放大镜，占位符是英文。改成从 Dock.app 读资源后，两版的离屏自检都报「resources from /System/Library/CoreServices/Dock.app, language zh_CN ("搜索"), 3 of 3 search field image(s)」，同一块屏上两版搜索框的截图一致；整屏对照没有别的差别。单元测试 `Tests/LaunchpadAwakenerSpringboardCoreTests/SpringboardResourceTests.swift`：Dock 包里四张图两种倍率都在、缺的图返回空、按用户的语言偏好挑 Dock 的语言（地区退到语言，都没有时英文）、「未命名」在中文偏好下取自 Dock 的字串；`StandaloneResourceTests`：独立版的宿主指向 `com.apple.dock`。
+- 多显示器（2026-11-11，只在开发机上）：单元测试覆盖 Dock 矩形到显示器的换算（中心所在的屏；藏到底边外时归上面那块；离所有屏都远时不归任何一块）。另有两条在开发机（27.2）上实际问窗口服务器：Dock 的矩形落在一块活动显示器上，换成 AppKit 坐标后正好接在 Dock 那块屏可用区域的下沿。没有在接着第二块屏的真机上看过。
 - 测试工具的两处坑（不是独立版的问题）：经 ssh 从别的进程切输入法，要在界面打开之前切，已激活的输入上下文不跟着变；用发 `CGEvent` 的小工具按 F13 这类功能键后，系统的 Fn 修饰键状态会卡住，之后的字母都成了 Fn+字母（Fn-A 把焦点移到 Dock），要补发一次 Fn 键（虚拟键码 63）。
 
 ## 已知降级
@@ -94,6 +97,7 @@ LaunchpadAwakenerStandalone/main.swift     # App 外壳：建 delegate 并运行
 - 界面打开时按 Cmd-逗号，设置窗口开在界面下面，收起界面才看得到；从 Dock 图标菜单打开不受影响。
 - 输入法只试了拼音。组字时下划线只有一种，不分输入法给的「当前段」；`characterIndex(for:)` 不回答点在哪个字上，点选候选以外的鼠标操作照文本框的规矩先收下组字。
 - 独立版自己的文字（设置窗口、Dock 菜单的「Settings…」）只有英文。
+- Dock 设成自动隐藏时，窗口服务器还给不给 Dock 的矩形没有核对过；给不出时开在主显示器上，与有这项功能之前一样。
 
 ## 延伸阅读
 

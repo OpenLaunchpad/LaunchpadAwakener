@@ -28,6 +28,15 @@ protocol DockDisplayDescriptor {
     var notchBounds: CGRect? { get }
 }
 
+/// Which display a `DisplayDescriptor` describes. Apart from ``DockDisplayDescriptor`` and not among the
+/// methods checked before any hook goes in: a Dock without it only loses the choice of display, and the
+/// springboard opens on the main display as it did before.
+@RuntimeClassProxy("DisplayDescriptor")
+protocol DockDisplayIdentity {
+    /// The display's `CGDirectDisplayID`.
+    var identifier: UInt32? { get }
+}
+
 /// What the springboard needs to know about the Dock and its display, read from the Dock itself.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "DockEnvironment")
 @MainActor
@@ -67,13 +76,28 @@ enum DockEnvironment {
         return SpringboardMetrics.dockThickness(desiredTileSize: desiredTileSize, tileSize: tileSize)
     }
 
-    /// The camera housing's height on the Dock's display; zero without one.
-    static var notchHeight: CGFloat {
-        guard
-            let display = DockBarReference.dockBar.flatMap({ DockBarGeometryImplementation($0)?.display }),
-            let notchBounds = DockDisplayDescriptorImplementation(display)?.notchBounds
-        else { return 0 }
-        return notchBounds.height
+    /// The display the Dock is on: `DockBar.display`, which a move to another display sets as it starts, and
+    /// what macOS 15's `-[Springboard display]` read. `realDisplay` follows only once the Dock's window has
+    /// left the old display. Nil when the `DockBar` or the identifier is out of reach.
+    static var dockDisplayIdentifier: CGDirectDisplayID? {
+        dockDisplay.flatMap { DockDisplayIdentityImplementation($0)?.identifier }
+    }
+
+    /// The camera housing's height on `displayIdentifier`; zero without one. The Dock describes only the
+    /// display it is on, so another display counts as one without a camera housing.
+    static func notchHeight(onDisplay displayIdentifier: CGDirectDisplayID) -> CGFloat {
+        guard let display = dockDisplay else { return 0 }
+        // A Dock whose descriptor does not say which display it is keeps the springboard on the main display,
+        // which is where the descriptor was always taken to be before.
+        if let dockDisplayIdentifier = DockDisplayIdentityImplementation(display)?.identifier, dockDisplayIdentifier != displayIdentifier {
+            return 0
+        }
+        return DockDisplayDescriptorImplementation(display)?.notchBounds?.height ?? 0
+    }
+
+    /// `DockBar.display`, a `DisplayDescriptor`.
+    private static var dockDisplay: NSObject? {
+        DockBarReference.dockBar.flatMap { DockBarGeometryImplementation($0)?.display }
     }
 
     // MARK: - Icon appearance
