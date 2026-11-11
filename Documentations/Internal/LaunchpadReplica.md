@@ -257,7 +257,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 捏合没有接入 27 的 Dock 手势系统（那里已经没有它），而是读原始 DockSwipe 事件，并且要用户先关掉 Spotlight 的捏合。
 - 背景默认照 15 截壁纸、加三个滤镜；另有 `springboard-background` 设为 `glass` 时的 Dock 液态玻璃，那时 App 的窗口会被模糊进来。
 - 点 Apps 图标关闭 Launchpad，靠「点 Dock 收起后 0.5 秒内的请求」认出这次点击，不是 15 那样按图标类型豁免（原因见上）。
-- 多显示器：提案的第一版只在主显示器上显示，后来照 15 改为开在 Dock 所在的屏，见提案[多显示器：照 macOS 15 开在 Dock 所在的那块屏](../Evolutions/draft-multi-display.md)。
+- 多显示器：提案的第一版只在主显示器上显示，后来照 15 改为开在 Dock 所在的屏，见提案[多显示器：照 macOS 15 开在 Dock 所在的那块屏](../Evolutions/0012-multi-display.md)。
 
 ## 验证
 

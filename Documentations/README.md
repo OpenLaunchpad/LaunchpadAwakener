@@ -2,7 +2,7 @@
 
 - [Evolutions/README.md](Evolutions/README.md) —— 提案状态总表
 - [Evolutions/draft-launchpad-replica.md](Evolutions/draft-launchpad-replica.md) —— 在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad（In Progress）
-- [Evolutions/draft-multi-display.md](Evolutions/draft-multi-display.md) —— 多显示器：照 macOS 15 开在 Dock 所在的那块屏，显示期间拦住 Dock 换屏，显示器变化与失去键盘焦点时收起（In Progress）
+- [Evolutions/0012-multi-display.md](Evolutions/0012-multi-display.md) —— 多显示器：照 macOS 15 开在 Dock 所在的那块屏，显示期间拦住 Dock 换屏，显示器变化与失去键盘焦点时收起（Implemented）
 - [Evolutions/0011-runtime-dock-global-discovery.md](Evolutions/0011-runtime-dock-global-discovery.md) —— 在运行时找出 Dock 的两个全局变量，取消构建白名单：按类扫宿主的数据段，删掉构建档案（Implemented）
 - [Evolutions/0001-input-method-helper.md](Evolutions/0001-input-method-helper.md) —— 用常驻辅助进程给搜索框与改名框接上输入法（Implemented）
 - [Evolutions/0002-standalone-launchpad.md](Evolutions/0002-standalone-launchpad.md) —— 不注入 Dock 的独立版 Launchpad：与注入版共用数据层与界面层（Implemented）
