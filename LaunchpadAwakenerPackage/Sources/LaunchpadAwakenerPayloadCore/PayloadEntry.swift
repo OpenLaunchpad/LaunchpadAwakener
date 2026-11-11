@@ -83,7 +83,10 @@ public enum PayloadEntry {
 
         do {
             try RuntimeMethodHook.installAtomically(hooks)
-            logger.info("Installed \(hooks.count, privacy: .public) hook(s)")
+            // `notice` is the default level. Deliberately not info: info-level lines live only in the
+            // memory buffer and are gone from the log store within hours, and this line — with the
+            // method check above it — is exactly what gets looked up after a system upgrade.
+            logger.notice("Installed \(hooks.count, privacy: .public) hook(s)")
             let missingVisibilityMembers = LiveDockVisibility.missingMembers()
             if missingVisibilityMembers.isEmpty {
                 logger.info("The Dock's visibility controller matches: the Dock is kept on screen, and slides away for an open folder")
