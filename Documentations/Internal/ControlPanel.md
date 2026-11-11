@@ -50,7 +50,7 @@
 - **认出已装的**：按独立版的 bundle ID 先查 LaunchServices，再看两个「应用程序」文件夹，后者能认出刚拷进去、还没登记的。读 `Info.plist` 不用 `Bundle`：`Bundle` 按路径缓存，删掉的 App 它还会报在。废纸篓里的不算。
 - **测试**：测试机的 SIP 都关着，开发构建带启动参数 `--assume-system-integrity-protection-enabled` 时按没关处理。
 
-**横幅的顺序就是修的顺序。** SIP 没关排在最前：那时下面每一条都修不了，启动流程也不跑。其余 `ControlPanelReadiness` 依次看：启动是否还在跑、daemon 是否可用、退回开关、有没有注入、hook 装上没有、payload 旧不旧。退回开关排在注入之前：开着它，别的都改变不了 Dock 的行为。「hook 没装上」排在「payload 旧了」之前：Dock 构建不受支持时，重启 Dock 换上新 payload 也一样什么都装不上。注入了但 payload 还没回话，按「可用」算：注入已经发生，没有要修的。
+**横幅的顺序就是修的顺序。** SIP 没关排在最前：那时下面每一条都修不了，启动流程也不跑。其余 `ControlPanelReadiness` 依次看：启动是否还在跑、daemon 是否可用、退回开关、有没有注入、hook 装上没有、payload 旧不旧。退回开关排在注入之前：开着它，别的都改变不了 Dock 的行为。「hook 没装上」排在「payload 旧了」之前：这个 Dock 的方法签名对不上时，重启 Dock 换上新 payload 也一样什么都装不上。注入了但 payload 还没回话，按「可用」算：注入已经发生，没有要修的。
 
 **开机启动只默认打开一次。** 原来开机启动跟着「自动注入」开关一起开关，每次启动都强行打开。现在它是独立的开关，第一次注入成功时，用户没表过态就登记一次，之后以用户为准（`LaunchAtLoginDefault`）。早先版本已经登记过的，原样保留。启动时不弹窗口的条件后来又改了一次：改用 AppKit 之后，只有登录时的自动启动才不弹，从 Finder 或 Dock 手动打开都弹（读启动时的 Apple 事件，见 [AppKit 界面层的实现说明](AppKitInterface.md)）。
 

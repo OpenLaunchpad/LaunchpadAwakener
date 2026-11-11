@@ -131,12 +131,18 @@ public final class PayloadInjectionCoordinator {
         /// What became of the payload's hooks.
         public enum HookState: Sendable, Equatable {
             case installed(hookCount: Int)
-            /// The Dock is a build with no profile; the payload installed nothing.
-            case unknownDockBuild(executableUUID: String)
-            /// The build is known, but its methods do not match their recorded signatures.
+            /// The Dock's methods do not match the signatures the payload recorded for them.
             case incompatibleDockMethods
             /// A hook failed validation, so none were installed.
             case failed(description: String)
+        }
+
+        /// Whether the payload could reach the Dock globals the replica needs, when last asked.
+        public enum GlobalsReachability: Sendable, Equatable {
+            /// Every global the replica needs was found.
+            case reachable
+            /// What could not be found, named the way a person would read it.
+            case unreachable(missingClassNames: [String])
         }
 
         public let hostProcessIdentifier: pid_t
@@ -146,10 +152,18 @@ public final class PayloadInjectionCoordinator {
         /// Not the build in this app's bundle. Re-injecting will not replace it.
         public let isStale: Bool
         public let hookState: HookState
-        /// `CFBundleVersion` of the Dock, from its build profile. Nil when the build has no profile.
-        public let dockBundleVersion: String?
-        /// The macOS releases that ship this Dock build. Empty when the build has no profile.
-        public let dockSystemReleases: [String]
+        /// `CFBundleVersion` of the Dock the payload is attached to.
+        public let dockBundleVersion: String
+        /// The macOS that Dock is running on, such as `27.2 (26B123)`.
+        public let dockSystemRelease: String
+        /// Whether the payload could reach the Dock globals the replica needs, when last asked.
+        ///
+        /// Independent of ``hookState``: the hooks decide where the Launchpad key goes, these give the
+        /// geometry and material needed to sit against the Dock. Without them the replica still opens.
+        public let dockGlobalsReachability: GlobalsReachability
+
+        /// True when the replica has everything it needs to sit flush against the Dock.
+        public var areDockGlobalsReachable: Bool { dockGlobalsReachability == .reachable }
 
         public var id: pid_t { hostProcessIdentifier }
 
@@ -262,8 +276,9 @@ public final class PayloadInjectionCoordinator {
                     imageUUID: status.payloadImageUUID,
                     isStale: Self.isStale(imageUUID: status.payloadImageUUID, bundledImageUUIDs: bundledPayloadImageUUIDs),
                     hookState: ResidentPayload.HookState(status.hookInstallation),
-                    dockBundleVersion: status.dockBuild?.bundleVersion,
-                    dockSystemReleases: status.dockBuild?.systemReleases ?? []
+                    dockBundleVersion: status.dockBuild.bundleVersion,
+                    dockSystemRelease: status.dockBuild.systemRelease,
+                    dockGlobalsReachability: .init(status.dockGlobalsReachability)
                 )
             }
             .sorted { $0.hostProcessIdentifier < $1.hostProcessIdentifier }
@@ -968,13 +983,22 @@ public final class PayloadInjectionCoordinator {
     }
 }
 
+extension PayloadInjectionCoordinator.ResidentPayload.GlobalsReachability {
+    init(_ reachability: DockGlobalsReachability) {
+        switch reachability {
+        case .reachable:
+            self = .reachable
+        case .unreachable(let missingClassNames):
+            self = .unreachable(missingClassNames: missingClassNames)
+        }
+    }
+}
+
 extension PayloadInjectionCoordinator.ResidentPayload.HookState {
     init(_ hookInstallation: HookInstallation) {
         switch hookInstallation {
         case .installed(let hookCount):
             self = .installed(hookCount: hookCount)
-        case .unknownDockBuild(let executableUUID):
-            self = .unknownDockBuild(executableUUID: executableUUID)
         case .incompatibleDockMethods:
             self = .incompatibleDockMethods
         case .failed(let description):

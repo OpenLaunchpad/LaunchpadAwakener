@@ -18,11 +18,13 @@
 
 按英文名 / 标识符字母序排列。
 
-### DockBuildProfile（构建档案）
+### DockGlobalScanner（全局扫描）
 
-以 Dock 可执行文件 arm64e 切片的 `LC_UUID` 为键、记着只对那一个 Dock 构建成立的事实的一条记录：`DockBar` 与 `DockGlobals` 两个全局变量的地址、`DockGlobals` 的类名，以及它随哪些系统版本发布。不在表里的构建，payload 一个 hook 都不装。表里登记了 macOS 26.0 到 27.2 的全部正式构建。
+在宿主自己的可写数据段里按「这个槽持有的对象是什么类」认出一个全局变量的做法。扫 Dock 可执行文件 `__DATA` 段的 `__common`、`__bss`、`__data` 三节，逐个指针槽过三道筛子：非空且按指针对齐、`malloc_size` 认得它且块不小于目标类的实例、读出的类正好等于目标类。复刻靠它拿到持有 `DockBar` 与 `DockGlobals` 的那两个全局；这两个全局在二进制里没有符号，也没有任何导出的路径通向它们。
 
-- **主要出现在**：`LaunchpadAwakenerPayloadCore/Host/DockBuildProfile.swift`、[实现说明](Internal/LaunchpadReplica.md)「适配新的 Dock 构建」
+它替掉了原先的「构建档案」——一张以 Dock 可执行文件 UUID 为键、按构建记着两个全局地址的表。那张表每条都要人工逆向，漏一条整个功能就不生效，所以取消了；现在 macOS 26 与 27 的任何 Dock 构建都直接工作。
+
+- **主要出现在**：`LaunchpadAwakenerPayloadCore/Host/DockGlobalScanner.swift`、[实现说明](Internal/LaunchpadReplica.md)「关键设计决策」
 
 ### DockSwipe
 

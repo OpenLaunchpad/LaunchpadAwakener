@@ -14,8 +14,9 @@ struct StatusLineTests {
         processIdentifier: pid_t = 512,
         hookState: ResidentPayload.HookState = .installed(hookCount: 2),
         isStale: Bool = false,
-        dockBundleVersion: String? = "1985.6.3",
-        dockSystemReleases: [String] = ["27.1 (26B82)", "27.2 (26B123)"]
+        dockBundleVersion: String = "1985.6.3",
+        dockSystemRelease: String = "27.2 (26B123)",
+        dockGlobalsReachability: ResidentPayload.GlobalsReachability = .reachable
     ) -> ResidentPayload {
         ResidentPayload(
             hostProcessIdentifier: processIdentifier,
@@ -24,7 +25,8 @@ struct StatusLineTests {
             isStale: isStale,
             hookState: hookState,
             dockBundleVersion: dockBundleVersion,
-            dockSystemReleases: dockSystemReleases
+            dockSystemRelease: dockSystemRelease,
+            dockGlobalsReachability: dockGlobalsReachability
         )
     }
 
@@ -33,23 +35,28 @@ struct StatusLineTests {
     @Test("before the payload answers, the Dock build is unknown")
     func dockBuildBeforeInjection() {
         let line = StatusLine.dockBuild(reportedBy: nil)
-        #expect(line == StatusLine(text: "Known once the Dock is injected", tint: .neutral, help: "The payload reports the Dock build once it is in the Dock."))
+        #expect(line == StatusLine(text: "Known once the Dock is injected", tint: .neutral, help: "The payload reports which Dock it is in once it is injected."))
     }
 
-    @Test("a supported build names the newest macOS that ships it, and the help lists them all")
+    @Test("a working Dock names the macOS it runs on, and the help gives its version")
     func supportedDockBuild() {
         let line = StatusLine.dockBuild(reportedBy: Self.payload())
         #expect(line.text == "macOS 27.2 (26B123) · supported")
         #expect(line.tint == .positive)
-        #expect(line.help == "Dock 1985.6.3\nShips with macOS 27.1 (26B82), 27.2 (26B123)")
+        #expect(line.help == "Dock 1985.6.3\nRunning on macOS 27.2 (26B123)")
     }
 
-    @Test("a build the payload has no profile for is not supported, and the help gives its executable UUID")
-    func unknownDockBuild() {
-        let line = StatusLine.dockBuild(reportedBy: Self.payload(hookState: .unknownDockBuild(executableUUID: "0F1E"), dockBundleVersion: nil, dockSystemReleases: []))
-        #expect(line.text == "Unknown build — not supported")
+    /// Hooks installed but the globals out of reach is its own state: the Launchpad key is taken over,
+    /// yet the replica cannot sit against the Dock. It has to read as a problem, and name what is
+    /// missing.
+    @Test("globals out of reach mark the row red and the help names what is missing")
+    func dockWithUnreachableGlobals() {
+        let line = StatusLine.dockBuild(
+            reportedBy: Self.payload(dockGlobalsReachability: .unreachable(missingClassNames: ["DockBar", "DockGlobals"]))
+        )
+        #expect(line.text == "macOS 27.2 (26B123) · Launchpad's entry points are missing")
         #expect(line.tint == .critical)
-        #expect(line.help == "Executable UUID 0F1E")
+        #expect(line.help == "Dock 1985.6.3\nRunning on macOS 27.2 (26B123)\nNot found in this Dock: DockBar, DockGlobals")
     }
 
     @Test("hooks that did not install mark the build red", arguments: [
@@ -107,7 +114,7 @@ struct StatusLineTests {
 
     @Test("a payload without hooks is red")
     func payloadWithoutHooks() {
-        let line = StatusLine.injection(injectedProcessIdentifiers: [512], residentPayloads: [Self.payload(hookState: .unknownDockBuild(executableUUID: "0F1E"))])
+        let line = StatusLine.injection(injectedProcessIdentifiers: [512], residentPayloads: [Self.payload(hookState: .incompatibleDockMethods)])
         #expect(line.text == "Process 512 · current build · no hooks")
         #expect(line.tint == .critical)
     }

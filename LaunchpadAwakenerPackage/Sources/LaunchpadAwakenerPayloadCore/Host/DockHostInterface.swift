@@ -99,7 +99,9 @@ enum DockHostInterface {
             )
             #log(.error, "\(requiredMethod.methodName, privacy: .public) expected \(requiredMethod.typeEncoding, privacy: .public), found \(liveTypeEncoding ?? "nothing", privacy: .public)")
         }
-        #log(.info, "Checked \(requiredMethods.count, privacy: .public) Dock method(s), \(mismatchCount, privacy: .public) mismatch(es)")
+        // Default level rather than info: this line is read after a system upgrade, and info does
+        // not survive in the log store that long. See ``PayloadEntry``.
+        #log(.default, "Checked \(requiredMethods.count, privacy: .public) Dock method(s), \(mismatchCount, privacy: .public) mismatch(es)")
         return mismatchCount == 0
     }
 

@@ -11,7 +11,8 @@ struct ControlPanelReadinessTests {
 
     private static func payload(
         hookState: ResidentPayload.HookState = .installed(hookCount: 2),
-        isStale: Bool = false
+        isStale: Bool = false,
+        dockGlobalsReachability: ResidentPayload.GlobalsReachability = .reachable
     ) -> ResidentPayload {
         ResidentPayload(
             hostProcessIdentifier: 512,
@@ -20,7 +21,8 @@ struct ControlPanelReadinessTests {
             isStale: isStale,
             hookState: hookState,
             dockBundleVersion: "1985.6.3",
-            dockSystemReleases: ["27.2 (26B123)"]
+            dockSystemRelease: "27.2 (26B123)",
+            dockGlobalsReachability: dockGlobalsReachability
         )
     }
 
@@ -102,12 +104,11 @@ struct ControlPanelReadinessTests {
         #expect(Self.evaluate(isInjected: false, residentPayloads: []) == .notInjected)
     }
 
-    /// The reason this app's banner has a case DockIconOverride's does not: on a Dock build without a
-    /// profile the payload goes in, installs nothing, and the Dock looks exactly as if nothing had
-    /// happened. Saying "Active" there would be the worst possible answer.
+    /// The reason this app's banner has a case DockIconOverride's does not: when the payload's hooks do
+    /// not install, it goes in, changes nothing, and the Dock looks exactly as if nothing had happened.
+    /// Saying "Active" there would be the worst possible answer.
     @Test("A payload with no hooks is not active", arguments: [
-        PayloadInjectionCoordinator.ResidentPayload.HookState.unknownDockBuild(executableUUID: "0F0E"),
-        .incompatibleDockMethods,
+        PayloadInjectionCoordinator.ResidentPayload.HookState.incompatibleDockMethods,
         .failed(description: "signature mismatch"),
         .installed(hookCount: 0),
     ])

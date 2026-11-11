@@ -1,6 +1,6 @@
 # LaunchpadAwakener
 
-在 macOS 26 与 27 的 Dock 里复刻 macOS 15 的 Launchpad：一个注入 Dock 的 payload，加上负责注入的 App 与特权 daemon。支持 26.0 到 27.2 的每个正式构建，别的构建在补上构建档案之前什么都不装（见实现说明「适配新的 Dock 构建」）。工程由 [InjectionScaffold](https://github.com/Mx-Iris/InjectionScaffold) 生成，方案见提案 [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](Documentations/Evolutions/draft-launchpad-replica.md)。
+在 macOS 26 与 27 的 Dock 里复刻 macOS 15 的 Launchpad：一个注入 Dock 的 payload，加上负责注入的 App 与特权 daemon。macOS 26 与 27 的任何 Dock 构建都直接工作：复刻要的两个全局变量在运行时按它们持有的对象的类认出来，不按构建记地址（见实现说明「关键设计决策」）。升级系统后只需确认日志里方法签名没有不符的。工程由 [InjectionScaffold](https://github.com/Mx-Iris/InjectionScaffold) 生成，方案见提案 [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](Documentations/Evolutions/draft-launchpad-replica.md)。
 
 另有一个不注入 Dock 的独立版 App「Launchpad」：自己开一扇盖住整块主屏幕（连 Dock 与菜单栏）的窗口，画同一套 Launchpad，不需要关 SIP。两版共用 Launchpad 本身的代码，方案见提案 [不注入 Dock 的独立版 Launchpad](Documentations/Evolutions/0002-standalone-launchpad.md)，实现见[独立版实现说明](Documentations/Internal/StandaloneLaunchpad.md)。
 
@@ -74,7 +74,7 @@ hook 与 Dock 自己的类（Dock 不导出任何类）用 FrameworkToolbox 的 
 | `SpringboardCore/System/` | 系统框架的私有接口（Core Animation 滤镜、IconServices、SkyLight），两个宿主都能用 |
 | `SpringboardCore/Data/` | 布局库、旧库导入、App 的发现 |
 | `SpringboardCore/Interface/` | 界面层，按 15.5 的 `ECSB*` / `ECPager*` 划分 |
-| `PayloadCore/Host/` | 调用 Dock 内部方法的地方，也是 Dock 这一侧的宿主：构建档案、签名校验、`WALayerKitWindow`、`EC*` 图层类 |
+| `PayloadCore/Host/` | 调用 Dock 内部方法的地方，也是 Dock 这一侧的宿主：全局扫描、签名校验、`WALayerKitWindow`、`EC*` 图层类 |
 | `PayloadCore/Integration/` | hook 声明，以及事件接管 |
 
 调 Dock 内部方法一律经过 `PayloadCore/Host/`：先按类型编码校验，再调用。界面层要 Dock 的东西，一律经宿主接口要，不直接调 `Host/` 里的类型。

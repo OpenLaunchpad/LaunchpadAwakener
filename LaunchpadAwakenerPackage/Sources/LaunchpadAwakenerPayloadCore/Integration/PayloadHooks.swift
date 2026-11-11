@@ -34,13 +34,15 @@ public enum PayloadHooks {
     /// The hooks to install, validated and applied as one atomic batch.
     ///
     /// Returning an empty array is a valid state: the payload attaches, logs, and changes nothing. That
-    /// is what happens on a Dock build this payload does not know, or whose methods no longer match —
+    /// is what happens on a Dock whose methods no longer match what this payload recorded for them —
     /// every entry then keeps opening the system's Apps.
+    ///
+    /// Reaching the Dock's globals is deliberately not a condition here. They are found on first use
+    /// rather than now, because the payload can arrive within 250 ms of the Dock starting, before it has
+    /// built its singletons; and without them the replica still opens, it just stops sitting flush
+    /// against the Dock. What the app shows about them comes from ``DockBarReference/reachability``,
+    /// asked afresh each time the control panel refreshes.
     public static func descriptors() -> [RuntimeMethodHook.Descriptor] {
-        guard DockBuildProfile.current != nil else {
-            #log(.error, "Unknown Dock build; installing no hooks")
-            return []
-        }
         guard DockHostInterface.isCompatible else {
             #log(.error, "The Dock's methods do not match this payload; installing no hooks")
             return []

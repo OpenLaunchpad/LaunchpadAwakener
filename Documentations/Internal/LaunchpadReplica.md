@@ -9,9 +9,17 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 
 ## 关键设计决策
 
-**只认构建档案里的 Dock。** `DockBuildProfile` 以 Dock 可执行文件 arm64e 切片的 `LC_UUID` 为键，存着只对这一个构建成立的事实：`DockBar` 与 `DockGlobals` 两个全局变量的地址、`DockGlobals` 的类名，以及这个 Dock 随哪些系统版本发布（只写进日志）。UUID 不在表里，payload 一个 hook 都不装，所有入口照旧打开系统的 Apps。这是有意的：地址在别的构建里毫无意义，读错地址会让 Dock 崩溃。表里登记了 26.0 到 27.2 全部 24 个正式构建（含只给特定机型的构建），它们一共只有 16 个不同的 Dock：点版本常常带着逐字节相同的 Dock，但也有像 26.7.2 这样版本号不变却重编了的。`DockBuildProfileTests.supportedReleases` 列着这 24 个版本，每个都要恰好对上一条档案。
+**两个全局变量在运行时按类认出来，不按构建记地址。** `DockGlobalScanner` 扫 Dock 可执行文件 `__DATA` 段里的 `__common`、`__bss`、`__data` 三节，把每个指针槽当候选试一遍：槽里的值过了三道筛子——非空且按指针对齐、`malloc_size` 认得它且块不小于目标类的实例、从块头读出的类与目标类在同一个地址——那个槽就是全局。这个判断本身就是「要找的是什么」的定义，所以不需要另一张表来给它背书。
 
-**`DockBar` 只能经全局变量拿到。** 27.2 里没有任何导出的路径通向它；`-[DockBar rect]` 和 `-[DockBar setRollTile:]` 在鼠标划过 Dock 时都不会被调用，所以「hook 这两个方法、在调用时记下接收者」的办法拿不到它（原型试过）。`DockGlobals` 同样只能经全局变量拿到。读全局变量后还会核对对象的类：按类对象比较，不比类名，因为运行时给 Swift 类的名字是 `DockCore.DockGlobals`，不是查找它用的改编名 `_TtC8DockCore11DockGlobals`。26 的 `DockGlobals` 还是 Objective-C 类 `DockGlobals`，所以要查的类名也记在构建档案里。
+这替掉了原先的 `DockBuildProfile`：一张以 Dock 可执行文件 UUID 为键、记着两个全局变量地址的表，有 17 条，每条都要人工下固件包、建 IDA 库、从反汇编里读出两个数字。那张表漏一条整个功能就不生效（26.7 上发生过），而且它以 arm64e 切片的 UUID 为键，27 的 Dock.app 却有 `arm64e` 与 `arm64e.x1` 两个切片两个 UUID。扫描不比对 UUID，所以 26 与 27 的任何构建都直接工作。完整取舍见提案[在运行时找出 Dock 的两个全局变量，取消构建白名单](../Evolutions/draft-runtime-dock-global-discovery.md)。
+
+**扫描为什么不会碰坏 Dock。** 数据段里全是别处留下的值——小整数、没映射的地址、指向块内部的指针、函数地址——每一个都会走到这三道筛子，所以每道都不能解引用还没证明过的内存。`malloc_size` 对任意野指针安全：它逐个内存 zone 调 `zone->size(zone, 指针)`，各 zone 的实现只比地址范围、不属于自己就返回 0（libmalloc 的 `malloc.c`，`malloc_size` 与 `_find_registered_zone`）；返回非 0 还顺带证明这个指针是某个 malloc 块的起始，而不是块内部。读类只读那个堆块头部的 8 字节、按 isa 的格式掩码，拿到的类指针只跟目标类比地址，绝不向候选发消息。**比较必须是地址比较**：原先比的是两个 `AnyClass`，而 `===` 会把两边都转成 `AnyObject` 交给 ARC retain、release，从一个根本不是对象的堆块上读出的「类」却是个野地址——release 它就崩在 `swift_unknownObjectRelease` 里（2026-11-11 实测，那条扫遍所有已加载镜像的测试十几次里中一次）。现在包装函数直接返回 `UnsafeRawPointer?`，两边都只是数字。**而目标类那一侧要取类对象自己的地址**，不能按位取 `AnyClass`：对 Objective-C 类，运行时交出来的元类型是包在类外面的一层壳，它的地址不会出现在任何 isa 里——按位取的那一版在 26 上让两个全局一个都找不到（2026-11-11 实测；本地的扫描器测试当时全用 Swift 类，所以全绿也没拦住）。桥接成 `AnyObject` 拿到的才是类对象，这一步在 `findGlobal` 里只做一次，而类是不朽对象，交给 ARC 安全——不朽这一点正是候选不能这么做的原因。拿类这一步走 `dlsym` 取到的 `object_getClass` C 入口，而不是 Swift 导入的那个版本：后者要先把候选变成 Swift 对象引用，而 `takeUnretainedValue()` 返回的是 ARC 管的值，编译器可以对它插 retain，retain 一个不是对象的东西就会去读一个垃圾 isa。槽里的指针没有指针认证签名——反汇编里取它用的是裸 `LDR X0, [X22]`，前后没有任何 `AUT*` 指令。
+
+**扫描不当装 hook 的闸门。** 它在第一次真用到时才跑，找不到不缓存、下次重试。注入可能发生在 Dock 启动后 250 毫秒内（App 每 250 毫秒轮询一次新的 Dock 进程），那时 Dock 还没建好这两个单例，把扫描当闸门会把正常启动判成失败。而且五个用到 `DockBar` 的地方本来就都处理了拿不到的情况并各自降级（Dock 不滑走、玻璃背景不画、厚度取默认值、「点在 Dock 上」判否、刘海按 0 算），所以扫不到并不致命。控制面板显示的可达性由它每次刷新时现场问 payload，答案因此总是当下的。
+
+**扫出多个槽位不算问题，扫出两个不同对象才算。** `DockBar` 与 `DockGlobals` 都是进程单例，Dock 从好几处读同一个全局，多个槽持有的必然是同一个对象，用哪个都一样。真扫出两个不同实例时一个也不用，并留一条日志——与 hook 要么整批装要么一个不装是同一个取向。
+
+**`DockBar` 只能经全局变量拿到。** 27.2 里没有任何导出的路径通向它；`-[DockBar rect]` 和 `-[DockBar setRollTile:]` 在鼠标划过 Dock 时都不会被调用，所以「hook 这两个方法、在调用时记下接收者」的办法拿不到它（原型试过）。`DockGlobals` 同样只能经全局变量拿到。而全局变量本身在二进制里没有符号（Dock 被 strip 过，3116 个符号里只有 2 个数据符号），也没有任何属性链爬得过去——`DockBar` 没有单例访问器，五个事件处理器都不持有它，整个导出面里只有 `Tile` 有 `dock` 属性而 `Tile` 自己就难以随时拿到。所以认它只能靠它持有的对象是什么类。`DockGlobals` 的类名两个都试：26 上是 Objective-C 类 `DockGlobals`，27 改写成了 Swift，运行时名是改编过的 `_TtC8DockCore11DockGlobals`，哪个在这个系统上存在就用哪个。比较一律按类对象，不比类名，因为运行时给 Swift 类的名字是 `DockCore.DockGlobals`，不是查找它用的那个改编名。
 
 **26 与 27 用同一套复刻。** 26 的 Dock 里旧 Launchpad 的类（`Springboard`、`LPSpringboard`、`ECSB*`、`ECPager*`）都还在，但 23 处入口经一个恒返回 1 的函数一律改道到 `-[Spotlight sendLaunchAppsBrowsing]`，和 27 一样，所以拦这一个方法就接管了 Launchpad 键、Dock 上的 Apps 图标、触发角与 Apps 本身。复刻调用的 23 个方法与两个 hook 在 26.0 到 27.2 的每个构建里签名都相同。几处差别：26 的 `-[DockAppEventHandler handleMachMessage:size:]` 在 Exposé 或旧 Springboard 捕获事件时不调 `handleDockBarEvent:type:`（后者在 26 上从不捕获，Mission Control 打开时复刻收不到事件，和 15 一样）；26 的玻璃控制器没有 `updateUsingLayoutConfiguration:environment:`，可选的玻璃背景退回模糊；26 与 27.0 的 Dock 自己接捏合（见已知降级）；26 的壁纸窗口（`Wallpaper-`）还是 Dock 自己画的，和 15 一样，到 27 才归 WindowManager（`Wallpaper`）。所以截壁纸时按属主进程认窗口：WindowManager 的优先，没有就用 Dock 自己的。不按属主名认，因为那是本地化的名字，中文系统上 26 的 Dock 叫「程序坞」。
 
@@ -194,7 +202,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 ├── Host/                               # 调 Dock 内部的唯一地方，也是 Dock 这一侧的宿主
 │   ├── DockSpringboardHost.swift       # Dock 宿主：把宿主接口接到下面这些类型上
 │   ├── DockSpringboardWindow.swift     # 全屏窗口、27/29 层、键盘焦点
-│   ├── DockBuildProfile.swift          # 构建档案：UUID → 只对该构建成立的事实
+│   ├── DockGlobalScanner.swift         # 扫宿主数据段，按持有的对象的类认出全局
 │   ├── DockHostInterface.swift         # 签名清单与校验；WALayerKitWindow 的 proxy 与 init
 │   ├── DockBarReference.swift          # 经全局变量拿 DockBar 与 DockGlobals
 │   ├── DockGlassMaterial.swift         # Dock 自己的液态玻璃（Cmd-Tab 切换器那套控制器）
@@ -212,6 +220,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - **显示**：入口 hook（`-[Spotlight sendLaunchAppsBrowsing]`）→ `SpringboardController.toggle`（按 `SpringboardEntry` 决定打开、关闭或不动）→ 读 Dock 的几何算出 `SpringboardMetrics` → 建窗口与 `SpringboardInterface`，摆到上次收起时的 `SpringboardPosition` → 窗口抬到 27 层、Dock 的窗口抬到 29 层、抢键盘焦点。
 - **事件**：事件 hook 把 `CGEvent` 抄成 `SpringboardInputEvent` → 控制器换算成容器坐标（左下为原点、y 向上）→ 交给界面 → 界面返回「无 / 关闭 / 启动」三种动作之一。落在 Dock 栏上的点击交还 Dock。
 - **布局**：`LaunchpadLibrary` 启动时打开库，首次导入，与已安装的 App 对账，发布布局；之后应用目录一有变化就再对账。每次发布都会触发图标预取。
+- **取名字要串行**：发现流程用 `FileManager.displayName(atPath:)` 取每个包的名字（15 显示的就是 Finder 的本地化名字），而这会让 LaunchServices 登记它没见过的包，走一次没有超时的同步 XPC。十六个这样的调用同时占住 Swift 并发池的线程时，回复就不再来，一个线程也回不来——2026-11-11 在开发机上跑并行测试时因此挂住两次（74 与 42 分钟后被杀掉，而同一时刻从另一个进程查同样的名字仍在一秒内返回）。所以这一步用一把 `NSLock` 串起来：发现流程本来就是一趟串行循环，锁在真机上永不争用，已登记的包也只是读一次数据库；`ApplicationDiscoveryTests` 里那条「十六个并发发现」守着它（修之前三次全红，修之后六次全绿）。
 
 ## 与提案的差异
 
@@ -243,7 +252,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 改名框的编辑（2026-11-08，先在 15.5 虚拟机里看原版，再在 MacBook 上截图、录屏核对）：原版进入改名时整个名字蓝底选中，→ 后光标到末尾，← 逐字左移，Esc 后名字不变；复刻的选区高度与原版一致，颜色读数的细微差别来自 MacBook 截图的 P3 色彩空间。MacBook 上核对了进入时全选、→ ← 后在中间插字、拖选、超出框宽时横向滚动且光标贴在右边缘、↑ 回到开头、Esc 按当前文字提交；录屏里选区、打字、删除都在一帧之内换上。双击选词与按住 Shift、Option 的操作模拟工具发不出来，只有单元测试。测试用的文件夹已改回原名。
 - 图标大小与 15.5 对照（2026-11-08）：在 15.5 虚拟机的截图（1487×936 屏，Dock 默认大小）上逐像素量网格：列距 169、行距 145、图标 96 点、首行图标顶边距屏幕顶 72 点，与公式在留 79 点时的结果一致；图标图片占图标框的比例两边相同（约 81%），文件夹方块都是图标边长减 20 点。改后部署到 MacBook，自检日志为 Dock 79、单元格 193×171、图标 120（1739×1080 屏），正是 15 在这块屏幕上的结果。没有做交互验证。
 - 第 6 批的非交互验证（2026-11-08，MacBook 上）：部署后 hook 装上、23 个 Dock 方法签名全部吻合；开发构建的自检显示 Dock 的卸载器可用，149 个 App 里有 39 个可删（都是 App Store 的，只问不删）；19 个 App 带「新」标记，都是从 15 的库里带过来的，下次打开时启动过的会清掉。三指轻扫、文件夹方向键、关闭按钮与删除、搜索框编辑与复制粘贴都没有做交互验证。
-- 各构建的离线核对（2026-11-08）：26.0 到 27.2 的 24 个正式构建都从 Apple 的完整更新包里取出 Dock，去重后 16 个二进制，逐个核对了复刻用到的类与方法的声明，并在 IDA 里读出两个全局变量；读法先在 27.2 上验证过，得出的正是档案里原有的两个地址。单元测试核对档案恰好覆盖这 24 个版本、地址落在可执行文件里且按指针对齐、`DockGlobals` 的类名与大版本相符。
+- 各构建的离线核对（2026-11-08）：26.0 到 27.2 的 24 个正式构建都从 Apple 的完整更新包里取出 Dock，去重后 16 个二进制，逐个核对了复刻用到的类与方法的声明，并在 IDA 里读出两个全局变量；读法先在 27.2 上验证过，得出的正是档案里原有的两个地址。核对档案自洽的那组单元测试随 2026-11-11 取消档案一起删了；这条记录留着，因为它核对过的「方法签名在 26.0 到 27.2 的每个构建里都一致」这个结论仍然是现在只需看签名日志的依据。
 - macOS 26 虚拟机上的验证（2026-11-08，26.6.2 25G83，Ultra 上的 VirtualBuddy）：日志认出这个 Dock（`Dock build 2427.6 of macOS 26.6.2`）、23 个方法签名全部吻合、两个 hook 装上；用户打开过界面，能打开、关闭。第一次背景是灰的：自检报 `No wallpaper window on display 1`，原因是 26 的壁纸窗口归 Dock 自己，复刻只认 WindowManager 的；改为按属主进程挑窗口后，自检报 `wallpaper captured, 2982×1804 pixels`。挑窗口的规则用两台机器上实际读到的窗口列表写了回归测试。同一个构建随后部署到 27.2 的 MacBook：认出 27.2 的 Dock、23 个方法签名全部吻合、两个 hook 装上，自检报 `wallpaper captured, 3478×2160 pixels`，改过的 WindowManager 那条路径照常。两台都没有做交互验证。
 - 选中高亮（2026-11-08，MacBook 上，同样的截图与模拟按键）：用户指出搜索结果的选中项是白底；此前搜「日历」的截图里也是一块不透明的浅灰 232。修好后搜「s」，App Store 的高亮是压暗壁纸的深色圆角块，白色标题清楚，与 15 的截图一致；主页上用方向键选中的文件夹也是这样，图标与文件夹方块的样子没有变。拖放目标的方圆与透明、着色图标样式只有单元测试，没有在真机上看。
 - Dock 的显隐（2026-11-09，MacBook 上）：部署后 hook 装上，23 个 Dock 方法签名全部吻合，payload 启动时的日志确认 `DockVisibility` 的四个方法与 `_dockForceHiddenReasons` 都对得上，Dock 没有崩溃。文件夹开合时 Dock 滑走、滑回由用户在真机上亲眼看过。开了自动隐藏时 Dock 露出没有在真机上看过。
@@ -257,6 +266,10 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
   - 修复（窗口设成完全透明）只有单元测试，没有在实机上看过：MacBook 被拿去装 macOS 15 了。
 - 删除确认改用辅助进程弹的 `NSPopover`（2026-11-10）：单元测试覆盖消息经真实 XPC 往返、Dock 一侧客户端（弹出的回答、按钮回报、关闭请求、辅助进程退出）、界面层的状态（问辅助进程要的内容与图标中心、按钮与按键都关掉它、一次只问一个、弹不出时退回自己画的、辅助进程退出时按取消、收起时撤下、答过之后迟到的按钮不算）、辅助进程里锚点的位置与 popover 的内容排版（与 nib 的框一致：问句 (82, 40, 308×34)，删除按钮右边缘 388）。之前先在 15.5 虚拟机里放了带空收据的「可删测试」，用户截到了原版的气泡。部署到 26.6.2 虚拟机（非交互）：认出 Dock 2427.6、23 个方法签名全部吻合、两个 hook 装上；同样放了「可删测试」后，对账把它加进第 2 页，自检报卸载器 69 个 App 里 1 个可删，正是它。用户在 26 虚拟机里看到 popover 照预期上屏、位置与内容都对，但「删除」没有画成默认按钮；锚点改成 nonactivating panel 后重新部署，单元测试锁住锚点的这几项（改前先失败）。改后用户看过，删除是蓝色的默认按钮，日志记的是 popover 窗口 `key true, application active true`。开发构建 20 秒没有输入就收起 Launchpad，点 popover 不算输入，所以那里的气泡最多停 20 秒。用户随后点「删除」：第一下就生效，半秒后卸载器删掉了 `/Applications/可删测试.app`，布局随即从 69 个 App 变成 68 个。27 上的样子没有试（MacBook 改装了 15）。
 - 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认在 27 上的样子。
+
+- 全局扫描（2026-11-11，只在开发机上，不碰 Dock）：单元测试覆盖找到持有目标类实例的那个槽、类不匹配时不误报、堆块小于实例大小时被筛掉、不是堆块的值（小整数、没映射的地址、未对齐的地址）一个都不解引用、多个槽持有同一对象时都报出来且用那个对象、持有不同对象时一个也不用、先扫的段有命中就不看后面的段、区域起点不按指针对齐时仍能找到里面对齐位置上的对象、堆块够大而第一个字根本不是类时既不认错也不把那个野地址交给 ARC、按类名查来的 Objective-C 类也能匹配（Dock 的两个全局走的就是这条路）。另有一条遍历本进程全部已加载镜像的真实 `__DATA` 段、拿一个没有全局持有的类去扫：那些段装满了别处留下的值，跑完不崩就是「三道筛子没有解引用不该碰的内存」的证据。`swift test` 合计 538 个测试通过，`RunScript.sh` 的完整构建与三个架构切片校验通过。
+- **在真实的 Dock 里验证过了**（2026-11-11，用户亲自在一台 27.2（26B123）上运行）：`DockBar` 与 `DockGlobals` 都在 `__DATA,__common` 里，各只有一个槽持有它们——日志是 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`。控制面板开着时每三秒现场扫一次，近百次里每次都只找到那一个槽（那时每扫一次都写一行日志，这之后改成只有答案变化时才写）。
+- **macOS 26 上也验证过了**（2026-11-11，在 26.6.2 的虚拟机里非交互跑的）：注入后两个全局同样各在 `__DATA,__common` 的一个槽里被找到，26 上 `DockGlobals` 是 Objective-C 类，日志写的就是 `Found DockGlobals in __DATA,__common, 1 slot(s)`；同一次注入 23 个方法签名全部吻合、两个 hook 都装上，离屏自检的网格、缩略图、选中材质、壁纸与 97 个图标都与改前一致。玻璃退回模糊是 26 上本来就有的降级（见「已知降级」），与这次改动无关。
 
 ## 已知降级
 
@@ -277,20 +290,44 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 新装 App 的蓝点：从 Launchpad 以外启动后，要到下次打开 Launchpad 才消失，并且依赖 Spotlight 记下的使用时间；关掉 Spotlight 索引时只有从 Launchpad 启动才会清掉。测试版 App 的黄点与屏幕使用时间的沙漏标记没有做。
 - macOS 26 上没有玻璃背景：26 的 `DockGlassMaterialLayerController` 用的是 `configureUsingConfiguration:` 与 `rebuildLayersWithEnvironment:`，签名核对不过，`springboard-background` 设成 `glass` 也退回带 15 三个滤镜的模糊。
 - macOS 26 上透明与着色图标的混合没有与 26 的 Dock 对照过：26 没有 `kCAFilterClearIconBlendMode`，复刻按 27 的映射在透明与浅色着色样式下不加滤镜、深色着色用 Screen，而 26 的 `-[DOCKTileLayer init]` 默认给格子图片的是 Screen。
-- 新一代芯片的 Mac 上，27 的 Dock 可能加载另一个切片 `arm64e.x1`（macOS 27 新增的 `CPU_SUBTYPE_ARM64E_X1`）：它的 UUID 与地址都和 arm64e 切片不同，档案没有登记。手边没有这类 Mac，payload 能否注入这种进程也没验证过。
+- 新一代芯片的 Mac 上，27 的 Dock 可能加载另一个切片 `arm64e.x1`（macOS 27 新增的 `CPU_SUBTYPE_ARM64E_X1`）。这不再影响找全局变量——扫描不比对 UUID、也不用按切片记的地址，2026-11-11 起两个切片一视同仁；但手边没有这类 Mac，payload 能否注入这种进程仍未验证过。
 
-## 适配新的 Dock 构建
+## 新的 Dock 构建：什么都不用做
 
-2026-11-08 用这套步骤补齐了 26.0 到 27.2 的全部构建。
+payload 不认 Dock 的构建号，也不带任何按构建登记的地址。它要的两个全局变量在第一次用到时现找（见上文「关键设计决策」），所以 macOS 26 与 27 的任何 Dock 构建——包括还没发布的——装上就能用，升级系统当天不需要做任何事。
 
-1. 新系统上 payload 会在日志里写出 `Unknown Dock build <UUID>`，什么也不装。
-2. 取那个构建的 Dock。`/Volumes/RE/Dock/` 下已有的目录先看 README 里列的版本；没有就从 Apple 的完整更新包里取。`/Volumes/Firmwares/macOS/` 存着 26.0 到 27.2 的全部包（`<版本>_<build>_universal.zip`，只给特定机型的构建以机型命名）。更新的版本用 `ipsw download appledb --os macOS --type ota --release --json` 查出 `active_url` 与 `sha256`，`aria2c` 开 16 个连接下载，再用 `openssl dgst -sha256` 核对（`aria2c` 自带的校验是单线程的，17 GB 要十几分钟）。旧包所在的 CDN 节点慢，一个包十几 MiB/s，多个包要并行下。
-3. 取出 Dock：`ipsw ota extract <包> --pattern 'System/Library/CoreServices/Dock\.app/Contents/(MacOS/Dock|Info\.plist|version\.plist)$' --confirm --output <目录>`，约一分钟。`TMPDIR` 与输出目录要在同一个卷上，否则最后一步改名报 `cross-device link`。先比 arm64e 切片的 UUID：和已登记的相同就只在那条档案里加上这个版本。
-4. 把新 Dock 放进 `/Volumes/RE/Dock/<版本>/`，用 reverse-engineering skill 的脚本导出头文件，用 `idax binary --arch arm64e` 建 IDA 库（27 的 Dock 另有 `arm64e.x1` 切片，不加 `--arch` 会选错）。
-5. 核对签名：用 `ipsw class-dump <Dock> --arch arm64e --re -V` 导出声明，把复刻用到的类（`WALayerKitWindow`、`WAWindow`、`DockBar`、`DisplayDescriptor`、`EC*` 图层、`Spotlight`、`DockAppEventHandler`、玻璃的四个类、`IconAppearance`、`Environment`、卸载器与 `CALayer` 的分类）和同一大版本已登记的构建逐个对照。26.0 到 27.2 里不同的只有复刻没用到的方法。
-6. 找两个全局变量：`-[DockBarSystemDefinedEventHandler handleSystemDefinedEvent:type:]` 处理 Launchpad 键（系统定义事件子类型 9、键码 104）的分支里，向一个全局变量发 `keyFocusController`——那是 `DockBar`；向另一个发 `slowMotionAllowed`——那是 `DockGlobals`。看汇编里 `ADRL` 加 `LDR` 取的地址，26.0 到 27.2 都是这样。这个方法的地址取自第 5 步导出里的注释。
-7. 在 `DockBuildProfile.knownProfiles` 加一条（UUID、系统版本、版本号、两个地址；26 用 `macOS26Profile`，27 用 `macOS27Profile`，二者只差 `DockGlobals` 的类名），把版本加进 `DockBuildProfileTests.supportedReleases`，并在 RE 目录的 README 里记下来源与两个地址的出处。
-8. 部署到同一大版本的测试机，看日志里 `Checked N Dock method(s), M mismatch(es)` 与 `Installed 2 hook(s)`：有不符的，日志会写出新的类型编码，逐个核对后改对应 proxy 协议或 hook 方法的 Swift 类型（编码由它推出；init 的签名直接改字符串），并更新 `DockSignatureTests` 里记的编码。
+这是日志里应该看到的两行，默认级别，不加 `--info` 也看得到：
+
+```
+Found DockBar in __DATA,__common, 1 slot(s)
+Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)
+```
+
+第二行的类名是 `class_getName` 给的：27 的 `DockGlobals` 是 Swift 类，新的 Objective-C 运行时把它反混淆成「模块.类名」（查找时用的仍是改编名 `_TtC8DockCore11DockGlobals`）。26 上它是 Objective-C 类，那一行写作 `Found DockGlobals in __DATA,__common, 1 slot(s)`。
+
+每一行只在答案变化时写一次，不是每次扫描都写：控制面板开着时每隔几秒就问一次状态，而每次问都现场扫一遍。所以一次 Dock 的生命周期里通常就这两行。重复的那些落在 debug 级，而 debug 级默认根本不记录，`log show --debug` 也看不到；要看它们就在扫描发生时开着 `log stream --level debug`（2026-11-11 在 26.6.2 的虚拟机上这样看过，控制面板开着时每三秒一对）。
+
+真正可能被新构建打破的只剩方法签名。安装 hook 之前，复刻会把它要调的全部 Dock 方法按类型编码整批核对，一处不符就一个 hook 都不装，并把实际读到的编码写进日志。所以升级系统后只需要看一眼：
+
+```bash
+ssh JH@192.168.50.13 '/usr/bin/log show --last 5m --predicate '"'"'subsystem == "com.MxIris.LaunchpadAwakener"'"'"''
+```
+
+`Checked N Dock method(s), 0 mismatch(es)` 加 `Installed 2 hook(s)` 就是好的。有 mismatch，或者两行 `Found …` 里缺了一行，才进入下一节。
+
+这四行都是默认级别，留在日志库里，所以上面的命令不必加 `--info`，隔几天回头查也还在。在 2026-11-11 之前它们是 info 级，而 info 只留在内存缓冲里：那时注入过了两小时就查不到了（实测，同一次注入的 `Channel to the app is open` 还在），所以改成了默认级别。
+
+**2026-11-08 曾经为 26.0 到 27.2 的 24 个正式构建各登记过一条构建档案**（去重后 16 个二进制），每条都要下完整更新包、取出 Dock、建 IDA 库、从反汇编里读出两个全局变量的地址。那套流程连同它维护的表一起取消了，取而代之的是运行时扫描；留在下面的是其中仍然用得上的部分——只在要核对一个构建的方法签名时才需要。
+
+## 方法签名不符时：取那个构建来核对
+
+1. 取那个构建的 Dock。`/Volumes/Firmwares/macOS/` 存着 26.0 到 27.2 的全部完整更新包（`<版本>_<build>_universal.zip`，只给特定机型的构建以机型命名）。更新的版本用 `ipsw download appledb --os macOS --type ota --release --json` 查出 `active_url` 与 `sha256`，`aria2c` 开 16 个连接下载，再用 `openssl dgst -sha256` 核对（`aria2c` 自带的校验是单线程的，17 GB 要十几分钟）。旧包所在的 CDN 节点慢，一个包十几 MiB/s，多个包要并行下。
+2. 取出 Dock：`ipsw ota extract <包> --pattern 'System/Library/CoreServices/Dock\.app/Contents/(MacOS/Dock|Info\.plist|version\.plist)$' --confirm --output <目录>`，约一分钟。`TMPDIR` 与输出目录要在同一个卷上，否则最后一步改名报 `cross-device link`。先比 arm64e 切片的 UUID（`dwarfdump --uuid`）：和已经核对过的某个构建相同，就不必再往下走。
+3. 把新 Dock 放进 `/Volumes/RE/Dock/<版本>/`，用 reverse-engineering skill 的脚本导出头文件，用 `idax binary --arch arm64e` 建 IDA 库（27 的 Dock 另有 `arm64e.x1` 切片，不加 `--arch` 会选错）。
+4. 核对签名：用 `ipsw class-dump <Dock> --arch arm64e --re -V` 导出声明，把复刻用到的类（`WALayerKitWindow`、`WAWindow`、`DockBar`、`DisplayDescriptor`、`EC*` 图层、`Spotlight`、`DockAppEventHandler`、玻璃的四个类、`IconAppearance`、`Environment`、卸载器与 `CALayer` 的分类）和同一大版本里已核对过的构建逐个对照。26.0 到 27.2 里不同的只有复刻没用到的方法。
+5. 部署到同一大版本的测试机，看日志里 `Checked N Dock method(s), M mismatch(es)`：日志会写出不符的那几个的新编码，逐个核对后改对应 proxy 协议或 hook 方法的 Swift 类型（编码由它推出；init 的签名直接改字符串），并更新 `DockSignatureTests` 里记的编码。
+
+两行 `Found …` 里缺了一行时，要查的是另一回事：那个构建把单例放在了扫描没覆盖的地方，或者 Dock 还没建好它。先在测试机上多等一会儿再看一次日志；确实一直找不到，就在那个构建的 IDA 库里看 `-[DockBarSystemDefinedEventHandler handleSystemDefinedEvent:type:]` 处理 Launchpad 键（系统定义事件子类型 9、键码 104）的分支，顺着向一个全局发 `keyFocusController`（那是 `DockBar`）、向另一个发 `slowMotionAllowed`（那是 `DockGlobals`）的两处 `ADRL` 加 `LDR`，确认那两个地址落在哪一节——`DockGlobalScanner` 扫的是 `__DATA` 的 `__common`、`__bss`、`__data`。
 
 ## 延伸阅读
 

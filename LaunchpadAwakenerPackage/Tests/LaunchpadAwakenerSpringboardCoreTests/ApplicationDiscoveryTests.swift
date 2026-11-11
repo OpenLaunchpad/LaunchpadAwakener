@@ -1,6 +1,7 @@
 import Foundation
 import LaunchpadAwakenerSpringboardCore
 import Testing
+import Synchronization
 import TestingSupport
 
 @Suite("Finding applications")
@@ -131,5 +132,69 @@ struct ApplicationDiscoveryTests {
             return .application(bundleIdentifier: entry["bundleid"] as? String ?? "")
         }
         #expect(DefaultLaunchpadLayout.mainPage == entriesFromPlist)
+    }
+    /// Enough discoveries at once to fill the Swift concurrency pool, which is how a hang
+    /// underneath this one showed up.
+    ///
+    /// Describing a bundle asks `FileManager` for its display name, and for a bundle LaunchServices
+    /// has not seen before that means registering it — a synchronous XPC call with no deadline of its
+    /// own. Ten of those in flight from one process wedged this test bundle twice in three runs on
+    /// 2026-11-11: the first few registrations answered, then every thread stopped inside
+    /// `displayName(atPath:)` and none of them came back (74 and 42 minutes before they were killed,
+    /// while the same lookup made from another process still answered in under a second). Serializing
+    /// the lookup is what fixes it; this is the test that fails without it.
+    ///
+    /// Shaped to fail rather than to hang: the discoveries run on threads of their own and the test
+    /// waits on a deadline instead of on them, so the deadlock coming back is a red test rather than a
+    /// run that never ends.
+    @Test("sixteen discoveries at once all finish")
+    func concurrentDiscoveriesAllFinish() throws {
+        let discoveryCount = 16
+        let applicationsPerDiscovery = 4
+        let roundCount = 3
+        try withTemporaryDirectory { directoryURL in
+            for round in 0 ..< roundCount {
+                // A directory each, holding bundles LaunchServices has never seen: one it already knows
+                // is answered out of its database, without the registration this test is about. Several
+                // rounds because the deadlock is a race — one round caught it in one run out of three.
+                let searchDirectoryURLs = try (0 ..< discoveryCount).map { discoveryIndex -> URL in
+                    let searchDirectoryURL = directoryURL
+                        .appendingPathComponent("Round-\(round)/Applications-\(discoveryIndex)", isDirectory: true)
+                    for applicationIndex in 0 ..< applicationsPerDiscovery {
+                        try ApplicationBundleFixture(
+                            name: "Alpha \(round)-\(discoveryIndex)-\(applicationIndex)",
+                            bundleIdentifier: "com.example.alpha-\(round)-\(discoveryIndex)-\(applicationIndex)"
+                        ).write(in: searchDirectoryURL)
+                    }
+                    return searchDirectoryURL
+                }
+
+                let finishedDiscoveries = DispatchSemaphore(value: 0)
+                let discoveredCounts = Mutex<[Int]>([])
+                for searchDirectoryURL in searchDirectoryURLs {
+                    // Tasks rather than threads of their own: the runs that hung had every thread of the
+                    // Swift concurrency pool stopped inside this call, which is the state wanted here.
+                    Task.detached {
+                        let discoveredApplications = ApplicationDiscovery.discoverApplications(
+                            in: [searchDirectoryURL],
+                            exclusionList: .standard
+                        )
+                        discoveredCounts.withLock { $0.append(discoveredApplications.count) }
+                        finishedDiscoveries.signal()
+                    }
+                }
+
+                for _ in 0 ..< discoveryCount {
+                    // A round takes about 1.5 seconds with the lookup serialized — registering a
+                    // bundle is around 20 ms — so a 30-second deadline is the deadlock, not slowness.
+                    guard finishedDiscoveries.wait(timeout: .now() + .seconds(30)) == .success else {
+                        Issue.record("A discovery in round \(round) never came back — see this test's comment")
+                        return
+                    }
+                }
+
+                #expect(discoveredCounts.withLock { $0 } == Array(repeating: applicationsPerDiscovery, count: discoveryCount))
+            }
+        }
     }
 }
