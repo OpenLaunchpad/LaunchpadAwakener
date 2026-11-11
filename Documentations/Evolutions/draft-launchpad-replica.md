@@ -212,7 +212,7 @@ final class SpringboardController {
    4. ✅ 抖动模式的关闭按钮与删除 App Store 的 App。15 的确认气泡由 `com.apple.dock.ecap` 服务画，27.2 的 Dock.app 里已经没有这个服务，要自己画。2026-11-10 起确认气泡改由辅助进程弹真的 `NSPopover`，见第 8 步。
    5. ◐ 把图标拖到 Dock 上加入 Dock，拖动搜索结果：2026-11-08 先留作后续项，同日接着做。拖动搜索结果已做：照 15 先退出搜索，再从 App 真正所在的地方接着拖（见决策日志），2026-11-08 在 MacBook 上交互验证。拖到 Dock 暂停，没有写代码（见决策日志）。2026-11-11 用户要求把拖到 Dock 做出来，分三步落地：
       1. ✅ 界面层与宿主接口：宿主新增 `dockDropTarget`（注入版以外都是 nil）。指针一进 Dock 栏，被拖的图标挪进一扇高于 Dock 的透明窗口、不透明度减半，App 交给 Dock 让出间隙；在 Dock 上时界面自己不让位、不弹开文件夹、不翻页；离开 Dock 复原。在 Dock 上松手，界面照 15 不滑回、直接复原，松在废纸篓上对可删的 App 弹删除确认；Esc、界面收起与拆除都让 Dock 收起间隙。单元测试用假的 Dock 目标驱动真实的界面。
-      2. Dock 一侧：照逆向结论在 payload 里接上 Dock 的拖放跟踪与放下，方法签名先核对、不符就整个功能停用。
+      2. ✅ Dock 一侧（`DockDropTarget`）：不建 CoreDrag，直接往 Dock 的事件队列里排事件。进入时把拖动内容标为「App 的文件 URL」（6）并排 DragEnter，Dock 的动画线程此后每帧按真实指针摆放间隙；每次移动只唤醒动画线程；松手时先停住间隙、在 Dock 主锁内确认间隙的占位图标真在，再排一个新建图标的 DragDrop，四秒后 Dock 自己存进 `persistent-apps`；松在废纸篓上不排放下。每条退出路径都排一次 DragLeave、把内容标志清零。用到的 18 个方法在 26.6.2 与 27.2 签名相同，任何一个不符只停用这一项；`DragController` 照 `DockBar` 的办法按类从全局里认出来。单元测试覆盖签名与调用的顺序、成对。
       3. 文档与非交互验证：实现说明、术语表、部署到 26 虚拟机看签名与 hook。
    6. ✅ 搜索框与改名框的完整文本编辑（光标、选区、复制粘贴、撤销已做；输入法由文本输入辅助进程接上，见提案 [0001 用常驻辅助进程给搜索框与改名框接上输入法](0001-input-method-helper.md)）：搜索框的光标与选区、输入法、复制粘贴、撤销。15 用 `com.apple.dock.ecti` 服务里的真 `NSTextField`，27.2 里这个服务也没有了，方案先逆向再定。
    7. 捏合要用户关掉 Spotlight 的捏合后在真机上试，agent 做不了，留给用户。
@@ -324,3 +324,7 @@ final class SpringboardController {
 | 2026-11-11 | 指针在 Dock 上时，界面不让位、不弹开文件夹、不翻页 | 没有查证 15 是否也这样，按「Dock 上的图标归 Dock」处理：否则停在 Dock 上会被悬停计时弹开文件夹，页面也会把图标排到页末，而松手时它却交给了 Dock |
 | 2026-11-11 | 松在废纸篓上照 15 对可删的 App 弹删除确认，绝不交给 Dock 收下 | 15 的 `didEndDragOfItem` 先看是否在废纸篓上；Dock 自己收下落在废纸篓上的 App 会把 App 移进废纸篓。复刻用已有的删除确认与卸载器，不可删的 App 只是放回原处 |
 | 2026-11-11 | 在 Dock 上松手时 Dock 立刻收下，界面那一侧照旧等文件夹开合或退出搜索结束再复原 | 用户松手时就该看到 App 进了 Dock；界面的复原依赖页面与文件夹的状态，沿用已有的等待规则 |
+| 2026-11-11 | Dock 一侧不建 CoreDrag、不发 inject 消息，直接往 Dock 的事件队列里排 DragEnter、DragDrop、DragLeave | 15 用的 `injectIntoCoreDragTrackingProcWithMessage:window:refCon:theDrag:` 的签名里含 HIServices 的整个 `OpaqueCoreDrag` 结构，26.6.2 与 27.2 不同，ObjCRuntimeToolbox 的核对过不了两版；27.2 上「在内移动」的消息还会把 Dock 的指针卡在 (-1,-1)。逆向确认间隙与放下本来就是 Dock 事件队列里的事件，由动画线程每帧处理：直接排事件，要调的方法两版编码相同，间隙按真实指针摆放，payload 只需每次移动唤醒动画线程（逆向笔记 `/Volumes/RE/Dock/27.2/Notes/DragToDock.md`、`/Volumes/RE/Dock/26.6.2/Notes/DragToDock.md`）。两个逆向 agent 把「CoreDrag 加 inject」与「直排事件」留作取舍，按默认规则由 agent 定为后者 |
+| 2026-11-11 | 不调 `startDragWithProcess:` 与 `endDragForcingTrashRedraw:`；结束时排 DragLeave、把拖动内容标志清零 | 前者的参数是指向结构体的指针，宏推不出它的编码，项目又不许手写编码；它在 27.2 上还会装切换空间的屏幕边缘热区。后者在没有 start 时也无条件复位窗口拖动与 Exposé 的全局状态。间隙与放下这条路只读内容标志，DragLeave 无论指针在哪都会合上间隙 |
+| 2026-11-11 | 松手时先停住间隙，再在 Dock 主锁内用 `findTileAtLocation:checkExactBounds:shouldLock:` 按占位图标自己的位置确认它在 Dock 的图标里，才排放下 | Dock 的 `dummyTileInDock` 在指针直接落到某个图标正中时为真却没有间隙，这时放下会把 App 插到 App 区末尾。hook Dock 处理放下的方法更准，但它的参数也含指向结构体的指针；`tiles` 只有这一个带锁的入口 |
+| 2026-11-11 | 拖到 Dock 是可选功能：18 个方法任何一个签名不符只停用它，payload 启动时记一行结果；`DragController` 照 `DockBar` 的办法按类从全局里认出来，不进控制面板的可达性 | 与 Dock 显隐的处理一致；它只影响这一项，不该让整个复刻停用 |

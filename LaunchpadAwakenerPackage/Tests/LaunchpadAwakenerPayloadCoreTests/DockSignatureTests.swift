@@ -173,6 +173,48 @@ struct DockProxySignatureTests {
         ])
     }
 
+    /// Dragging onto the Dock, checked on its own as the payload starts: a mismatch switches only that off.
+    /// The same in 26.6.2, whose declarations were read alongside.
+    @Test func droppingOntoTheDock() {
+        #expect(DockBarDropReceptionImplementation.runtimeClassName == "DockBar")
+        expectRequirements(DockBarDropReceptionImplementation.methodRequirements, toMatch: [
+            "inBarRect": "{CGRect={CGPoint=dd}{CGSize=dd}}16@0:8",
+            "animationThread": "@16@0:8",
+            "trashTile": "@16@0:8",
+            "dummyTile": "@16@0:8",
+            "dummyTileInDock": "B16@0:8",
+            "setFDragging:": "v20@0:8B16",
+            "findTileAtLocation:checkExactBounds:shouldLock:": "@40@0:8{CGPoint=dd}16B32B36",
+            "accessingLockedEventQueue:": "v24@0:8@?16",
+            "makeDirty": "v16@0:8",
+        ])
+        #expect(DockAnimationThreadWakingImplementation.runtimeClassName == "DockAnimationThread")
+        expectRequirements(DockAnimationThreadWakingImplementation.methodRequirements, toMatch: [
+            "wakeup": "v16@0:8",
+            "updateLastMouseEventTimestampToNow": "v16@0:8",
+        ])
+        #expect(DockEventQueueDraggingImplementation.runtimeClassName == "DockEventQueue")
+        expectRequirements(DockEventQueueDraggingImplementation.methodRequirements, toMatch: [
+            "addDragEnterWithFlags:": "v24@0:8Q16",
+            "addDragLeave": "B16@0:8",
+            "setEventMousePosition:": "v32@0:8{CGPoint=dd}16",
+            "addDragDropAtMousePoint:tiles:": "v40@0:8{CGPoint=dd}16@32",
+        ])
+        #expect(DockDragControllerContentsImplementation.runtimeClassName == "DragController")
+        expectRequirements(DockDragControllerContentsImplementation.methodRequirements, toMatch: [
+            "setCurrentDragContents:": "v24@0:8Q16",
+        ])
+        #expect(DockFileTileMakingImplementation.runtimeClassName == "DOCKFileTileFactory")
+        expectRequirements(DockFileTileMakingImplementation.methodRequirements, toMatch: [
+            "+tileForDock:url:bookmark:": "@40@0:8@16@24@32",
+        ])
+        #expect(DockTileGeometryImplementation.runtimeClassName == "Tile")
+        expectRequirements(DockTileGeometryImplementation.methodRequirements, toMatch: [
+            "axFrame": "{CGRect={CGPoint=dd}{CGSize=dd}}16@0:8",
+        ])
+        #expect(DockDropTarget.requiredMethods.count == 18)
+    }
+
     /// The methods checked before any hook goes in: the 23 the replica calls, each recorded once, so the
     /// log's `Checked 23 Dock method(s)` keeps meaning what the implementation note says it means.
     @Test func requiredMethodsAreTheOnesTheReplicaCalls() {

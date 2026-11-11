@@ -84,9 +84,9 @@ final class DockSpringboardHost: SpringboardHost {
         DockBarVisibility.shared.apply(visibility)
     }
 
-    /// The Dock does not take drops from the springboard yet.
+    /// The Dock, wherever it has every method dragging onto it calls; see ``DockDropTarget``.
     var dockDropTarget: (any SpringboardDockDropTarget)? {
-        nil
+        DockDropTarget.isCompatible ? DockDropTarget.shared : nil
     }
 }
 
