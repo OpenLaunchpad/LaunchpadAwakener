@@ -88,16 +88,50 @@ actor PayloadPeer {
         }
     }
 
-    private func currentStatus() -> PayloadStatus {
+    private func currentStatus() async -> PayloadStatus {
         PayloadStatus(
             payloadImageUUID: Self.payloadImageUUID,
             hostProcessIdentifier: ProcessInfo.processInfo.processIdentifier,
             hostProcessName: ProcessInfo.processInfo.processName,
             hookInstallation: hookInstallation,
-            dockBuild: DockBuildProfile.current.map { profile in
-                DockBuildSummary(bundleVersion: profile.bundleVersion, systemReleases: profile.systemReleases)
-            }
+            dockBuild: Self.hostBuildSummary,
+            dockGlobalsReachability: await MainActor.run { DockBarReference.reachability }
         )
+    }
+
+    /// Which Dock this payload is attached to, read from the host rather than recorded per build.
+    ///
+    /// `Bundle.main` is the host — the payload is mapped into it — so its `CFBundleVersion` is the
+    /// Dock's. The release is this machine's, which is what someone looking at the control panel wants
+    /// to know; which *other* macOS releases happen to ship the same Dock was knowledge no running
+    /// process has, and it went away with the build profile.
+    private static let hostBuildSummary = DockBuildSummary(
+        bundleVersion: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
+        systemRelease: currentSystemRelease
+    )
+
+    /// This machine's macOS version with its build number, such as `27.2 (26B123)`.
+    ///
+    /// Assembled from two public sources rather than `operatingSystemVersionString`, which is wrapped
+    /// in words — `Version 27.2 (Build 26B123)` — and documented as unsuitable for anything but showing
+    /// verbatim.
+    private static var currentSystemRelease: String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        var productVersion = "\(version.majorVersion).\(version.minorVersion)"
+        if version.patchVersion > 0 {
+            productVersion += ".\(version.patchVersion)"
+        }
+        guard let buildVersion = currentSystemBuildVersion else { return productVersion }
+        return "\(productVersion) (\(buildVersion))"
+    }
+
+    /// The build number of the running system, such as `26B123`; nil when the kernel will not say.
+    private static var currentSystemBuildVersion: String? {
+        var byteCount = 0
+        guard sysctlbyname("kern.osversion", nil, &byteCount, nil, 0) == 0, byteCount > 0 else { return nil }
+        var buffer = [CChar](repeating: 0, count: byteCount)
+        guard sysctlbyname("kern.osversion", &buffer, &byteCount, nil, 0) == 0 else { return nil }
+        return String(cString: buffer)
     }
 
     /// `LC_UUID` of this payload's own image, which the app compares with the copy in its bundle.

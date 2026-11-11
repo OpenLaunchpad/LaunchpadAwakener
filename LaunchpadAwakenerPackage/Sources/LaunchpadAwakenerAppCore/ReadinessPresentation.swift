@@ -77,11 +77,8 @@ public struct ReadinessPresentation: Equatable, Sendable {
             let title: String
             let reason: String
             switch hookState {
-            case .unknownDockBuild:
-                title = "This Dock build is not supported"
-                reason = "LaunchpadAwakener has no build profile for it"
             case .incompatibleDockMethods:
-                title = "This Dock does not match its build profile"
+                title = "This Dock does not match what the payload expects"
                 reason = "the methods the payload calls have different signatures"
             case .failed:
                 title = "The payload's hooks did not install"

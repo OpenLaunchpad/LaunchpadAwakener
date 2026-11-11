@@ -34,21 +34,29 @@ public struct PayloadStatus: Codable, Sendable, Equatable {
     /// What became of the hooks.
     public let hookInstallation: HookInstallation
 
-    /// The Dock build, as its build profile names it. Nil when the build has no profile.
-    public let dockBuild: DockBuildSummary?
+    /// Which Dock this payload is attached to, as the host reports itself.
+    public let dockBuild: DockBuildSummary
+
+    /// Whether the globals the replica needs could be reached when this snapshot was taken.
+    ///
+    /// Worked out on being asked, not when the payload started: the Dock may not have built its
+    /// singletons by then, and a snapshot taken a second later would say something different.
+    public let dockGlobalsReachability: DockGlobalsReachability
 
     public init(
         payloadImageUUID: UUID,
         hostProcessIdentifier: pid_t,
         hostProcessName: String,
         hookInstallation: HookInstallation,
-        dockBuild: DockBuildSummary?
+        dockBuild: DockBuildSummary,
+        dockGlobalsReachability: DockGlobalsReachability
     ) {
         self.payloadImageUUID = payloadImageUUID
         self.hostProcessIdentifier = hostProcessIdentifier
         self.hostProcessName = hostProcessName
         self.hookInstallation = hookInstallation
         self.dockBuild = dockBuild
+        self.dockGlobalsReachability = dockGlobalsReachability
     }
 }
 
@@ -59,23 +67,34 @@ public struct PayloadStatus: Codable, Sendable, Equatable {
 public enum HookInstallation: Codable, Sendable, Equatable {
     /// The whole batch is in place.
     case installed(hookCount: Int)
-    /// The Dock is a build this payload has no profile for.
-    case unknownDockBuild(executableUUID: String)
-    /// The build is known, but the methods the payload calls do not match their recorded signatures.
+    /// The methods the payload calls do not match the signatures it recorded for them.
     case incompatibleDockMethods
     /// A hook failed validation, so none were installed.
     case failed(description: String)
 }
 
-/// The facts a build profile gives about the Dock it describes.
-public struct DockBuildSummary: Codable, Sendable, Equatable {
-    /// `CFBundleVersion` of Dock.app.
-    public let bundleVersion: String
-    /// Every macOS release that ships this build, such as `27.2 (26B123)`.
-    public let systemReleases: [String]
+/// Whether the payload can reach the host globals the replica needs, at the moment it was asked.
+///
+/// Kept apart from ``HookInstallation`` because neither decides the other. The hooks decide where the
+/// Launchpad key goes; the globals give the geometry and the material needed to sit against the Dock.
+/// Without them the replica still opens — the Dock just does not slide away, the glass background is
+/// not drawn, and the Dock's thickness falls back to a default.
+public enum DockGlobalsReachability: Codable, Sendable, Equatable {
+    /// Every global the replica needs was found.
+    case reachable
+    /// What could not be found, named the way a person would read it.
+    case unreachable(missingClassNames: [String])
+}
 
-    public init(bundleVersion: String, systemReleases: [String]) {
+/// Which Dock the payload is attached to, as that Dock reports itself.
+public struct DockBuildSummary: Codable, Sendable, Equatable {
+    /// `CFBundleVersion` of Dock.app, read from the host's own bundle.
+    public let bundleVersion: String
+    /// The macOS this Dock is running on, such as `27.2 (26B123)`.
+    public let systemRelease: String
+
+    public init(bundleVersion: String, systemRelease: String) {
         self.bundleVersion = bundleVersion
-        self.systemReleases = systemReleases
+        self.systemRelease = systemRelease
     }
 }

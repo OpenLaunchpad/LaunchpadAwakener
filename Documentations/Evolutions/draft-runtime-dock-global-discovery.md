@@ -1,6 +1,6 @@
 # Draft - 在运行时找出 Dock 的两个全局变量，取消构建白名单
 
-- **状态**: Accepted
+- **状态**: In Progress
 - **作者**: JH
 - **创建日期**: 2026-11-11
 - **最后更新**: 2026-11-11
@@ -82,7 +82,7 @@ Launchpad 复刻要用 Dock 里两个没有任何导出入口的全局变量（�
 
 1. **新增 `DockGlobalScanner`**（`PayloadCore/Host/`）：给定一个类和若干段内存，找出其中持有该类实例的指针槽。段范围由调用方传入，这样测试可以喂一块自己准备的内存，不必为了测一个纯计算过程去注入任何进程。扫描分两层：先扫 `__common`，没命中再扫 `__bss` 与 `__data`。
 2. **`DockBarReference` 改用它**：`readGlobalObject(atUnslidAddress:expectedClassName:)` 换成按类名查找。`DockGlobals` 的两个类名（26 的 Objective-C 类 `DockGlobals`、27 的 Swift 类 `_TtC8DockCore11DockGlobals`）都试一次，哪个在这个系统上存在就用哪个——这替掉了原先按构建记在档案里的 `dockGlobalsClassName`。保持现在的延迟语义：`weak` 缓存，找不到不缓存、下次重试。
-3. **删掉 `DockBuildProfile` 与 `DockBuildProfileTests`**，`MachOImageInspector`（读 `LC_UUID`）随之一起删——它只被档案用。`PayloadHooks.descriptors()` 的闸门只剩 `DockHostInterface.isCompatible`。
+3. **删掉 `DockBuildProfile` 与 `DockBuildProfileTests`**。`MachOImageInspector`（读 `LC_UUID`）搬到自己的文件而不是删掉：`PayloadPeer` 也用它读 payload 自己的镜像 UUID。`PayloadHooks.descriptors()` 的闸门只剩 `DockHostInterface.isCompatible`。
 4. **通道类型调整**：`HookInstallation` 删掉 `unknownDockBuild` 这个状态；新增 `DockGlobalsReachability` 作为 `PayloadStatus` 上的独立字段——hook 装没装和全局找不找得到是两件互不决定的事，不该挤在一个枚举里。`DockBuildSummary` 的 `systemReleases: [String]`（人工维护的「随哪些 macOS 发布」）换成 `systemRelease: String`（当前系统的版本与 build），`bundleVersion` 改从 Dock 自己的 bundle 读。`dockBuild` 不再可空。
 5. **控制面板**：「Dock build」那一行改为显示当前系统版本；hook 装上但全局找不到时，显示「在这个 Dock 里找不到 Launchpad 的入口」。
 6. **文档**：实现说明「适配新的 Dock 构建」拆成两段——新构建什么都不用做；日志报签名不符时怎么取那个构建来核对。术语表删掉「DockBuildProfile（构建档案）」，换成新机制的条目。项目 `CLAUDE.md` 开头那句「别的构建在补上构建档案之前什么都不装」改写。
@@ -104,8 +104,8 @@ Launchpad 复刻要用 Dock 里两个没有任何导出入口的全局变量（�
 ///
 /// 段范围由调用方传进来，而不是让扫描器自己去问 dyld：查找本身是个纯计算过程，
 /// 测试应当能喂一块自己准备的内存，而不必为了测它去注入任何进程。
-struct PointerSlotRegion: Sendable {
-    /// 第一个槽的地址，按指针大小对齐。
+struct PointerSlotRegion {
+    /// 这一段从哪里开始，对齐就是链接器留下的样子——未必按指针对齐。
     let baseAddress: UnsafeRawPointer
     /// 这一段有多少字节；凑不满一个槽的尾巴忽略。
     let byteCount: Int
@@ -115,27 +115,33 @@ struct PointerSlotRegion: Sendable {
 
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "DockGlobalScanner")
 enum DockGlobalScanner {
-    /// 一个持有目标类实例的全局。
-    struct FoundGlobal: Sendable {
-        /// 这个全局本身的地址，只用于写日志。
-        let slotAddress: UnsafeRawPointer
-        /// 它持有的对象。
-        let object: NSObject
+    /// 找一个全局的结果。
+    ///
+    /// 对象按 `AnyObject` 交出而不是 `NSObject`：能不能对它发消息是调用方的事，
+    /// 在这里收窄会把一个并非 `NSObject` 子类的目标悄悄判成找不到。
+    enum Outcome {
+        /// 找到一个对象，列出的每个槽都持有它。
+        case found(object: AnyObject, slotAddresses: [UnsafeRawPointer])
+        /// 所有段里没有一个槽持有这个类的实例。
+        case notFound
+        /// 不同的槽持有不同的实例，无从知道 Dock 读的是哪个；一个也不用。
+        case ambiguous(slotAddresses: [UnsafeRawPointer])
     }
 
-    /// 在 `regions` 里按先后顺序找持有 `targetClass` 实例的槽位；
-    /// 某一段有命中就不再看后面的段。
-    static func findGlobals(
-        holdingInstanceOf targetClass: AnyClass,
-        in regions: [PointerSlotRegion]
-    ) -> [FoundGlobal]
+    /// 在 `regions` 里按先后顺序找持有 `targetClass` 实例的槽；某一段有命中就不再看后面的段。
+    static func findGlobal(holdingInstanceOf targetClass: AnyClass, in regions: [PointerSlotRegion]) -> Outcome
 
-    /// 宿主可执行文件里值得扫的几段，按先扫的在前排好：`__common`、`__bss`、`__data`。
-    ///
-    /// 三段都在 `__DATA` 里，dyld 把它们映射成可读写（27.2 上 `vmmap` 实测 `rw-`）。
-    /// 段范围经 `getsectbynamefromheader_64` 问出来，加上 `_dyld_get_image_vmaddr_slide(0)`；
-    /// 两者都是公开 API，所以这里没有一处写死的地址。
+    /// 宿主——也就是 payload 被注入进去的那个进程——值得扫的几段。
     static func mainExecutablePointerSlotRegions() -> [PointerSlotRegion]
+
+    /// dyld 已映射的某个镜像里值得扫的几段，按先扫的在前排好：`__common`、`__bss`、`__data`。
+    ///
+    /// 三段都在 `__DATA` 里，dyld 把它们映射成可读写（27.2 上 `vmmap` 实测 `rw-`）。段范围经
+    /// `getsectiondata` 问出来——它直接给这一节在内存里的位置，slide 由它自己按传入的 header
+    /// 算出——所以这里没有一处写死的地址。索引是参数，好让测试走遍本进程的每个镜像：测试
+    /// runner 自己的可执行文件小到这三节都没有，而随它加载的那些库三节都有，且装满了那三道
+    /// 筛子正是为之存在的遗留值。
+    static func pointerSlotRegions(ofImageAtIndex imageIndex: UInt32) -> [PointerSlotRegion]
 }
 ```
 
@@ -143,7 +149,9 @@ enum DockGlobalScanner {
 
 1. 非空，且按指针大小对齐。
 2. `malloc_size(候选) >= class_getInstanceSize(targetClass)`。`malloc_size` 对任意野指针安全（见前期调研），返回非 0 还证明了它是某个 malloc 块的起始；块比目标类的实例还小就不可能是它。
-3. `object_getClass(候选) == targetClass`。只读堆块头部 8 字节并按 isa 的格式掩码，拿到的类指针直接比较，不向候选对象发任何消息。
+3. 读出的类正好等于 `targetClass`。只读堆块头部 8 字节并按 isa 的格式掩码，拿到的类指针直接比较，不向候选对象发任何消息。这一步走 `dlsym` 取到的 `object_getClass` C 入口：Swift 导入的那个版本参数是 `Any?`，要先把候选变成 Swift 对象引用，而 `Unmanaged.takeUnretainedValue()` 返回的是 ARC 管的值，编译器可以对它插 retain，retain 一个不是对象的东西就会去读一个垃圾 isa。
+
+扫描从区域里第一个按指针对齐的地址开始，而不是从区域起点：遍历一个活进程的全部镜像会遇到对齐小于一个指针的 `__DATA` 节，从不对齐的起点按槽长走会一槽一槽地跨过去，把该节里每个真正的指针都错过，而且毫无征兆——跨槽读出的值和任何不是对象的值长得一样。
 
 命中不唯一不是问题：`DockBar` 与 `DockGlobals` 都是进程单例，多个槽位持有的必然是同一个对象。扫到的对象指向同一个就用它；真出现两个不同对象就一个也不用，并写日志——与项目里 hook 要么整批装要么一个不装的做法一致。
 
@@ -199,7 +207,7 @@ public enum HookInstallation: Codable, Sendable, Equatable {
 /// 玻璃背景不画、厚度取默认值。
 public enum DockGlobalsReachability: Codable, Sendable, Equatable {
     case reachable
-    /// 没找到的那些，按查找时用的类名写。
+    /// 没找到的那些，按人能读的名字写（27 上的 `_TtC8DockCore11DockGlobals` 一律报成 `DockGlobals`）。
     case unreachable(missingClassNames: [String])
 }
 
@@ -251,16 +259,16 @@ public struct DockBuildSummary: Codable, Sendable, Equatable {
 
 ## 落地步骤
 
-1. 加 `PointerSlotRegion` 与 `DockGlobalScanner`，连同它的单元测试：测试自己 malloc 一块内存当作「段」，在某个槽里放一个真实对象的指针，验证能找到它、验证类不匹配时不误报、验证块小于实例大小时被筛掉。这一步不碰 Dock，可独立验证。
-2. `DockBarReference` 改用扫描器；删掉 `DockBuildProfile`、`MachOImageInspector` 与 `DockBuildProfileTests`；`PayloadHooks.descriptors()` 的闸门只留签名核对。
-3. 通道类型调整，App 一侧同步：`HookInstallation` 去掉一个状态，`PayloadStatus` 加可达性字段，`DockBuildSummary` 换字段并改为从宿主自己读。
-4. 控制面板与就绪提示的文案。
-5. 部署到两台测试机验证：27 用测试 MacBook，26 用 Ultra 上的虚拟机。看日志里找到两个全局的那两行、`Installed 2 hook(s)`，再看 Launchpad 开起来之后 Dock 会滑走、玻璃背景在画。
-6. 文档同批落地：实现说明拆两段、术语表换条目、项目 `CLAUDE.md` 开头那句、未落地的复刻草案里提到构建档案的那一行、文档索引。
+1. ✅ 加 `PointerSlotRegion` 与 `DockGlobalScanner`，连同它的单元测试：测试自己 malloc 一块内存当作「段」，在某个槽里放一个真实对象的指针，验证能找到它、验证类不匹配时不误报、验证块小于实例大小时被筛掉，并遍历本进程全部已加载镜像的真实数据段证实扫描不会碰坏什么。这一步不碰 Dock，可独立验证。
+2. ✅ `DockBarReference` 改用扫描器；删掉 `DockBuildProfile` 与 `DockBuildProfileTests`，`MachOImageInspector` 搬到自己的文件；`PayloadHooks.descriptors()` 的闸门只留签名核对。通道类型与 App 一侧同批改（原定的第 2、3 步合成一步：删掉一个类型必然同时牵动通道上引用它的类型，分两次都编译不过）。
+3. ✅ `HookInstallation` 去掉一个状态，`PayloadStatus` 加可达性字段，`DockBuildSummary` 换字段并改为从宿主自己读。
+4. ✅ 控制面板与就绪提示的文案。
+5. ⏳ 部署到两台测试机验证：27 用测试 MacBook，26 用 Ultra 上的虚拟机。看日志里找到两个全局的那两行、`Installed 2 hook(s)`，再看 Launchpad 开起来之后 Dock 会滑走、玻璃背景在画。**没做**：会话在公司那台 Mac Studio 上，到测试机要经 Mac mini 转发，整个 App 的 rsync 约 11 分钟而转发撑不过 10 分钟，断在半途会留下一个坏掉的 App（2026-11-10 实测两次都断）。等从 Ultra 直连时做。
+6. ✅ 文档同批落地：实现说明拆两段、术语表换条目、项目 `CLAUDE.md` 开头那句、未落地的复刻草案里提到构建档案的那几处、文档索引、控制面板实现说明里一句、已知降级里 `arm64e.x1` 那条。
 
 **收尾时必须判断两件事**（判断结果写进决策日志，不允许沉默跳过）：
 
-- **要不要配套专题文章** —— 扫描为什么安全（`malloc_size` 对野指针安全、`object_getClass` 不解引用结果、槽里的指针没有签名）从代码本身看不出来，倾向写进实现说明「适配新的 Dock 构建」那一节。
+- **要不要配套专题文章** —— 不另写一篇。扫描为什么安全（`malloc_size` 对野指针安全、读类不解引用结果、槽里的指针没有签名）从代码本身看不出来，已写进实现说明的「关键设计决策」；适配流程那一节按本提案拆成了「新构建什么都不用做」与「方法签名不符时怎么核对」两段。
 - **有没有引入新术语** —— 术语表要删掉「DockBuildProfile（构建档案）」，并为新机制加一个条目。
 
 ## 决策日志
@@ -276,3 +284,14 @@ public struct DockBuildSummary: Codable, Sendable, Equatable {
 | 2026-11-11 | 扫描器只放本项目，不回写脚手架 | 这个技术对任何注入项目都通用，但先在本项目用稳，避免本次改动跨两个仓库。 |
 | 2026-11-11 | 不留手动写死地址的后门 | 扫不到时日志会写清扫过哪几段、各多少槽位、找的是哪个类名；这是开发者自用的工具，改代码重新部署的成本低于多维护一条配置路径。 |
 | 2026-11-11 | 用户批准，开始实现 | 状态改为 Accepted，实现落在 `feature/runtime-dock-global-discovery`。 |
+| 2026-11-11 | 开始实现，状态转 In Progress | 批准后在 `feature/runtime-dock-global-discovery` 上落地。 |
+| 2026-11-11 | `MachOImageInspector` 保留，搬到自己的文件 | 提案原说它随构建档案一起删，这是判断错了：`PayloadPeer` 也用它读 payload 自己的镜像 UUID，App 靠那个 UUID 认出 Dock 里的旧 payload。从 `DockBuildProfile.swift` 搬到 `PayloadCore/MachOImageInspector.swift`。 |
+| 2026-11-11 | 落地步骤的第 2、3 步合成一步 | 删掉 `DockBuildProfile` 必然同时牵动通道上引用它的类型，分两次都编译不过。原子性在这里是删一个类型本身要求的。 |
+| 2026-11-11 | 扫描器返回 `AnyObject`，不是 `NSObject` | 原先窄到 `NSObject` 时，一个不是 `NSObject` 子类的目标会让转换失败，而那条失败路径把结果报成「扫出多个不同对象」——测试一上来就抓住了它。能不能发消息是调用方的事，`DockBarReference` 自己转。 |
+| 2026-11-11 | 从区域里第一个指针对齐的地址开始扫，不从区域起点 | 测试遍历本进程全部已加载镜像时发现：有些镜像的 `__DATA` 节对齐小于一个指针。从不对齐的起点按 8 字节步长走，会一槽一槽地跨过去，把该节里每个真正的指针都错过，而且毫无征兆——跨槽读出的值和任何不是对象的值长得一样。 |
+| 2026-11-11 | 段范围改用 `getsectiondata`，不用 `getsectbynamefromheader_64` | 后者在 macOS 13.0 已废弃，而且只给记录在文件里的未滑动地址，还要自己加 slide；前者没废弃，直接返回这一节在内存里的位置，slide 由它自己按传入的 header 算出（cctools `libmacho/getsecbyname.c`）。少一处可能算错的地方。 |
+| 2026-11-11 | 读候选的类走 `dlsym` 取到的 `object_getClass` C 入口 | Swift 导入的那个版本参数是 `Any?`，要先把候选变成 Swift 对象引用；而 `Unmanaged.takeUnretainedValue()` 返回的是 ARC 管的值，编译器可以对它插 retain，retain 一个不是对象的东西就会去读一个垃圾 isa。经 C 函数指针调用，候选在类比较完成之前始终只是一个地址。 |
+| 2026-11-11 | 可达性在 App 一侧另有一个本地类型 | `ResidentPayload` 刻意不暴露通道类型，这样 App target 只链接 `LaunchpadAwakenerAppCore`。照 `HookState` 的既有做法给 `DockGlobalsReachability` 配了一个 `ResidentPayload.GlobalsReachability` 与转换。 |
+| 2026-11-11 | 报缺失时用可读的类名，不用查找时的改编名 | 提案原说「按查找时用的类名写」。27 上那是 `_TtC8DockCore11DockGlobals`，对看控制面板的人没有意义，改成统一报 `DockGlobals`。 |
+| 2026-11-11 | 代码、测试与文档完成；测试机上的部署验证留到能直连时做 | 单元测试 488 个全部通过，`RunScript.sh` 的完整构建与架构切片校验通过。扫描在真实 Dock 里能否找到那两个全局只能在测试机上证实；从公司那台部署会在半途断开并弄坏测试机上的 App，所以不在用户不知情时试。 |
+| 2026-11-11 | 可达性查询不走主线程，也不读那两个属性的缓存 | App 是从 payload 的通道 actor 上问的，跳到主 actor 去复用缓存就会让答案等 Dock 主线程做完手上的事，而 App 给状态请求只有两秒。重新扫一遍只要几十微秒，读的还是同一块内存。 |

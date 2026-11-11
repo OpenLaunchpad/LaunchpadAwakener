@@ -77,10 +77,7 @@ public enum PayloadEntry {
 
         guard !hooks.isEmpty else {
             logger.info("No hooks declared — payload is attached but inert")
-            // `descriptors()` declares none for exactly these two reasons, and has logged which.
-            guard DockBuildProfile.current != nil else {
-                return .unknownDockBuild(executableUUID: DockBuildProfile.currentExecutableUUID?.uuidString ?? "unreadable")
-            }
+            // `descriptors()` declares none for exactly one reason now, and has logged it.
             return .incompatibleDockMethods
         }
 

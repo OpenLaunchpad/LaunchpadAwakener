@@ -19,49 +19,45 @@ public struct StatusLine: Equatable, Sendable {
 }
 
 extension StatusLine {
-    /// The Dock build row: which macOS the Dock ships with, and whether this build is one the payload
-    /// knows.
+    /// The Dock row: which macOS this Dock is running on, and whether the replica is working in it.
     ///
     /// `payload` is the first Dock that answered. There is one Dock per login session, so in practice
     /// it is the only one.
+    ///
+    /// There is no "unsupported build" any more — the payload finds what it needs by looking rather
+    /// than by matching the build against a list — so what can go wrong here is narrower: the methods
+    /// it replaces may have changed, or the globals it reads may be out of reach.
     public static func dockBuild(reportedBy payload: PayloadInjectionCoordinator.ResidentPayload?) -> StatusLine {
         guard let payload else {
             return StatusLine(
                 text: "Known once the Dock is injected",
                 tint: .neutral,
-                help: "The payload reports the Dock build once it is in the Dock."
+                help: "The payload reports which Dock it is in once it is injected."
             )
         }
+        let release = "macOS \(payload.dockSystemRelease)"
         let text: String
         switch payload.hookState {
-        case .installed where payload.areHooksInstalled:
-            let release = payload.dockSystemReleases.last.map { "macOS \($0)" } ?? "Known build"
+        case .installed where payload.areHooksInstalled && payload.areDockGlobalsReachable:
             text = "\(release) · supported"
+        case .installed where payload.areHooksInstalled:
+            text = "\(release) · Launchpad's entry points are missing"
         case .installed:
             text = "No hooks declared"
-        case .unknownDockBuild:
-            text = "Unknown build — not supported"
         case .incompatibleDockMethods:
             text = "Methods do not match"
         case .failed:
             text = "Hooks failed to install"
         }
-        var helpLines: [String] = []
-        if let dockBundleVersion = payload.dockBundleVersion {
-            helpLines.append("Dock \(dockBundleVersion)")
+        var helpLines = ["Dock \(payload.dockBundleVersion)", "Running on \(release)"]
+        if case .unreachable(let missingClassNames) = payload.dockGlobalsReachability {
+            helpLines.append("Not found in this Dock: \(missingClassNames.joined(separator: ", "))")
         }
-        if !payload.dockSystemReleases.isEmpty {
-            helpLines.append("Ships with macOS \(payload.dockSystemReleases.joined(separator: ", "))")
-        }
-        switch payload.hookState {
-        case .unknownDockBuild(let executableUUID):
-            helpLines.append("Executable UUID \(executableUUID)")
-        case .failed(let description):
+        if case .failed(let description) = payload.hookState {
             helpLines.append(description)
-        case .installed, .incompatibleDockMethods:
-            break
         }
-        return StatusLine(text: text, tint: payload.areHooksInstalled ? .positive : .critical, help: helpLines.joined(separator: "\n"))
+        let isWorking = payload.areHooksInstalled && payload.areDockGlobalsReachable
+        return StatusLine(text: text, tint: isWorking ? .positive : .critical, help: helpLines.joined(separator: "\n"))
     }
 
     /// The Dock row of the injection section: which process, and what its payload says about itself.

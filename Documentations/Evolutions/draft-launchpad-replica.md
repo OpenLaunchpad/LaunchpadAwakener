@@ -55,7 +55,7 @@ macOS 26 停用了 Launchpad，macOS 27 把它的代码从 Dock 里彻底删除�
 
 在 Dock 进程里运行一个 Swift payload，由 LaunchpadAwakener（InjectionScaffold 结构：App、特权 daemon、payload）负责注入与自动重新注入。payload 分四层：
 
-1. **宿主接口层**：对每个用到的 Dock 方法核对签名；以 Dock 可执行文件的 UUID 为键，查一张「构建档案」表，取各构建特有的事实（如 `DockBar` 全局变量的地址）。遇到不认识的构建，一个 hook 都不装，入口退回系统的 Apps。
+1. **宿主接口层**：对每个用到的 Dock 方法核对签名，一处不符就一个 hook 都不装、入口退回系统的 Apps；`DockBar` 与 `DockGlobals` 两个没有符号的全局变量在运行时按它们持有的对象的类认出来。（原先改为查一张以 Dock 可执行文件 UUID 为键的「构建档案」表取各构建的全局地址，2026-11-11 换成运行时扫描，见提案[在运行时找出 Dock 的两个全局变量，取消构建白名单](draft-runtime-dock-global-discovery.md)。）
 2. **数据层**：仿 15.5 的 `LPStorage` / `LPAppManager` / `LPAppSource` / `LPLayout`。自己的 SQLite 库沿用 15 的表结构；首次启动从旧库导入，旧库只读。App 的发现照 15.5 的做法，监听应用目录与 LaunchServices 的变更。
 3. **界面层**：仿 15.5 的 `ECSB*` / `ECPager*` 用 Swift 重写，底层复用 27 的 Dock 里仍在的 `EC*` 图层类；尺寸、间距与动画参数取自 15.5。
 4. **集成层**：
@@ -74,7 +74,7 @@ macOS 26 停用了 Launchpad，macOS 27 把它的代码从 Dock 里彻底删除�
 - ~~删除 App：抖动模式里 App Store 应用左上角的关闭按钮、确认气泡与卸载。~~ 2026-11-08 移入第 6 批（见决策日志）。
 - 图标角标、App Store 购买时图标飞入与下载进度、VoiceOver 等辅助功能、15 的 Games 分组。
 - ~~支持 macOS 26，或 27.2 26B123 以外的构建。~~ 2026-11-08 起支持 26.0 到 27.2 的全部正式构建（见决策日志）。
-- 自动兼容没登记过的 Dock 构建：新构建靠补构建档案逐个适配。26.0 之前的系统自带 Launchpad，不在范围内。
+- ~~自动兼容没登记过的 Dock 构建：新构建靠补构建档案逐个适配。~~ 2026-11-11 起不再需要登记：两个全局在运行时认出来，26 与 27 的任何构建都直接工作（见决策日志）。26.0 之前的系统自带 Launchpad，不在范围内。
 - 公开发布：不做公证、自动更新与安装引导。
 - 逐方法对照 15.5 的汇编来还原；只要求外观与行为一致。
 - 多显示器：第一版只在主显示器上显示。
@@ -82,14 +82,14 @@ macOS 26 停用了 Launchpad，macOS 27 把它的代码从 Dock 里彻底删除�
 
 ## 详细设计
 
-模块按 InjectionScaffold 的分层放在 `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/` 下，以子目录区分：`Host`（宿主接口与构建档案）、`Data`、`Interface`、`Integration`。下面是各层的主要类型；方法细节在实现时按 15.5 对应类的公开行为确定。
+模块按 InjectionScaffold 的分层放在 `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/` 下，以子目录区分：`Host`（宿主接口与全局扫描）、`Data`、`Interface`、`Integration`。下面是各层的主要类型；方法细节在实现时按 15.5 对应类的公开行为确定。
 
 ```swift
-// Host —— 每个 Dock 构建的事实；未知构建返回 nil，整个 payload 不安装任何 hook
-struct DockBuildProfile: Sendable {
-    let executableUUID: UUID
-    let dockBarGlobalAddress: UInt
-    static func current() -> DockBuildProfile?
+// Host —— 在宿主的数据段里按持有的对象的类认出全局；找不到时返回 .notFound，复刻少几个
+// 贴合 Dock 的细节但照常打开（2026-11-11 换掉原先按构建记地址的 DockBuildProfile）
+enum DockGlobalScanner {
+    static func findGlobal(holdingInstanceOf: AnyClass, in: [PointerSlotRegion]) -> Outcome
+    static func mainExecutablePointerSlotRegions() -> [PointerSlotRegion]
 }
 
 // Data —— 对应 15.5 的 LPStorage / LPRoot / LPPage / LPGroup / LPApp
@@ -164,7 +164,7 @@ final class SpringboardController {
 
 ### 平台与最低版本
 
-- 支持 macOS 26.0 到 27.2 的全部正式构建，包括只给特定机型的构建；各构建登记在构建档案（`DockBuildProfile.knownProfiles`）里，取法见[实现说明](../Internal/LaunchpadReplica.md)「适配新的 Dock 构建」。其他构建在补上构建档案之前不安装任何 hook。
+- 支持 macOS 26 与 27 的任何 Dock 构建，包括只给特定机型的构建与尚未发布的。两个全局变量在运行时按持有的对象的类认出来（见[实现说明](../Internal/LaunchpadReplica.md)「关键设计决策」），所以没有需要人工登记的构建清单；真正会被新构建打破的只有方法签名，而那一处不符就整批不装 hook。
 - 可选的玻璃背景只在 27 上有：26 的 Dock 玻璃控制器接口不同，选了玻璃也退回模糊背景。
 - 运行的机器需要已关闭 SIP。开发与验证只在测试机上进行：27 用测试用的 MacBook，26 用 Ultra 上的 macOS 26 虚拟机。
 
@@ -315,3 +315,4 @@ final class SpringboardController {
 | 2026-11-10 | 删除确认改用真的 `NSPopover`，由文本输入辅助进程照 15 的 ecap 服务弹出（第 6 批第 8 步）：锚点窗口挪到图标中心，popover 窗口抬到层级 106 直接上屏，按钮由辅助进程回报、按键由 Dock 判断，关闭总由 Dock 发起。自己画的气泡只在辅助进程不可用时用 | 用户在 15.5 虚拟机里截到原版后指出自己画的气泡明显不对：原版是系统 popover，半透明材质透出壁纸，箭头与边框连成一体。用户看过「照 15 的样子自己画」与「改用真 NSPopover」的取舍后选了后者，接受它在 26/27 上是系统的玻璃样式、与 15 的样子不同。逆向 ecap 确认 15 的气泡就是上屏的真窗口，不经 `CALayerHost`，Dock 只吞掉气泡以外的点按、自己判断按键（`/Volumes/RE/Dock/15.5/Notes/LaunchpadFoldersAndDragging.md` 第 6.3 节） |
 | 2026-11-10 | 删除确认的锚点窗口改成 nonactivating panel | 用户在 26 虚拟机里看到 popover 正常弹出，但「删除」没有画成默认按钮。逆向 26.6 的 AppKit：popover 窗口弹出时照抄锚点窗口是否 nonactivating，不是活跃 App 的进程里只有 nonactivating 窗口能成为 key，而默认按钮只在 key 窗口里画成强调色；15 的锚点 mini view 窗口同样自称 nonactivating。改后 popover 窗口经辅助进程覆写的 `_stealKeyFocusWithOptions:` 成为 key，不动 Dock 的键盘焦点 |
 | 2026-11-10 | 删除确认改用真 `NSPopover` 收尾，第 6 批第 8 步完成：快进进 `main` 并推送，`feature/deletion-popover` 与它的 worktree 删除。本提案仍是 In Progress、不取号 | 用户在 26 虚拟机里看过改后的 popover，又从它真删了一个 App，之后要求收尾。第 6 批第 5 步的拖到 Dock 仍暂停，第 7 步的捏合仍待用户在真机上试。文档：实现说明改写了「删除 App」并补了辅助进程的新职责、目录树、验证与已知降级；项目 `CLAUDE.md` 同步了辅助进程的职责、消息文件与 15 虚拟机里造可删 App 的办法；术语表「抖动模式」一条更正了「复刻没做删除」的旧说法。没有给外部调用方的契约，不需要使用指南；没有新术语 |
+| 2026-11-11 | 两个全局变量改为运行时按类扫出来，构建档案与构建白名单一并取消 | 档案每条都要人工下固件包、建 IDA 库、从反汇编里读地址，漏一条整个功能就不生效（26.7 上发生过），而且它以 arm64e 切片的 UUID 为键，27 的 Dock.app 有两个切片两个 UUID。调研确认两个全局在 26 与 27 上都落在极小的 `__DATA,__common` 段里，可以按持有的对象是不是目标类的实例认出来；那个判断本身就是定义，不需要表来背书。细节与取舍见提案[在运行时找出 Dock 的两个全局变量，取消构建白名单](draft-runtime-dock-global-discovery.md) |

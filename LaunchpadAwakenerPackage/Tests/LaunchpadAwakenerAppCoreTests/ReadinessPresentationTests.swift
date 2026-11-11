@@ -24,7 +24,7 @@ struct ReadinessPresentationTests {
         Expectation(readiness: .killSwitchEngaged, title: "Paused", symbolName: "pause.circle.fill", tint: .paused, action: .turnLaunchpadBackOn),
         Expectation(readiness: .startupStopped(reason: "The daemon is registered but unreachable."), title: "Startup did not finish", symbolName: "exclamationmark.triangle.fill", tint: .caution, action: .injectNow),
         Expectation(readiness: .notInjected, title: "Not injected", symbolName: "bolt.horizontal.circle.fill", tint: .caution, action: .injectNow),
-        Expectation(readiness: .hooksNotInstalled(.unknownDockBuild(executableUUID: "0F1E")), title: "This Dock build is not supported", symbolName: "xmark.octagon.fill", tint: .critical, action: nil),
+        Expectation(readiness: .hooksNotInstalled(.incompatibleDockMethods), title: "This Dock does not match what the payload expects", symbolName: "xmark.octagon.fill", tint: .critical, action: nil),
         Expectation(readiness: .stalePayload, title: "Restart the Dock to update", symbolName: "clock.badge.exclamationmark.fill", tint: .caution, action: .restartDock),
         Expectation(readiness: .active, title: "Active", symbolName: "checkmark.circle.fill", tint: .positive, action: nil),
     ]
@@ -45,7 +45,7 @@ struct ReadinessPresentationTests {
     }
 
     @Test("hooks that did not install say why the Dock keeps opening the system's Apps", arguments: [
-        (PayloadInjectionCoordinator.ResidentPayload.HookState.incompatibleDockMethods, "This Dock does not match its build profile", "The Dock keeps opening the system's Apps: the methods the payload calls have different signatures."),
+        (PayloadInjectionCoordinator.ResidentPayload.HookState.incompatibleDockMethods, "This Dock does not match what the payload expects", "The Dock keeps opening the system's Apps: the methods the payload calls have different signatures."),
         (.failed(description: "Tile has no setter"), "The payload's hooks did not install", "The Dock keeps opening the system's Apps: one of them failed validation, so none were installed."),
         (.installed(hookCount: 0), "The payload has no hooks", "The Dock keeps opening the system's Apps: this build of the payload declares none."),
     ])
