@@ -84,6 +84,11 @@ struct DockProxySignatureTests {
         expectRequirements(DockDisplayDescriptorImplementation.methodRequirements, toMatch: [
             "notchBounds": "{CGRect={CGPoint=dd}{CGSize=dd}}16@0:8",
         ])
+        // Checked on first use rather than before the hooks: without it only the choice of display goes.
+        #expect(DockDisplayIdentityImplementation.runtimeClassName == "DisplayDescriptor")
+        expectRequirements(DockDisplayIdentityImplementation.methodRequirements, toMatch: [
+            "identifier": "I16@0:8",
+        ])
     }
 
     @Test func visibilityController() {

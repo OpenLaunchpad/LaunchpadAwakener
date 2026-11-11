@@ -2,7 +2,7 @@ import AppKit
 import LaunchpadAwakenerSpringboardCore
 import OSToolbox
 
-/// The springboard's window in the standalone app: borderless, over the whole main display at the level
+/// The springboard's window in the standalone app: borderless, over the whole of its display at the level
 /// macOS 15's Launchpad window took (27, above the menu bar's 24 and the Dock's 20), on every Space and
 /// over full-screen applications. The Dock cannot be raised above it from another process, so it is
 /// covered.

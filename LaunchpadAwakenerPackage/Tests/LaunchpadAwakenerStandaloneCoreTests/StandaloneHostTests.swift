@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 @testable import LaunchpadAwakenerSpringboardCore
@@ -95,5 +96,70 @@ struct StandaloneHostTests {
         #expect(databaseURL.lastPathComponent == "Launchpad.db")
         #expect(databaseURL.deletingLastPathComponent().lastPathComponent == "Standalone")
         #expect(databaseURL.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent == "LaunchpadAwakener")
+    }
+
+    // MARK: - The Dock's display
+
+    /// A 1512×982 built-in display with a 1366×1024 iPad through Sidecar to its right, in global coordinates
+    /// with a top-left origin, as `CGDisplayBounds` gives them.
+    private static let builtInAndSidecarDisplays: [(identifier: CGDirectDisplayID, bounds: CGRect)] = [
+        (identifier: 1, bounds: CGRect(x: 0, y: 0, width: 1512, height: 982)),
+        (identifier: 5, bounds: CGRect(x: 1512, y: 0, width: 1366, height: 1024)),
+    ]
+
+    @Test("the Dock is on the display holding the middle of its rectangle")
+    func dockOnTheSecondDisplay() {
+        let dockRect = CGRect(x: 1700, y: 930, width: 990, height: 94)
+        #expect(StandaloneEnvironment.display(holdingDockRect: dockRect, among: Self.builtInAndSidecarDisplays) == 5)
+    }
+
+    @Test("a Dock hidden below a display's bottom edge belongs to that display")
+    func hiddenDock() {
+        let dockRect = CGRect(x: 200, y: 982, width: 1100, height: 94)
+        #expect(StandaloneEnvironment.display(holdingDockRect: dockRect, among: Self.builtInAndSidecarDisplays) == 1)
+    }
+
+    @Test("a rectangle far from every display belongs to none")
+    func rectangleOffEveryDisplay() {
+        let dockRect = CGRect(x: 10_000, y: 10_000, width: 990, height: 94)
+        #expect(StandaloneEnvironment.display(holdingDockRect: dockRect, among: Self.builtInAndSidecarDisplays) == nil)
+    }
+
+    /// The window server of the machine the tests run on, asked as the standalone app asks it.
+    @Test(
+        "the window server's Dock rectangle lies on one of this machine's displays",
+        .enabled(if: CGMainDisplayID() != kCGNullDirectDisplay)
+    )
+    func dockDisplayOfThisMachine() throws {
+        let dockRect = try #require(SkyLightBridge.dockRect)
+        let dockDisplay = try #require(StandaloneEnvironment.dockDisplayIdentifier, "the Dock's rectangle \(dockRect) is on no display")
+        #expect(SpringboardDisplay.activeDisplays.contains(dockDisplay))
+    }
+
+    /// Pins the rectangle's coordinate space on a real system: turned from a top-left origin into AppKit's
+    /// bottom-left one, a Dock at the bottom that stays on screen ends where AppKit's visible frame of its
+    /// screen starts. A single display cannot tell the two origins apart by which display holds the Dock.
+    @Test(
+        "the window server's Dock rectangle has a top-left origin",
+        .enabled(if: Self.hasBottomDockThatStaysOnScreen)
+    )
+    @MainActor
+    func dockRectangleOrigin() throws {
+        let dockRect = try #require(SkyLightBridge.dockRect)
+        let zeroScreenHeight = try #require(NSScreen.screens.first).frame.height
+        let dockRectFromBottomLeft = CGRect(x: dockRect.minX, y: zeroScreenHeight - dockRect.maxY, width: dockRect.width, height: dockRect.height)
+        let dockScreen = try #require(NSScreen.screens.first { screen in
+            screen.frame.contains(CGPoint(x: dockRectFromBottomLeft.midX, y: dockRectFromBottomLeft.midY))
+        })
+        #expect(
+            abs(dockScreen.visibleFrame.minY - dockRectFromBottomLeft.maxY) <= 1,
+            "visible frame \(NSStringFromRect(dockScreen.visibleFrame)), the Dock from the bottom left \(NSStringFromRect(dockRectFromBottomLeft))"
+        )
+    }
+
+    private static var hasBottomDockThatStaysOnScreen: Bool {
+        let dockPreferences = UserDefaults(suiteName: "com.apple.dock")
+        let orientation = dockPreferences?.string(forKey: "orientation") ?? "bottom"
+        return orientation == "bottom" && dockPreferences?.bool(forKey: "autohide") == false && CGMainDisplayID() != kCGNullDirectDisplay
     }
 }
