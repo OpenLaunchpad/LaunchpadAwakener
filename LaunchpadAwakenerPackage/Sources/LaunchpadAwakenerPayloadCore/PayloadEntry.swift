@@ -93,7 +93,7 @@ public enum PayloadEntry {
             } else {
                 logger.error("The Dock's visibility controller lacks \(missingVisibilityMembers.joined(separator: ", "), privacy: .public); the Dock is left as it is")
             }
-            let missingDropMethods = DockDropTarget.missingMethods()
+            let missingDropMethods = DockDropTarget.missingMethodNames
             if missingDropMethods.isEmpty {
                 logger.info("The Dock's drag events match: an application dragged onto the Dock is kept there")
             } else {

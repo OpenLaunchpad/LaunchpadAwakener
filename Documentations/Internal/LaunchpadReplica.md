@@ -303,7 +303,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - Dock 在左右两侧时，满 5 行的文件夹常常不往下多伸那 30 点：15 的公式只在文件夹底边高于 30 点时才伸，侧放 Dock 时底边多半正好是 30。这时文件夹每页的格子比主页的矮 6 点，而界面层按主页的格子算拖动的落点与让位，会偏几点。这是按代码推断的，没有在真机上复现。
 - 文件夹开着时让 Dock 滑走，只在指针不在 Dock 上、Dock 没有键盘焦点时立刻开始，15 与 27.2 的 Dock 都是这样；Dock 藏起来时指针推到屏幕边会不会把它叫回来，没有验证。
 - 只在主显示器上显示。
-- 拖到 Dock：指针进入 Dock 栏之前，压在 Dock 上的那部分图标仍被 Dock 盖住（15 整个拖动都在 Dock 上方）。没有 15 那种悬停在 Dock 图标上的效果（弹开堆栈、悬停进 App Exposé），那些来自复刻不发的「在内移动」消息。开着放大时，松手后 Dock 可能一直放大到下一次鼠标移动（逆向推断，没有验证）。独立版不支持拖到 Dock：它的窗口盖住了 Dock。
+- 拖到 Dock：指针进入 Dock 栏之前，压在 Dock 上的那部分图标仍被 Dock 盖住（15 整个拖动都在 Dock 上方）。没有 15 那种悬停在 Dock 图标上的效果（弹开堆栈、悬停进 App Exposé），那些来自复刻不发的「在内移动」消息。开着放大时，松手后 Dock 可能一直放大到下一次鼠标移动（逆向推断，没有验证）。独立版不支持拖到 Dock：它的窗口盖住了 Dock。从文件夹里拖出的 App 松在废纸篓上不问删除：它回到了关着的文件夹里，没有自己的图标可以指向。
 - 新装 App 的蓝点：从 Launchpad 以外启动后，要到下次打开 Launchpad 才消失，并且依赖 Spotlight 记下的使用时间；关掉 Spotlight 索引时只有从 Launchpad 启动才会清掉。测试版 App 的黄点与屏幕使用时间的沙漏标记没有做。
 - macOS 26 上没有玻璃背景：26 的 `DockGlassMaterialLayerController` 用的是 `configureUsingConfiguration:` 与 `rebuildLayersWithEnvironment:`，签名核对不过，`springboard-background` 设成 `glass` 也退回带 15 三个滤镜的模糊。
 - macOS 26 上透明与着色图标的混合没有与 26 的 Dock 对照过：26 没有 `kCAFilterClearIconBlendMode`，复刻按 27 的映射在透明与浅色着色样式下不加滤镜、深色着色用 Screen，而 26 的 `-[DOCKTileLayer init]` 默认给格子图片的是 Screen。

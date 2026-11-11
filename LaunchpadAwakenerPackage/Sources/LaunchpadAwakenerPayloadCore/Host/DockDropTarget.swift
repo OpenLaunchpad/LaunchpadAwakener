@@ -137,16 +137,15 @@ final class DockDropTarget: SpringboardDockDropTarget {
             requirements: DockTileGeometryImplementation.methodRequirements
         )
 
-    /// The methods the running Dock lacks or has with another signature: empty when everything matches.
-    /// Logged once as the payload starts; a mismatch switches only dragging onto the Dock off.
-    nonisolated static func missingMethods() -> [String] {
-        requiredMethods.compactMap { signature in
-            signature.isPresent ? nil : signature.methodName
-        }
+    /// The methods the running Dock lacks or has with another signature, worked out once: empty when
+    /// everything matches. Logged as the payload starts; a mismatch switches only dragging onto the Dock off.
+    nonisolated static let missingMethodNames: [String] = requiredMethods.compactMap { signature in
+        signature.isPresent ? nil : signature.methodName
     }
 
-    /// Whether every method matches, worked out once.
-    nonisolated static let isCompatible: Bool = missingMethods().isEmpty
+    nonisolated static var isCompatible: Bool {
+        missingMethodNames.isEmpty
+    }
 
     func contains(_ globalPoint: CGPoint) -> Bool {
         guard let dockBar = DockBarReference.dockBar.flatMap({ DockBarDropReceptionImplementation($0) }) else { return false }
@@ -262,10 +261,12 @@ final class DockApplicationDrag: SpringboardDockDrag {
         end()
     }
 
-    /// The contents are cleared at once rather than once the DragLeave is handled. A frame running at
-    /// that moment then closes the gap a frame early, which the DragLeave would do anyway; and a drop is
-    /// queued only after the gap stopped following the pointer and a locked look-up waited out the frame
-    /// in progress, so no frame that could still move the gap reads the cleared contents.
+    /// The contents are cleared at once rather than once the DragLeave is handled. Handling a DragDrop does
+    /// not read them — whether the tile is an application's is the tile's own, set as it was made — on 26.6.2
+    /// or 27.2. A frame running at that moment closes the gap a frame early, which the DragLeave would do
+    /// anyway; and a drop is queued only after the gap stopped following the pointer and a locked look-up
+    /// waited out the frame in progress, so no frame that could still move the gap reads the cleared
+    /// contents.
     private func end() {
         guard !isOver else { return }
         isOver = true

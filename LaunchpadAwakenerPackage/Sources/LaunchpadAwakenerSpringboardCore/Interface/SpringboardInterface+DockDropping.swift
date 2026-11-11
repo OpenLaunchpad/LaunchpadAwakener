@@ -20,12 +20,12 @@ import QuartzCore
 extension SpringboardInterface {
     /// Follows the pointer onto and off the Dock; returns whether it is on the Dock now.
     func trackDock(at containerPoint: CGPoint) -> Bool {
-        guard let dragSession, dragSession.dockDropResult == nil else { return false }
-        if !dragSession.hasAskedForDockDropTarget {
-            dragSession.hasAskedForDockDropTarget = true
-            dragSession.dockDropTarget = resolveDockDropTarget()
-        }
-        guard let dockDropTarget = dragSession.dockDropTarget, let screenTopLeft else { return false }
+        guard
+            let dragSession,
+            dragSession.dockDropResult == nil,
+            let dockDropTarget = dragSession.dockDropTarget,
+            let screenTopLeft
+        else { return false }
         let globalPoint = screenTopLeft(CGRect(origin: containerPoint, size: .zero))
         let isOnDock = dockDropTarget.contains(globalPoint)
         switch (dragSession.isOverDock, isOnDock) {
@@ -64,7 +64,7 @@ extension SpringboardInterface {
         dragSession.dockDrag = nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        if dragSession.dragWindow != nil, dragSession.itemLayer.superlayer === dragSession.dragWindow?.containerLayer {
+        if dragSession.itemLayer.superlayer === dragSession.dragWindow?.containerLayer {
             containerLayer.addSublayer(dragSession.itemLayer)
         }
         CATransaction.commit()
@@ -107,13 +107,22 @@ extension SpringboardInterface {
 
     /// After a release on the Dock: the icon is back in its place at once, and a release on the Trash asks
     /// to delete the application, if it can be deleted, from that place.
+    ///
+    /// The place is looked for in the open folder, then on the main pages: putting the icon back may have
+    /// started closing a folder the drag held open, which stays on screen while it closes. An application
+    /// back inside a closed folder has no icon of its own to ask from, and is not asked about. The page was
+    /// just rebuilt, so its icon is laid out before the popover is placed by it.
     func finishDropOnDock(_ result: SpringboardDockDropResult) {
         guard let dragSession else { return }
         let draggedItem = dragSession.item
         cancelDrag(slidingBack: false)
         guard result == .trash, case .application(let application) = draggedItem, canDelete(application) else { return }
-        let context: GridContext = folderPanel == nil ? .main : .folder
-        guard let itemLayer = pages(for: context).itemLayers.first(where: { $0.item?.identifier == application.identifier }) else { return }
-        presentDeletionPanel(for: itemLayer, context: context)
+        let contexts: [GridContext] = folderPanel == nil ? [.main] : [.folder, .main]
+        for context in contexts {
+            guard let itemLayer = pages(for: context).itemLayers.first(where: { $0.item?.identifier == application.identifier }) else { continue }
+            itemLayer.layoutIfNeeded()
+            presentDeletionPanel(for: itemLayer, context: context)
+            return
+        }
     }
 }

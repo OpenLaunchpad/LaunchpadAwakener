@@ -86,6 +86,21 @@ struct SpringboardDockDroppingTests {
         var edits: [LaunchpadEdit] = []
     }
 
+    final class RecordingDeletionConfirmation: SpringboardHostedDeletionConfirmation {
+        let configuration: SpringboardHostedDeletionConfirmationConfiguration
+        var answerHandler: ((SpringboardDeletionChoice) -> Void)?
+        var presentationDidFail: (() -> Void)?
+        var interruptionHandler: (() -> Void)?
+
+        init(configuration: SpringboardHostedDeletionConfirmationConfiguration) {
+            self.configuration = configuration
+        }
+
+        func present() {}
+
+        func dismiss() {}
+    }
+
     // MARK: - The springboard
 
     private static let metrics = SpringboardMetrics(
@@ -114,12 +129,13 @@ struct SpringboardDockDroppingTests {
 
     private static let calculator = application(10, title: "Calculator")
     private static let terminal = application(11, title: "Terminal")
+    private static let folderIdentifier = LaunchpadItemIdentifier(rowIdentifier: 50)
 
     private static let layout = LaunchpadLayout(pages: [
         LaunchpadPage(identifier: LaunchpadItemIdentifier(rowIdentifier: 1), items: [
             .application(calculator),
             .folder(LaunchpadFolder(
-                identifier: LaunchpadItemIdentifier(rowIdentifier: 50),
+                identifier: folderIdentifier,
                 title: "Utilities",
                 pages: [
                     LaunchpadFolderPage(
@@ -145,9 +161,9 @@ struct SpringboardDockDroppingTests {
         let editLog: EditLog
     }
 
-    private static func makeFixture(dropResult: SpringboardDockDropResult = .kept) -> Fixture {
+    private static func makeFixture(dropResult: SpringboardDockDropResult = .kept, position: SpringboardPosition = .firstPage) -> Fixture {
         let editLog = EditLog()
-        let interface = SpringboardInterface(layout: layout, metrics: metrics, scale: 2, rootLayer: CALayer(), applyEdit: { editLog.edits.append($0) })
+        let interface = SpringboardInterface(layout: layout, metrics: metrics, scale: 2, rootLayer: CALayer(), position: position, applyEdit: { editLog.edits.append($0) })
         let dockDropTarget = RecordingDockDropTarget()
         dockDropTarget.dropResult = dropResult
         interface.resolveDockDropTarget = { dockDropTarget }
@@ -316,6 +332,24 @@ struct SpringboardDockDroppingTests {
         #expect(dockDrag.drops.isEmpty)
     }
 
+    @Test("going while a search result on the Dock still leaves the search, the icon fades with the springboard")
+    func hidingWhileLeavingSearchOnDock() throws {
+        let fixture = Self.makeFixture()
+        defer { fixture.interface.tearDown() }
+        let dragSession = try Self.pickUp(itemAt: 0, in: fixture.interface)
+        // As for a dragged search result until the results have faded out.
+        dragSession.isLeavingSearch = true
+        _ = fixture.interface.handleMouseDragged(to: Self.pointOnDock, timestamp: Self.time(2))
+        #expect(dragSession.isOverDock)
+
+        fixture.interface.prepareForHiding()
+
+        // Back under the springboard's own container, which the exit animation fades out.
+        #expect(dragSession.itemLayer.superlayer === fixture.interface.containerLayer)
+        #expect(dragSession.itemLayer.opacity == 1)
+        #expect(fixture.dockDropTarget.drags.first?.cancelCount == 1)
+    }
+
     @Test("torn down mid-drag, the springboard leaves no gap and no window behind")
     func tearDownOnDock() throws {
         let fixture = Self.makeFixture()
@@ -347,6 +381,66 @@ struct SpringboardDockDroppingTests {
         #expect(question.application.identifier == Self.calculator.identifier)
         #expect(question.itemLayer === fixture.interface.mainPages.currentPageGrid?.itemLayers.first)
         #expect(fixture.editLog.edits.isEmpty)
+    }
+
+    @Test("the popover for a release on the Trash hangs from the icon, back in its place")
+    func trashPopoverHangsFromIcon() throws {
+        let fixture = Self.makeFixture(dropResult: .trash)
+        defer { fixture.interface.tearDown() }
+        let bundlePath = try #require(Self.calculator.bundleURL?.path)
+        fixture.interface.deletabilityByBundlePath[bundlePath] = true
+        var presentedConfiguration: SpringboardHostedDeletionConfirmationConfiguration?
+        fixture.interface.makeHostedDeletionConfirmation = { configuration in
+            presentedConfiguration = configuration
+            return RecordingDeletionConfirmation(configuration: configuration)
+        }
+        _ = try Self.pickUp(itemAt: 0, in: fixture.interface)
+        _ = fixture.interface.handleMouseDragged(to: Self.pointOnDock, timestamp: Self.time(2))
+
+        _ = fixture.interface.handleMouseUp(at: Self.pointOnDock, timestamp: Self.time(3))
+
+        // The page was rebuilt for the drop; the icon is where its laid-out image is.
+        let configuration = try #require(presentedConfiguration)
+        let homeLayer = try #require(fixture.interface.mainPages.currentPageGrid?.itemLayers.first)
+        homeLayer.layoutIfNeeded()
+        let iconFrame = homeLayer.imageLayer.convert(homeLayer.imageLayer.bounds, to: fixture.interface.containerLayer)
+        #expect(!iconFrame.isEmpty)
+        #expect(configuration.screenIconCenter == CGPoint(x: iconFrame.midX, y: 956 - iconFrame.midY))
+    }
+
+    @Test("let go on the Trash while a folder is open, the application put back on the main page is asked about")
+    func trashWithFolderOpen() throws {
+        // Opened over the folder, with an application of the main page picked up behind it: what a folder
+        // held open by the dragged icon and then left for the Dock in one move leaves behind.
+        let fixture = Self.makeFixture(
+            dropResult: .trash,
+            position: SpringboardPosition(openFolder: SpringboardPosition.OpenFolder(identifier: Self.folderIdentifier, pageIndex: 0))
+        )
+        defer { fixture.interface.tearDown() }
+        #expect(fixture.interface.folderPanel != nil)
+        let bundlePath = try #require(Self.calculator.bundleURL?.path)
+        fixture.interface.deletabilityByBundlePath[bundlePath] = true
+        fixture.interface.makeHostedDeletionConfirmation = { _ in nil }
+        let itemLayer = try #require(fixture.interface.mainPages.currentPageGrid?.itemLayers.first)
+        itemLayer.layoutIfNeeded()
+        let iconFrame = itemLayer.convert(itemLayer.iconFrame, to: fixture.interface.containerLayer)
+        let start = CGPoint(x: iconFrame.midX, y: iconFrame.midY)
+        fixture.interface.beginDrag(
+            of: itemLayer,
+            context: .main,
+            pageIndex: 0,
+            itemIndex: 0,
+            startLocation: start,
+            location: CGPoint(x: start.x + 10, y: start.y),
+            timestamp: Self.time(1)
+        )
+        _ = fixture.interface.handleMouseDragged(to: Self.pointOnDock, timestamp: Self.time(2))
+
+        _ = fixture.interface.handleMouseUp(at: Self.pointOnDock, timestamp: Self.time(3))
+
+        let question = try #require(fixture.interface.deletionQuestion)
+        #expect(question.application.identifier == Self.calculator.identifier)
+        #expect(question.context == .main)
     }
 
     @Test("let go on the Trash, an application that cannot be deleted is only put back")

@@ -59,10 +59,9 @@ final class SpringboardDragSession {
     /// is stored only by the drop.
     var unsavedFolderTarget: (application: LaunchpadApplication, title: String)?
 
-    /// The Dock as a place to drop the icon, asked for on the first move; see
+    /// The Dock as a place to drop the icon, asked for once as the drag starts; see
     /// `SpringboardInterface+DockDropping.swift`.
-    var dockDropTarget: (any SpringboardDockDropTarget)?
-    var hasAskedForDockDropTarget = false
+    let dockDropTarget: (any SpringboardDockDropTarget)?
     /// Set while the pointer is on the Dock: the Dock has the icon, which rides above it dimmed to half,
     /// and nothing in the springboard responds to where it is.
     var isOverDock = false
@@ -96,9 +95,11 @@ final class SpringboardDragSession {
         grabOffset: CGPoint,
         location: CGPoint,
         timestamp: UInt64,
-        origin: SpringboardDragging.Location
+        origin: SpringboardDragging.Location,
+        dockDropTarget: (any SpringboardDockDropTarget)?
     ) {
         self.item = item
+        self.dockDropTarget = dockDropTarget
         self.itemLayer = itemLayer
         switch origin {
         case let .mainPage(originPageIndex, originItemIndex):
@@ -202,7 +203,8 @@ extension SpringboardInterface {
             grabOffset: CGPoint(x: frameInContainer.midX - startLocation.x, y: frameInContainer.midY - startLocation.y),
             location: location,
             timestamp: timestamp,
-            origin: origin
+            origin: origin,
+            dockDropTarget: resolveDockDropTarget()
         )
         if isShowingSearchResults {
             leaveSearchForDraggedResult()
@@ -900,6 +902,9 @@ extension SpringboardInterface {
     /// Ends the drag. One that ended in a folder it opened leaves the main page with its gap until that
     /// folder closes.
     func finishDrag() {
+        // An icon still on the Dock — a search result whose drag ends as the springboard goes — comes back
+        // under the springboard first, to go with everything else rather than with the Dock's window.
+        leaveDock()
         if let dragSession, let mainPageArrangement = dragSession.mainPageArrangement, folderPanel != nil {
             mainPagePlaceholder = mainPageArrangement
         }
