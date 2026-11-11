@@ -307,6 +307,8 @@ final class SpringboardInterface {
         // (`-[Springboard setVisible:slow:forGaming:reason:]`, 15.5 `0x100091764`).
         answerDeletionPanel(.cancel)
         if let dragSession {
+            // Under the springboard, the dragged icon goes with everything else.
+            bringDraggedIconIntoSpringboard()
             if dragSession.isLeavingSearch {
                 // Going now: a search result still on its way out of the search fades out with everything
                 // else where it is, and the next showing opens on the page shown before the search, as

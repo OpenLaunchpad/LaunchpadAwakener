@@ -65,7 +65,7 @@ extension SpringboardInterface {
         }
         let unsavedFolder = LaunchpadFolder.unsaved(title: title, applications: [targetApplication, draggedApplication])
         let targetFlight = SpringboardIconFlight.makeFlyingLayer(copying: targetLayer.imageLayer, in: targetLayer)
-        let draggedFlight = SpringboardIconFlight.makeFlyingLayer(copying: dragSession.itemLayer.imageLayer, in: targetLayer)
+        let draggedFlight = SpringboardIconFlight.makeFlyingLayer(copying: dragSession.itemLayer.imageLayer, frame: draggedImageFrame(in: targetLayer))
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -102,6 +102,13 @@ extension SpringboardInterface {
         }
     }
 
+    /// The dragged icon's image in `destinationLayer`'s coordinates, by way of the container: the icon rides
+    /// in the window above the Dock, a layer tree of its own.
+    private func draggedImageFrame(in destinationLayer: CALayer) -> CGRect {
+        guard let imageLayer = dragSession?.itemLayer.imageLayer else { return .zero }
+        return destinationLayer.convert(rectInContainer(imageLayer.bounds, of: imageLayer), from: containerLayer)
+    }
+
     // MARK: - Dropping onto a folder
 
     /// A release over a folder before it opened (4.11.2). The dragged image shrinks into the thumbnail of
@@ -117,7 +124,7 @@ extension SpringboardInterface {
         let firstPageApplications = updatedFolder.pages.first?.applications ?? []
         let slot = max(firstPageApplications.count - 1, 0)
         let isNewThumbnail = firstPageApplications.last?.identifier == draggedApplication.identifier
-        let flight = SpringboardIconFlight.makeFlyingLayer(copying: dragSession.itemLayer.imageLayer, in: folderItemLayer)
+        let flight = SpringboardIconFlight.makeFlyingLayer(copying: dragSession.itemLayer.imageLayer, frame: draggedImageFrame(in: folderItemLayer))
 
         folderItemLayer.endDropTargetAfterDrop()
         folderItemLayer.isHeldStill = false

@@ -13,11 +13,61 @@ import QuartzCore
 /// `-[ECSBDragCapture leftMouseUp:in:]`, `0x1000B65B0`); let go on the Trash, the springboard asks to delete
 /// the application if it can be deleted (`-[ECSBSpringboard confirmRemoveItem:]`, `0x1000F5FF0`).
 ///
-/// The Dock's windows sit above the springboard's, so on the Dock the icon rides in a transparent window
-/// above them, laid out like ``containerLayer``: 15 carried every dragged icon in such a window. Only while
-/// it is on the Dock, though — the rest of the drag converts the icon's geometry into the pages', which
-/// works only while both are in the same layer tree.
+/// The Dock's windows sit above the springboard's, so the dragged icon rides in a transparent window above
+/// them for the whole drag, as 15 carried every dragged icon in a window at the dragging level
+/// (`-[ECSBDragCapture _beginDragOfItemLayerWithEvent:itemFrame:]`, 15.5 `0x1000B4B98`): an icon that is
+/// partly over the Dock would otherwise slip under it. That window's layer is laid out like
+/// ``containerLayer`` but is a layer tree of its own, so the icon's geometry reaches the pages through
+/// ``rectInContainer(_:of:)``.
 extension SpringboardInterface {
+    // MARK: - Above the Dock
+
+    /// Moves the icon just picked up into a window above the Dock, where the host offers one, for the rest
+    /// of the drag. The window's layer is laid out like ``containerLayer``, so the icon keeps its frame.
+    func carryDraggedIconAboveDock() {
+        guard
+            let dragSession,
+            dragSession.dragWindow == nil,
+            let window = dragSession.dockDropTarget?.makeDragWindow()
+        else { return }
+        let windowContainerLayer = CALayer()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        windowContainerLayer.frame = containerLayer.frame
+        windowContainerLayer.isGeometryFlipped = window.rootLayer.contentsAreFlipped()
+        window.rootLayer.addSublayer(windowContainerLayer)
+        windowContainerLayer.addSublayer(dragSession.itemLayer)
+        CATransaction.commit()
+        window.orderIn()
+        dragSession.dragWindow = (window, windowContainerLayer)
+    }
+
+    /// Brings an icon still above the Dock back under the springboard, keeping its frame: as the
+    /// springboard goes, the icon goes with everything else rather than staying in sight above it.
+    func bringDraggedIconIntoSpringboard() {
+        guard
+            let dragSession,
+            let windowContainerLayer = dragSession.dragWindow?.containerLayer,
+            dragSession.itemLayer.superlayer === windowContainerLayer
+        else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        containerLayer.addSublayer(dragSession.itemLayer)
+        CATransaction.commit()
+    }
+
+    /// `rect` of `layer` — the dragged icon or a layer inside it — in ``containerLayer``'s coordinates,
+    /// wherever the icon is. The window above the Dock is laid out like the container, but `convert(_:to:)`
+    /// does not promise to reach from one layer tree into another.
+    func rectInContainer(_ rect: CGRect, of layer: CALayer) -> CGRect {
+        if let windowContainerLayer = dragSession?.dragWindow?.containerLayer, dragSession?.itemLayer.superlayer === windowContainerLayer {
+            return layer.convert(rect, to: windowContainerLayer)
+        }
+        return layer.convert(rect, to: containerLayer)
+    }
+
+    // MARK: - On the Dock
+
     /// Follows the pointer onto and off the Dock; returns whether it is on the Dock now.
     func trackDock(at containerPoint: CGPoint) -> Bool {
         guard
@@ -41,60 +91,30 @@ extension SpringboardInterface {
         return isOnDock
     }
 
-    /// The pointer came onto the Dock: the springboard stops responding, the icon rides above the Dock at
-    /// half its opacity, as 15 dimmed it, and an application is handed to the Dock.
+    /// The pointer came onto the Dock: the springboard stops responding, the icon dims to half, as 15
+    /// dimmed it, and an application is handed to the Dock.
     private func enterDock(_ dockDropTarget: any SpringboardDockDropTarget, at globalPoint: CGPoint) {
         guard let dragSession else { return }
         dragSession.isOverDock = true
         dragSession.cancelTimers()
         endHover()
-        carryDraggedIconAboveDock(dockDropTarget)
         dragSession.itemLayer.opacity = 0.5
         if case .application(let application) = dragSession.item, let bundleURL = application.bundleURL {
             dragSession.dockDrag = dockDropTarget.beginDrag(ofApplicationAt: bundleURL, at: globalPoint)
         }
     }
 
-    /// The pointer left the Dock, or the drag is ending: the Dock closes its gap, and an icon still in the
-    /// window above the Dock is back in the springboard, at full opacity — over the usual quarter of a second
-    /// while it is still dragged, at once when the drag ends, so that it goes with everything else.
+    /// The pointer left the Dock, or the drag is ending: the Dock closes its gap, and the icon is back at
+    /// full opacity — over the usual quarter of a second while it is still dragged, at once when the drag
+    /// ends, so that it does not brighten while everything else fades out.
     func leaveDock(animated: Bool = true) {
         guard let dragSession, dragSession.isOverDock else { return }
         dragSession.isOverDock = false
         dragSession.dockDrag?.cancel()
         dragSession.dockDrag = nil
         CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        // Only from that window: an icon put into a page or taken away meanwhile stays where it is.
-        if let windowContainerLayer = dragSession.dragWindow?.containerLayer, dragSession.itemLayer.superlayer === windowContainerLayer {
-            containerLayer.addSublayer(dragSession.itemLayer)
-        }
-        CATransaction.commit()
-        CATransaction.begin()
         CATransaction.setDisableActions(!animated)
         dragSession.itemLayer.opacity = 1
-        CATransaction.commit()
-    }
-
-    /// Moves the dragged icon into the window above the Dock, making that window the first time. The
-    /// window's layer is laid out like ``containerLayer``, so the icon keeps its frame.
-    private func carryDraggedIconAboveDock(_ dockDropTarget: any SpringboardDockDropTarget) {
-        guard let dragSession else { return }
-        if dragSession.dragWindow == nil, let window = dockDropTarget.makeDragWindow() {
-            let windowContainerLayer = CALayer()
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            windowContainerLayer.frame = containerLayer.frame
-            windowContainerLayer.isGeometryFlipped = window.rootLayer.contentsAreFlipped()
-            window.rootLayer.addSublayer(windowContainerLayer)
-            CATransaction.commit()
-            window.orderIn()
-            dragSession.dragWindow = (window, windowContainerLayer)
-        }
-        guard let windowContainerLayer = dragSession.dragWindow?.containerLayer else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        windowContainerLayer.addSublayer(dragSession.itemLayer)
         CATransaction.commit()
     }
 
