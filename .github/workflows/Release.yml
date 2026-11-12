@@ -25,7 +25,7 @@ jobs:
   release:
     runs-on: xcode-27
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Check the signing and notarization secrets
@@ -58,13 +58,13 @@ jobs:
           fi
       - name: Keep the products
         if: success() && github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: products
           path: ${{ runner.temp }}/AppRelease/*/*/Products
       - name: Keep the logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-logs
           path: ${{ runner.temp }}/AppRelease/*/*/logs

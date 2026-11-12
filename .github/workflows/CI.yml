@@ -19,7 +19,7 @@ jobs:
     # Nothing here touches the Dock or puts a window on screen; see Package.swift's test targets.
     runs-on: xcode-27
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Test
         working-directory: LaunchpadAwakenerPackage
         run: swift test
@@ -31,7 +31,7 @@ jobs:
     # build that fails any of those has passed every unit test before.
     runs-on: xcode-27
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build
         # No development certificate lives here, so the build is signed ad hoc.
         run: >-
@@ -39,7 +39,7 @@ jobs:
           -- CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
       - name: Keep the build log
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-logs
           path: Products/Logs
