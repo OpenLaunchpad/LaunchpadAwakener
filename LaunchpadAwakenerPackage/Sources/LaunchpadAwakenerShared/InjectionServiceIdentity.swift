@@ -27,6 +27,14 @@ public enum InjectionServiceIdentity {
     /// under this name, so the two stay in step automatically.
     public static var daemonPropertyListName: String { "\(machServiceName).plist" }
 
+    /// File name of the daemon's executable inside `Contents/Library/LaunchServices/`.
+    ///
+    /// The daemon target's product name, the same in every configuration: Xcode does not evaluate a
+    /// file reference's path per configuration, so an executable named after the service would leave
+    /// the Embed Daemon copy looking for the Debug name in a Release build. The payload compares its
+    /// host's executable name against this to tell that it was loaded inside the daemon.
+    public static let daemonExecutableName = "LaunchpadAwakenerDaemon"
+
     /// Version string the daemon reports over XPC.
     ///
     /// The app compares this against the running daemon and reinstalls on mismatch, which is what

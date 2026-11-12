@@ -63,13 +63,18 @@ public enum PayloadEntry {
 
     /// Whether this copy of the payload was loaded into the privileged daemon rather than a target.
     ///
-    /// Identified by executable name: the daemon's product name is its Mach service name, which is
-    /// exactly the constant the payload already shares with it. Deriving the check from that one
-    /// constant is why this needs no environment variable and no second place to keep in sync.
+    /// Identified by executable name: the daemon's executable is named by a constant the payload already
+    /// shares with it, so the check needs no environment variable.
     private static var isRunningInsideInjector: Bool {
         let executableName = (CommandLine.arguments.first as NSString?)?.lastPathComponent
             ?? ProcessInfo.processInfo.processName
-        return executableName == InjectionServiceIdentity.machServiceName
+        return isInjectorExecutable(named: executableName)
+    }
+
+    /// Whether `executableName` is the daemon's. Not its Mach service name: the executable keeps one name
+    /// in every configuration, while the service name differs between Debug and Release.
+    static func isInjectorExecutable(named executableName: String) -> Bool {
+        executableName == InjectionServiceIdentity.daemonExecutableName
     }
 
     /// Installs what the springboard can do without, as a batch of its own; returns how many hooks went in.
