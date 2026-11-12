@@ -2,8 +2,10 @@ name: Release
 
 # Pushing a tag v<MARKETING_VERSION>, such as v1.0, releases that commit: archive, Developer ID export,
 # notarization and the zip, then a GitHub Release with the zip. Running the workflow by hand does all of
-# that except the release, and keeps the products as an artifact. Release.zsh describes the release to
-# AppRelease (https://github.com/Mx-Iris/AppRelease).
+# that except the release, and keeps the products as an artifact: a rehearsal of the next version, which
+# works only once MARKETING_VERSION is raised and before its tag exists, since AppRelease refuses a
+# version whose tag already sits on another commit. Release.zsh describes the release to AppRelease
+# (https://github.com/Mx-Iris/AppRelease).
 on:
   push:
     tags: ['v*']
