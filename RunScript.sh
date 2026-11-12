@@ -18,6 +18,7 @@
 #   ./RunScript.sh --update-packages   # refresh SPM pins first
 #   ./RunScript.sh --clean             # wipe this script's DerivedData first
 #   ./RunScript.sh --dry-run           # print commands without running
+#   ./RunScript.sh --no-launch -- CODE_SIGN_IDENTITY=-   # pass what follows -- to xcodebuild
 #   ./RunScript.sh --help
 set -euo pipefail
 
@@ -41,6 +42,9 @@ UPDATE_PACKAGES=false
 CLEAN=false
 LAUNCH=true
 DRY_RUN=false
+# Whatever follows `--`, appended to the xcodebuild invocation: build settings such as the ad hoc
+# signing CI uses, where no development certificate exists.
+EXTRA_BUILD_ARGUMENTS=()
 
 fail() { echo "error: $*" >&2; exit 1; }
 log()  { echo "[RunScript] $*"; }
@@ -91,7 +95,8 @@ while [[ $# -gt 0 ]]; do
         --clean) CLEAN=true; shift;;
         --no-launch) LAUNCH=false; shift;;
         --dry-run) DRY_RUN=true; shift;;
-        -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+        --) shift; EXTRA_BUILD_ARGUMENTS=("$@"); break;;
+        -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
         *) fail "unknown argument: $1";;
     esac
 done
@@ -172,7 +177,8 @@ XCODEBUILD_LOG_NAME="build" run_piped xcodebuild build \
     -destination 'generic/platform=macOS' \
     -derivedDataPath "$DERIVED_DATA" \
     -IDEEnableNewPackagePIFBuilder=NO \
-    -skipPackagePluginValidation -skipMacroValidation
+    -skipPackagePluginValidation -skipMacroValidation \
+    ${EXTRA_BUILD_ARGUMENTS[@]+"${EXTRA_BUILD_ARGUMENTS[@]}"}
 
 PRODUCTS_DIR="$DERIVED_DATA/Build/Products/$CONFIGURATION"
 APP_PATH="$PRODUCTS_DIR/LaunchpadAwakener.app"

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The project needs Xcode 27's macOS 27 SDK; the xcode-27 image defaults to an older point release.
+  DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+
+jobs:
+  test:
+    name: Unit tests
+    # Nothing here touches the Dock or puts a window on screen; see Package.swift's test targets.
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        working-directory: LaunchpadAwakenerPackage
+        run: swift test
+
+  build:
+    name: Release build
+    # The configuration that ships. RunScript.sh checks the arm64e slices of the daemon and the payload,
+    # the executables both launchd property lists start, and the embedded standalone app; a Release
+    # build that fails any of those has passed every unit test before.
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        # No development certificate lives here, so the build is signed ad hoc.
+        run: >-
+          ./RunScript.sh --no-launch --configuration Release --derived-data "$RUNNER_TEMP/DerivedData"
+          -- CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
+      - name: Keep the build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: Products/Logs

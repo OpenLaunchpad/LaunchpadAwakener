@@ -1,0 +1,68 @@
+name: Release
+
+# Pushing a tag v<MARKETING_VERSION>, such as v1.0, releases that commit: archive, Developer ID export,
+# notarization and the zip, then a GitHub Release with the zip. Running the workflow by hand does all of
+# that except the release, and keeps the products as an artifact. Release.zsh describes the release to
+# AppRelease (https://github.com/Mx-Iris/AppRelease).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+
+permissions:
+  contents: write
+
+env:
+  # The project needs Xcode 27's macOS 27 SDK; the xcode-27 image defaults to an older point release.
+  DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+
+jobs:
+  release:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check the signing and notarization secrets
+        # They are organization secrets. On GitHub's Free plan those reach public repositories only, and
+        # without them AppRelease would look for a login keychain that a runner does not have.
+        env:
+          DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+        run: |
+          if [[ -z "$DEVELOPER_ID_CERTIFICATE_BASE64" || -z "$NOTARY_KEY_BASE64" ]]; then
+            echo "::error::The Developer ID certificate or the notary key is not available to this repository."
+            exit 1
+          fi
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_RELEASE_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APP_RELEASE_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APP_RELEASE_NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          APP_RELEASE_NOTARY_KEY_IDENTIFIER: ${{ secrets.NOTARY_KEY_IDENTIFIER }}
+          APP_RELEASE_NOTARY_ISSUER_IDENTIFIER: ${{ secrets.NOTARY_ISSUER_IDENTIFIER }}
+          APP_RELEASE_OUTPUT_ROOT: ${{ runner.temp }}/AppRelease
+        run: |
+          engine_version=$(sed -nE 's/^release_engine_version=([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' Release.zsh)
+          git clone --quiet --depth 1 --branch "$engine_version" https://github.com/Mx-Iris/AppRelease "$RUNNER_TEMP/AppRelease-Engine"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            "$RUNNER_TEMP/AppRelease-Engine/app-release" all --version-tag "$GITHUB_REF_NAME" --publish
+          else
+            "$RUNNER_TEMP/AppRelease-Engine/app-release" all
+          fi
+      - name: Keep the products
+        if: success() && github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: products
+          path: ${{ runner.temp }}/AppRelease/*/*/Products
+      - name: Keep the logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-logs
+          path: ${{ runner.temp }}/AppRelease/*/*/logs

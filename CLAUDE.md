@@ -99,6 +99,7 @@ hook 与 Dock 自己的类（Dock 不导出任何类）用 FrameworkToolbox 的 
 ./RunScript.sh --no-launch  # 只构建
 ./RunScript.sh --dry-run    # 只打印命令
 ./RunScript.sh --scheme LaunchpadAwakenerStandalone  # 构建独立版；从不启动它
+./RunScript.sh --no-launch -- CODE_SIGN_IDENTITY=-   # -- 之后的参数原样交给 xcodebuild，CI 靠它做临时签名
 ```
 
 独立版不注入，不需要 arm64e 切片，脚本也不替它核对切片。
@@ -133,6 +134,8 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 - **嵌入脚本压缩前由内向外重签独立版的拷贝**：嵌入框架时 Xcode 只重签框架本身，框架 Resources 里带可执行文件的 bundle（AppKitPlus 的 `AppKitPlusSpriteKitAssets.bundle`）留着厂商的 Apple Development 签名、没有时间戳；外层 App 里的那份由导出重签，zip 里的那份没人管，公证因此被拒过一次。脚本用这次构建的签名身份，先签这类 bundle，再签框架，最后签 App；`OTHER_CODE_SIGN_FLAGS` 带 `--timestamp` 时才加时间戳，所以 Debug 构建不需要联网。
 - **两个钩子补上引擎不查的东西**：daemon 与 payload 带 arm64e、两个 launchd plist 指向的程序在包里、zip 里有独立版；导出后，导出包和 zip 里的独立版中每一个 Mach-O 文件都要是这个团队的 Developer ID 签名、带时间戳，daemon、输入法辅助进程与独立版还要开着硬化运行时。
 - agent 试跑时把产物和构建目录都放进自己的目录，只跑到导出：`APP_RELEASE_OUTPUT_ROOT=/Volumes/DerivedData/Agents.noindex/<agent>/AppRelease/LaunchpadAwakener app-release all --skip-notarization --derived-data-path /Volumes/DerivedData/Agents.noindex/<agent>/DerivedData/LaunchpadAwakener`。公证会把 App 传给 Apple，`--publish` 会推 tag、建 GitHub Release，用户没要求就不做。
+- **CI**：`.github/workflows/CI.yml` 在推到 main 和开 PR 时跑单元测试，并用临时签名编一次 Release（CI 上没有开发证书），借 RunScript 的检查盯住切片、plist 与嵌入的独立版。`Release.yml` 在推送 `v<MARKETING_VERSION>` 形式的 tag（如 `v1.0`）时完整发布并建 GitHub Release；在 Actions 页面手动运行则跑到打 zip 为止，产物留作 artifact，不发布。两者都用 GitHub 的 `xcode-27` 预览镜像，`DEVELOPER_DIR` 指定 Xcode 27.2。
+- **签名与公证的 secret 放在 OpenLaunchpad 组织级**（`DEVELOPER_ID_CERTIFICATE_*`、`NOTARY_*`），由 workflow 转成 AppRelease 认的 `APP_RELEASE_*` 环境变量。组织是免费套餐，组织级 secret 只给公开仓库用：仓库公开之前，`Release.yml` 会在第一步就报出拿不到证书。
 
 2026-11-12 完整跑通到打 zip：公证通过、票据已装订，Gatekeeper 认它是公证过的 App；没有 `--publish`，也还没在测试机上装过这个包。
 
