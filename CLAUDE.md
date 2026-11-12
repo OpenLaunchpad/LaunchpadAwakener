@@ -129,11 +129,12 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 用 [AppRelease](https://github.com/Mx-Iris/AppRelease) 发布，配置是根目录的 `Release.zsh`：`app-release all` 依次归档、导出 Developer ID、公证、装订公证票据、打 zip，加 `--publish` 才打 tag 并建 GitHub Release。版本号取注入版 target 的 `MARKETING_VERSION`。
 
 - **归档时就签 Developer ID 并带时间戳**（`release_archive_arguments`）：独立版压在 `Contents/Resources/Launchpad.zip` 里，导出时签不到它，公证服务却会检查 zip 里面。
-- **独立版 target 设了 `SKIP_INSTALL = YES`**：不设它会和注入版一起装进归档，归档就成了导出拒收的「通用归档」。归档时 `BUILT_PRODUCTS_DIR` 里的独立版只是一个符号链接，所以嵌入脚本先解析出真实路径再压缩。
-- **两个钩子补上引擎不查的东西**：daemon 与 payload 带 arm64e、两个 launchd plist 指向的程序在包里、zip 里有独立版；导出后再逐个确认 daemon、输入法辅助进程、payload 与 zip 里的独立版都是这个团队的 Developer ID 签名、带时间戳。
+- **独立版 target 设了 `SKIP_INSTALL = YES`**：不设它会和注入版一起装进归档，归档就成了导出拒收的「通用归档」。归档时 `BUILT_PRODUCTS_DIR` 里的独立版只是一个符号链接，所以嵌入脚本先解析出真实路径。
+- **嵌入脚本压缩前由内向外重签独立版的拷贝**：嵌入框架时 Xcode 只重签框架本身，框架 Resources 里带可执行文件的 bundle（AppKitPlus 的 `AppKitPlusSpriteKitAssets.bundle`）留着厂商的 Apple Development 签名、没有时间戳；外层 App 里的那份由导出重签，zip 里的那份没人管，公证因此被拒过一次。脚本用这次构建的签名身份，先签这类 bundle，再签框架，最后签 App；`OTHER_CODE_SIGN_FLAGS` 带 `--timestamp` 时才加时间戳，所以 Debug 构建不需要联网。
+- **两个钩子补上引擎不查的东西**：daemon 与 payload 带 arm64e、两个 launchd plist 指向的程序在包里、zip 里有独立版；导出后，导出包和 zip 里的独立版中每一个 Mach-O 文件都要是这个团队的 Developer ID 签名、带时间戳，daemon、输入法辅助进程与独立版还要开着硬化运行时。
 - agent 试跑时把产物和构建目录都放进自己的目录，只跑到导出：`APP_RELEASE_OUTPUT_ROOT=/Volumes/DerivedData/Agents.noindex/<agent>/AppRelease/LaunchpadAwakener app-release all --skip-notarization --derived-data-path /Volumes/DerivedData/Agents.noindex/<agent>/DerivedData/LaunchpadAwakener`。公证会把 App 传给 Apple，`--publish` 会推 tag、建 GitHub Release，用户没要求就不做。
 
-2026-11-12 试跑到导出为止全部通过，公证还没试过。
+2026-11-12 完整跑通到打 zip：公证通过、票据已装订，Gatekeeper 认它是公证过的 App；没有 `--publish`，也还没在测试机上装过这个包。
 
 ## 改完代码之后要做什么
 

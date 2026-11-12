@@ -80,16 +80,31 @@ release_verify_archive() {
     launchpad_awakener_verify_contents "$archive_path/Products/$application_path"
 }
 
+# Every Mach-O file in the bundle, wherever it sits: the notary service checks each one, including code
+# in a framework's resources that export and Xcode's embedding leave alone.
+launchpad_awakener_verify_every_signature() {
+    local bundle_path=$1 file_path
+    local -i code_count=0
+    for file_path in "$bundle_path"/**/*(.N); do
+        [[ $(file -b "$file_path") == Mach-O* ]] || continue
+        launchpad_awakener_verify_signature "$file_path" > /dev/null
+        code_count+=1
+    done
+    app_release_detail "${bundle_path:t}: all $code_count Mach-O files signed with Developer ID and a timestamp"
+}
+
 release_verify_export() {
     local application_path=$1
     launchpad_awakener_verify_contents "$application_path"
     launchpad_awakener_verify_signature "$application_path/Contents/Library/LaunchServices/LaunchpadAwakenerDaemon" hardened-runtime
     launchpad_awakener_verify_signature "$application_path/Contents/Library/LoginItems/LaunchpadAwakenerTextInput.app" hardened-runtime
     launchpad_awakener_verify_signature "$application_path/Contents/Resources/LaunchpadAwakenerPayload.framework"
+    launchpad_awakener_verify_every_signature "$application_path"
 
     local extraction_directory
     extraction_directory=$(mktemp -d "${TMPDIR:-/tmp}/LaunchpadAwakenerRelease.XXXXXX")
     ditto -x -k "$application_path/Contents/Resources/Launchpad.zip" "$extraction_directory"
     launchpad_awakener_verify_signature "$extraction_directory/Launchpad.app" hardened-runtime
+    launchpad_awakener_verify_every_signature "$extraction_directory/Launchpad.app"
     rm -rf "$extraction_directory"
 }
