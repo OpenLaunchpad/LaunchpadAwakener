@@ -137,7 +137,9 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 - **CI**：`.github/workflows/CI.yml` 在推到 main 和开 PR 时跑单元测试，并用临时签名编一次 Release（CI 上没有开发证书），借 RunScript 的检查盯住切片、plist 与嵌入的独立版。`Release.yml` 在推送 `v<MARKETING_VERSION>` 形式的 tag（如 `v1.0`）时完整发布并建 GitHub Release；在 Actions 页面手动运行则跑到打 zip 为止，产物留作 artifact，不发布。两者都用 GitHub 的 `xcode-27` 预览镜像，`DEVELOPER_DIR` 指定 Xcode 27.2。
 - **签名与公证的 secret 放在 OpenLaunchpad 组织级**（`DEVELOPER_ID_CERTIFICATE_*`、`NOTARY_*`），由 workflow 转成 AppRelease 认的 `APP_RELEASE_*` 环境变量。组织是免费套餐，组织级 secret 只给公开仓库用：仓库公开之前，`Release.yml` 会在第一步就报出拿不到证书。
 
-2026-11-12 完整跑通到打 zip：公证通过、票据已装订，Gatekeeper 认它是公证过的 App；没有 `--publish`，也还没在测试机上装过这个包。
+- **发布说明**：`Release.zsh` 没设 `release_notes_path`，AppRelease 建的 Release 正文是空的；发布后用 `gh release edit <tag> --notes-file <文件>` 补上，标题设成 `LaunchpadAwakener <版本>`。
+
+1.0 于 2026-11-12 在本机用 `app-release all --publish` 发布（tag `v1.0`），没有走 CI：当时仓库还是私有的，拿不到组织级 secret。从下一个版本起推 tag、由 CI 发布，发版前先把注入版 target 的 `MARKETING_VERSION` 改成新版本号。1.0 这个包还没在测试机上装过。
 
 ## 改完代码之后要做什么
 
