@@ -3,10 +3,11 @@ import Foundation
 /// Names and versions shared by all four binaries in this project: the app, the privileged
 /// daemon, the injected payload, and anything that talks to them.
 ///
-/// Everything here is a single source of truth on the Swift side. The matching build-setting
-/// values live in `Configurations/Shared/Debug.xcconfig` and `Release.xcconfig` as
-/// `INJECTION_SERVICE_NAME`; the two must agree, which is why both are generated from the same
-/// scaffold placeholders. If you rename the service, change it in both places.
+/// Everything here is a single source of truth on the Swift side. The matching
+/// `INJECTION_SERVICE_NAME` build settings live in `LaunchpadAwakener.xcodeproj/project.pbxproj`;
+/// the two definitions must agree. If you rename the service, change it in both places. The
+/// daemon's executable is called `LaunchpadAwakenerDaemon` in every configuration and does not
+/// follow the service name.
 public enum InjectionServiceIdentity {
     /// Mach service name the daemon publishes and the app connects to.
     ///
@@ -30,8 +31,8 @@ public enum InjectionServiceIdentity {
     ///
     /// The app compares this against the running daemon and reinstalls on mismatch, which is what
     /// makes "I rebuilt the daemon but the old one is still resident" stop being a debugging
-    /// session. Bump it whenever the daemon's request surface changes.
-    public static let daemonVersion = "1.1.0"
+    /// session. Bump it whenever the daemon's request surface or bundled executable path changes.
+    public static let daemonVersion = "1.1.1"
 
     /// Where the app asks the daemon to place the payload before injecting it.
     ///

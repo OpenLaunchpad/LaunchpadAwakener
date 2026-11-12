@@ -156,8 +156,10 @@ remap 路径不会跑 payload 的构造函数，所以 `main.m` 里有第二个�
 
 ## 服务名有两处定义，必须一致
 
-- 构建设置 `INJECTION_SERVICE_NAME` —— 决定 daemon 产物名和 launchd plist
+- 构建设置 `INJECTION_SERVICE_NAME` —— 决定 daemon 的 bundle id 和 launchd plist（文件名、`Label`、Mach 服务）
 - `InjectionServiceIdentity.machServiceName` —— 决定 Swift 侧连哪个服务
+
+daemon 的可执行文件在两种配置下都叫 `LaunchpadAwakenerDaemon`，**不要再让它跟着服务名变**：Xcode 不按配置分别求值文件引用的路径，「Embed Daemon」在 Release 构建里也去找 Debug 的文件名，构建直接失败。改了可执行文件的路径要递增 `daemonVersion`，已装的旧 daemon 才会被重装。
 
 文本输入辅助进程同理：构建设置 `TEXT_INPUT_SERVICE_NAME`（决定它的 bundle id、LaunchAgent plist 与 Mach 服务）要与 `TextInputServiceIdentity.machServiceName` 一致。
 

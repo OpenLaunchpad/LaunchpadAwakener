@@ -219,6 +219,26 @@ log "Verifying architectures:"
 verify_has_arm64e "daemon " "$DAEMON_PATH"
 verify_has_arm64e "payload" "$PAYLOAD_PATH"
 
+# --- The launchd property lists name executables the app carries -------------
+#
+# The build generates both property lists, and the executables they start are named elsewhere in the
+# project. A rename that misses one still builds; it only fails once launchd tries to start the
+# service on the user's Mac, so check here.
+verify_bundle_program() {
+    local property_list_path="$1"
+    local bundle_program
+    bundle_program="$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$property_list_path")" \
+        || fail "$property_list_path has no BundleProgram"
+    [[ -x "$APP_PATH/$bundle_program" ]] \
+        || fail "$(basename "$property_list_path") starts $bundle_program, which the app does not contain"
+    log "  $(basename "$property_list_path") -> $bundle_program"
+}
+
+log "Verifying launchd property lists:"
+for PROPERTY_LIST_PATH in "$APP_PATH"/Contents/Library/LaunchDaemons/*.plist "$APP_PATH"/Contents/Library/LaunchAgents/*.plist; do
+    verify_bundle_program "$PROPERTY_LIST_PATH"
+done
+
 # --- The standalone app it installs while SIP is on --------------------------
 #
 # Zipped into the app's resources by the Embed Standalone Launchpad phase. Without it the control panel

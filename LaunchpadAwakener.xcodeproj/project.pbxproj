@@ -11,7 +11,7 @@
 		1A5C00000000000000000901 /* LaunchpadAwakenerDaemonCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000801 /* LaunchpadAwakenerDaemonCore */; };
 		1A5C00000000000000000902 /* LaunchpadAwakenerPayloadCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000802 /* LaunchpadAwakenerPayloadCore */; };
 		1A5C00000000000000000903 /* LaunchpadAwakenerPayload.framework in Embed Payload */ = {isa = PBXBuildFile; fileRef = 1A5C00000000000000000202 /* LaunchpadAwakenerPayload.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		1A5C00000000000000000904 /* $(INJECTION_SERVICE_NAME) in Embed Daemon */ = {isa = PBXBuildFile; fileRef = 1A5C00000000000000000201 /* $(INJECTION_SERVICE_NAME) */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		1A5C00000000000000000904 /* LaunchpadAwakenerDaemon in Embed Daemon */ = {isa = PBXBuildFile; fileRef = 1A5C00000000000000000201 /* LaunchpadAwakenerDaemon */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		1A5C00000000000000000905 /* LaunchpadAwakenerTextInputCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000803 /* LaunchpadAwakenerTextInputCore */; };
 		1A5C00000000000000000906 /* LaunchpadAwakenerTextInput.app in Embed Text Input Helper */ = {isa = PBXBuildFile; fileRef = 1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		1A5C00000000000000000907 /* LaunchpadAwakenerStandaloneCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A5C00000000000000000804 /* LaunchpadAwakenerStandaloneCore */; };
@@ -66,7 +66,7 @@
 			dstPath = Contents/Library/LaunchServices;
 			dstSubfolderSpec = 1;
 			files = (
-				1A5C00000000000000000904 /* $(INJECTION_SERVICE_NAME) in Embed Daemon */,
+				1A5C00000000000000000904 /* LaunchpadAwakenerDaemon in Embed Daemon */,
 			);
 			name = "Embed Daemon";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -86,7 +86,7 @@
 
 /* Begin PBXFileReference section */
 		1A5C00000000000000000200 /* LaunchpadAwakener.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaunchpadAwakener.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		1A5C00000000000000000201 /* $(INJECTION_SERVICE_NAME) */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "$(INJECTION_SERVICE_NAME)"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A5C00000000000000000201 /* LaunchpadAwakenerDaemon */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = LaunchpadAwakenerDaemon; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A5C00000000000000000202 /* LaunchpadAwakenerPayload.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = LaunchpadAwakenerPayload.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaunchpadAwakenerTextInput.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A5C00000000000000000204 /* Launchpad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Launchpad.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -193,7 +193,7 @@
 			isa = PBXGroup;
 			children = (
 				1A5C00000000000000000200 /* LaunchpadAwakener.app */,
-				1A5C00000000000000000201 /* $(INJECTION_SERVICE_NAME) */,
+				1A5C00000000000000000201 /* LaunchpadAwakenerDaemon */,
 				1A5C00000000000000000202 /* LaunchpadAwakenerPayload.framework */,
 				1A5C00000000000000000203 /* LaunchpadAwakenerTextInput.app */,
 				1A5C00000000000000000204 /* Launchpad.app */,
@@ -266,7 +266,7 @@
 				1A5C00000000000000000801 /* LaunchpadAwakenerDaemonCore */,
 			);
 			productName = LaunchpadAwakenerDaemon;
-			productReference = 1A5C00000000000000000201 /* $(INJECTION_SERVICE_NAME) */;
+			productReference = 1A5C00000000000000000201 /* LaunchpadAwakenerDaemon */;
 			productType = "com.apple.product-type.tool";
 		};
 		1A5C00000000000000000102 /* LaunchpadAwakenerPayload */ = {
@@ -418,7 +418,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# SMAppService.daemon(plistName:) reads this file out of the app bundle at registration\n# time. Generating it here instead of checking it in keeps Label / BundleProgram / MachServices\n# in lock-step with INJECTION_SERVICE_NAME, which differs between Debug and Release.\nset -e\n\nLAUNCH_DAEMONS_DIRECTORY=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchDaemons\"\nPROPERTY_LIST_PATH=\"${LAUNCH_DAEMONS_DIRECTORY}/${INJECTION_SERVICE_NAME}.plist\"\nPROPERTY_LIST_BUDDY=/usr/libexec/PlistBuddy\n\nmkdir -p \"${LAUNCH_DAEMONS_DIRECTORY}\"\nrm -f \"${PROPERTY_LIST_PATH}\"\n\nprintf '%s\\n' \\\n  '<?xml version=\"1.0\" encoding=\"UTF-8\"?>' \\\n  '<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">' \\\n  '<plist version=\"1.0\"><dict/></plist>' > \"${PROPERTY_LIST_PATH}\"\n\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :Label string ${INJECTION_SERVICE_NAME}\" \"${PROPERTY_LIST_PATH}\"\n# BundleProgram is relative to the app bundle root, which is how SMAppService locates the\n# executable that Embed Daemon copied into Contents/Library/LaunchServices.\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :BundleProgram string Contents/Library/LaunchServices/${INJECTION_SERVICE_NAME}\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :KeepAlive bool true\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :MachServices dict\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :MachServices:${INJECTION_SERVICE_NAME} bool true\" \"${PROPERTY_LIST_PATH}\"\n\necho \"Generated ${PROPERTY_LIST_PATH}\"\n";
+			shellScript = "# SMAppService.daemon(plistName:) reads this file out of the app bundle at registration\n# time. Generating it here instead of checking it in keeps Label and MachServices\n# in lock-step with INJECTION_SERVICE_NAME, which differs between Debug and Release. The daemon's\n# executable has one name in every configuration: Xcode does not evaluate a file reference's path\n# per configuration, so the Embed Daemon copy would look for the Debug name in a Release build.\nset -e\n\nLAUNCH_DAEMONS_DIRECTORY=\"${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchDaemons\"\nPROPERTY_LIST_PATH=\"${LAUNCH_DAEMONS_DIRECTORY}/${INJECTION_SERVICE_NAME}.plist\"\nPROPERTY_LIST_BUDDY=/usr/libexec/PlistBuddy\n\nmkdir -p \"${LAUNCH_DAEMONS_DIRECTORY}\"\nrm -f \"${PROPERTY_LIST_PATH}\"\n\nprintf '%s\\n' \\\n  '<?xml version=\"1.0\" encoding=\"UTF-8\"?>' \\\n  '<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">' \\\n  '<plist version=\"1.0\"><dict/></plist>' > \"${PROPERTY_LIST_PATH}\"\n\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :Label string ${INJECTION_SERVICE_NAME}\" \"${PROPERTY_LIST_PATH}\"\n# BundleProgram is relative to the app bundle root, which is how SMAppService locates the\n# executable that Embed Daemon copied into Contents/Library/LaunchServices.\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :BundleProgram string Contents/Library/LaunchServices/LaunchpadAwakenerDaemon\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :KeepAlive bool true\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :MachServices dict\" \"${PROPERTY_LIST_PATH}\"\n\"${PROPERTY_LIST_BUDDY}\" -c \"Add :MachServices:${INJECTION_SERVICE_NAME} bool true\" \"${PROPERTY_LIST_PATH}\"\n\necho \"Generated ${PROPERTY_LIST_PATH}\"\n";
 		};
 		1A5C00000000000000000507 /* Generate LaunchAgent Property List */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -661,7 +661,7 @@
 				ENABLE_POINTER_AUTHENTICATION = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(INJECTION_SERVICE_NAME)";
-				PRODUCT_NAME = "$(INJECTION_SERVICE_NAME)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 			};
@@ -675,7 +675,7 @@
 				ENABLE_POINTER_AUTHENTICATION = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(INJECTION_SERVICE_NAME)";
-				PRODUCT_NAME = "$(INJECTION_SERVICE_NAME)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 			};
