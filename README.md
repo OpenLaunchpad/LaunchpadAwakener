@@ -38,7 +38,7 @@ LaunchpadAwakener carries the standalone app inside it. On a Mac with SIP turned
 
 ## Installation
 
-There are no prebuilt releases yet; build the apps from source first (see [Building](#building)).
+Download `LaunchpadAwakener-<version>.zip` from [Releases](https://github.com/OpenLaunchpad/LaunchpadAwakener/releases) and unzip it. The app is notarized and carries the standalone app inside it. You can also build both from source (see [Building](#building)).
 
 ### Injected version
 
@@ -54,7 +54,7 @@ The app injects the Dock again every time the Dock restarts. Its window and menu
 
 ### Standalone version
 
-Copy `Launchpad.app` to `/Applications` and open it, or let LaunchpadAwakener install it with **Install Launchpad** when SIP is on.
+On a Mac with SIP on, open LaunchpadAwakener and click **Install Launchpad**: it copies the standalone app it carries into `/Applications` and opens it. A source build also produces `Launchpad.app` on its own, to copy to `/Applications` yourself.
 
 - Click its Dock icon to show Launchpad again.
 - Its settings (**Settings…** in the Dock icon's menu) set a global shortcut and **Launch at login**.
