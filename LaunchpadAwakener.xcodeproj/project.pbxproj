@@ -448,7 +448,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# The standalone Launchpad, zipped into the app's resources. While System Integrity Protection is on,\n# the control panel installs it from there into the Applications folder (StandaloneLaunchpadInstaller).\n# A zip rather than the app itself, which LaunchServices could register and Spotlight list as a second\n# Launchpad running from inside this bundle.\nset -e\n\nSTANDALONE_APPLICATION_PATH=\"${BUILT_PRODUCTS_DIR}/Launchpad.app\"\nARCHIVE_PATH=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Launchpad.zip\"\n\nrm -f \"${ARCHIVE_PATH}\"\n/usr/bin/ditto -c -k --keepParent \"${STANDALONE_APPLICATION_PATH}\" \"${ARCHIVE_PATH}\"\n\necho \"Embedded ${STANDALONE_APPLICATION_PATH} as ${ARCHIVE_PATH}\"\n";
+			shellScript = "# The standalone Launchpad, zipped into the app's resources. While System Integrity Protection is on,\n# the control panel installs it from there into the Applications folder (StandaloneLaunchpadInstaller).\n# A zip rather than the app itself, which LaunchServices could register and Spotlight list as a second\n# Launchpad running from inside this bundle.\nset -e\n\n# The standalone app is not installed on its own (SKIP_INSTALL), so in an archive BUILT_PRODUCTS_DIR\n# holds only a symbolic link to it. Resolve the link so the zip holds the app itself.\nSTANDALONE_APPLICATION_PATH=\"$(cd -P \"${BUILT_PRODUCTS_DIR}/Launchpad.app\" && pwd)\"\nARCHIVE_PATH=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Launchpad.zip\"\n\nrm -f \"${ARCHIVE_PATH}\"\n/usr/bin/ditto -c -k --keepParent \"${STANDALONE_APPLICATION_PATH}\" \"${ARCHIVE_PATH}\"\n\necho \"Embedded ${STANDALONE_APPLICATION_PATH} as ${ARCHIVE_PATH}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -796,6 +796,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.MxIris.LaunchpadAwakener.Launchpad.debug;
 				PRODUCT_NAME = Launchpad;
+				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 			};
 			name = Debug;
@@ -823,6 +824,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.MxIris.LaunchpadAwakener.Launchpad;
 				PRODUCT_NAME = Launchpad;
+				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 			};
 			name = Release;

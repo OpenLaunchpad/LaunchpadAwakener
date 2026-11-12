@@ -124,6 +124,17 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 
 **不要因为构建"通过了"就认为没问题** —— 一个悄悄产出 arm64-only daemon 的构建看起来和正确构建一模一样，直到注入时才暴露。
 
+## 发布
+
+用 [AppRelease](https://github.com/Mx-Iris/AppRelease) 发布，配置是根目录的 `Release.zsh`：`app-release all` 依次归档、导出 Developer ID、公证、装订公证票据、打 zip，加 `--publish` 才打 tag 并建 GitHub Release。版本号取注入版 target 的 `MARKETING_VERSION`。
+
+- **归档时就签 Developer ID 并带时间戳**（`release_archive_arguments`）：独立版压在 `Contents/Resources/Launchpad.zip` 里，导出时签不到它，公证服务却会检查 zip 里面。
+- **独立版 target 设了 `SKIP_INSTALL = YES`**：不设它会和注入版一起装进归档，归档就成了导出拒收的「通用归档」。归档时 `BUILT_PRODUCTS_DIR` 里的独立版只是一个符号链接，所以嵌入脚本先解析出真实路径再压缩。
+- **两个钩子补上引擎不查的东西**：daemon 与 payload 带 arm64e、两个 launchd plist 指向的程序在包里、zip 里有独立版；导出后再逐个确认 daemon、输入法辅助进程、payload 与 zip 里的独立版都是这个团队的 Developer ID 签名、带时间戳。
+- agent 试跑时把产物和构建目录都放进自己的目录，只跑到导出：`APP_RELEASE_OUTPUT_ROOT=/Volumes/DerivedData/Agents.noindex/<agent>/AppRelease/LaunchpadAwakener app-release all --skip-notarization --derived-data-path /Volumes/DerivedData/Agents.noindex/<agent>/DerivedData/LaunchpadAwakener`。公证会把 App 传给 Apple，`--publish` 会推 tag、建 GitHub Release，用户没要求就不做。
+
+2026-11-12 试跑到导出为止全部通过，公证还没试过。
+
 ## 改完代码之后要做什么
 
 改动的位置不同，需要的重启范围也不同，搞错了就会看到「代码改了行为没变」：
