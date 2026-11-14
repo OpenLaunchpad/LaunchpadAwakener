@@ -27,6 +27,7 @@ LaunchpadAwakener carries the standalone app inside it. On a Mac with SIP turned
 - **Blue dot** on newly installed App Store apps until they are first opened.
 - **Drag to the Dock.** Drag an app out of Launchpad onto the Dock to keep it there (injected version).
 - **Several displays.** Launchpad opens on the display the Dock is on, like macOS 15.
+- **The Dock's Apps icon** (injected version): clicking Apps opens this Launchpad, so the tile shows Launchpad's icon to match. LaunchpadAwakener's own icon carries a gear, so the two stay easy to tell apart. Switch it off in the window or the menu bar and the Dock's own icon comes straight back.
 - **Organize Launchpad** (injected version): a window that moves many apps at once, makes, renames and dissolves folders, sorts by name, and groups apps into folders by their App Store category.
 - **Every Dock build.** The Dock's internals are found at runtime instead of by per-build addresses; every Dock build from macOS 26.0 to 27.2 has been checked. Each Dock method is checked against its type encoding before it is called or hooked, and if any one does not match nothing is installed, so the Dock carries on unmodified rather than half patched.
 

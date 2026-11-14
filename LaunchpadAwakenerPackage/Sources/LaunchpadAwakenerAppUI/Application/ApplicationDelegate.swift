@@ -14,6 +14,7 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginController = LaunchAtLoginController()
     private let textInputAgentController = TextInputAgentController()
     private let killSwitchController = KillSwitchController()
+    private let dockAppsIconController: DockAppsIconController
     private let standaloneLaunchpadController = StandaloneLaunchpadController()
     private let launchProgress = ApplicationLaunchProgress()
     private let organizerViewModel: LaunchpadOrganizerViewModel
@@ -33,6 +34,7 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             launchAtLoginController: launchAtLoginController,
             textInputAgentController: textInputAgentController,
             killSwitchController: killSwitchController,
+            dockAppsIconController: dockAppsIconController,
             standaloneLaunchpadController: standaloneLaunchpadController,
             launchProgress: launchProgress,
             isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
@@ -58,6 +60,7 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             injectionMethod: .dynamicLibraryLoad
         )
         self.injectionCoordinator = injectionCoordinator
+        self.dockAppsIconController = DockAppsIconController(injectionCoordinator: injectionCoordinator)
         self.organizerViewModel = LaunchpadOrganizerViewModel(organizer: LaunchpadOrganizer(injectionCoordinator: injectionCoordinator))
         super.init()
     }
@@ -78,6 +81,7 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             daemonController: daemonController,
             injectionCoordinator: injectionCoordinator,
             killSwitchController: killSwitchController,
+            dockAppsIconController: dockAppsIconController,
             standaloneLaunchpadController: standaloneLaunchpadController,
             launchProgress: launchProgress,
             isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
@@ -190,6 +194,10 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
         // Pick up payloads still running from an earlier session before deciding anything else. Skipping
         // this makes a relaunched app report "not injected" while the payload is right there, and the
         // obvious response — injecting again — does nothing, because a mapped image cannot be loaded twice.
+        // Before reconnecting, so the payloads picked up below are told in the same pass rather than
+        // having to be revisited. The call records the setting whether or not anything is reachable yet.
+        await dockAppsIconController.applyStoredSetting()
+
         launchProgress.enter(.reconnectingToPayloads)
         await injectionCoordinator.reconnectToResidentPayloads()
 

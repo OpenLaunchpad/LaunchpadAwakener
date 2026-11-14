@@ -261,6 +261,54 @@ public final class PayloadInjectionCoordinator {
         return .available(channel)
     }
 
+    // MARK: - The icon on the Dock's Apps tile
+
+    /// What the app last decided about the Apps tile's icon, handed to every payload as it connects.
+    ///
+    /// Held here rather than read by the payload out of a preference domain: the payload runs inside the
+    /// Dock, and the app is the only side that knows both the preference and where its own bundle is. Not
+    /// observed — the control panel reads the switch from ``DockAppsIconController``, not from here.
+    @ObservationIgnored
+    private var dockAppsIconRequest: DockAppsIconRequest?
+
+    /// Records the settings and hands them to every payload that can be reached right now.
+    ///
+    /// Returns what those payloads answered, so the control panel can say when a Dock has no hook on its
+    /// icon path. A payload that cannot be reached is left out rather than reported as a failure: it is
+    /// told as soon as it connects, from ``sendDockAppsIconSettings(to:)``.
+    @discardableResult
+    public func applyDockAppsIcon(isEnabled: Bool, iconPath: String) async -> [DockAppsIconReply] {
+        dockAppsIconRequest = DockAppsIconRequest(isEnabled: isEnabled, iconPath: iconPath)
+        // A snapshot: the dictionary can change while this awaits each payload in turn.
+        let channels = Array(channelsByHostProcessIdentifier.values)
+        var replies: [DockAppsIconReply] = []
+        for channel in channels {
+            do {
+                replies.append(try await channel.setDockAppsIcon(isEnabled: isEnabled, iconPath: iconPath))
+            } catch {
+                #log(.error, "A payload would not change the Apps tile: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return replies
+    }
+
+    /// Tells one payload that just connected what the app has decided, if it has decided anything yet.
+    ///
+    /// Nothing to send is the normal state for the first moments of a launch, before
+    /// ``DockAppsIconController`` has read the preference; its first call covers the payloads already
+    /// connected by then.
+    private func sendDockAppsIconSettings(to channel: PayloadChannel) async {
+        guard let dockAppsIconRequest else { return }
+        do {
+            _ = try await channel.setDockAppsIcon(
+                isEnabled: dockAppsIconRequest.isEnabled,
+                iconPath: dockAppsIconRequest.iconPath
+            )
+        } catch {
+            #log(.error, "A payload would not take the Apps tile settings: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Every payload this app can currently reach, sorted by host.
     ///
     /// Populated by injecting and by ``reconnectToResidentPayloads()``, and kept current by
@@ -420,6 +468,7 @@ public final class PayloadInjectionCoordinator {
                 payloadStatusesByHostProcessIdentifier[endpointInfo.pid] = status
 
                 #log(.info, "Reconnected to the payload in \(status.hostProcessName, privacy: .public) (\(endpointInfo.pid, privacy: .public))")
+                await sendDockAppsIconSettings(to: reconnectedChannel)
             } catch {
                 // The payload is there but will not talk. Drop the registry entry rather than
                 // retrying it on every launch from here on.
@@ -912,6 +961,7 @@ public final class PayloadInjectionCoordinator {
         } catch {
             #log(.error, "Payload in \(hostProcessIdentifier, privacy: .public) did not report status: \(error.localizedDescription, privacy: .public)")
         }
+        await sendDockAppsIconSettings(to: channel)
     }
 
     @discardableResult

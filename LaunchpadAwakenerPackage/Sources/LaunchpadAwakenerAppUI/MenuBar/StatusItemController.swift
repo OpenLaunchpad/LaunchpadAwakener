@@ -15,6 +15,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let daemonController: PrivilegedDaemonController
     private let injectionCoordinator: PayloadInjectionCoordinator
     private let killSwitchController: KillSwitchController
+    private let dockAppsIconController: DockAppsIconController
     private let standaloneLaunchpadController: StandaloneLaunchpadController
     private let launchProgress: ApplicationLaunchProgress
     private let isInjectionBlockedBySystemIntegrityProtection: Bool
@@ -25,6 +26,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         daemonController: PrivilegedDaemonController,
         injectionCoordinator: PayloadInjectionCoordinator,
         killSwitchController: KillSwitchController,
+        dockAppsIconController: DockAppsIconController,
         standaloneLaunchpadController: StandaloneLaunchpadController,
         launchProgress: ApplicationLaunchProgress,
         isInjectionBlockedBySystemIntegrityProtection: Bool,
@@ -34,6 +36,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         self.daemonController = daemonController
         self.injectionCoordinator = injectionCoordinator
         self.killSwitchController = killSwitchController
+        self.dockAppsIconController = dockAppsIconController
         self.standaloneLaunchpadController = standaloneLaunchpadController
         self.launchProgress = launchProgress
         self.isInjectionBlockedBySystemIntegrityProtection = isInjectionBlockedBySystemIntegrityProtection
@@ -97,6 +100,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         killSwitchItem.state = killSwitchController.isEngaged ? .on : .off
 
+        let dockAppsIconItem = item("Use the Launchpad Icon for Apps") { [dockAppsIconController] in
+            Task { await dockAppsIconController.setEnabled(!dockAppsIconController.isEnabled) }
+        }
+        dockAppsIconItem.state = dockAppsIconController.isEnabled ? .on : .off
+        dockAppsIconItem.isEnabled = dockAppsIconController.isAvailable
+
         let injectNowItem = item("Inject Now") { [injectionCoordinator] in
             Task { await injectionCoordinator.injectIntoRunningTargets() }
         }
@@ -115,6 +124,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             injectNowItem,
             restartDockItem,
             killSwitchItem,
+            dockAppsIconItem,
             .separator(),
             item("Quit", keyEquivalent: "q") {
                 NSApplication.shared.terminate(nil)
