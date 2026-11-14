@@ -94,7 +94,9 @@ hook 与 Dock 自己的类（Dock 不导出任何类）用 FrameworkToolbox 的 
 
 独立版 `LaunchpadAwakenerStandalone/AppIcon.icon` 是干净的 Launchpad 图标，注入版 `LaunchpadAwakener/AppIcon.icon` 是同一张图、把 3×3 网格右下角那块灰方块换成齿轮，表示它是配置 App。
 
-**不要给独立版也加齿轮**：Dock 里 Apps 格子显示的那张图就是从独立版产物拷出来的（「Embed Standalone Launchpad」阶段拷成注入版的 `Contents/Resources/LaunchpadDockIcon.icns`），两边都加齿轮，就没有东西能把配置 App 和启动台本身区分开了。图标改完重新构建即可，拷贝是构建阶段做的。细节、渲染预览的命令与升级后要核对的日志见 [Dock 的 Apps 图标](Documentations/Internal/DockAppsIcon.md)。
+**不要给独立版也加齿轮**：Dock 里 Apps 格子显示的那张图就是从独立版产物拷出来的（「Embed Standalone Launchpad」阶段把它的 `Assets.car` 与 `AppIcon.icns` 拷进注入版的 `Contents/Resources/LaunchpadDockIcon/`），两边都加齿轮，就没有东西能把配置 App 和启动台本身区分开了。图标改完重新构建即可，拷贝是构建阶段做的。
+
+**拷的是零件，不是一张图**：浅色/深色/着色三套外观在 `Assets.car` 里，只有 IconServices 渲染得出来，而它只从 bundle 渲染；注入版包里直接放 `.app` 会被 LaunchServices 注册、还要进签名公证，所以 App 在运行时把零件拼成 `~/Library/Application Support/LaunchpadAwakener/LaunchpadDockIcon.app`。那个 bundle 必须以 `.app` 结尾、`CFBundleExecutable` 必须真能执行，否则渲出来是文件夹图标或带禁止符号的图标，而且不报错。细节、渲染预览的命令与升级后要核对的日志见 [Dock 的 Apps 图标](Documentations/Internal/DockAppsIcon.md)。
 
 ## 构建
 

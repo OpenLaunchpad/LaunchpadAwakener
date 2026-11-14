@@ -277,14 +277,14 @@ public final class PayloadInjectionCoordinator {
     /// icon path. A payload that cannot be reached is left out rather than reported as a failure: it is
     /// told as soon as it connects, from ``sendDockAppsIconSettings(to:)``.
     @discardableResult
-    public func applyDockAppsIcon(isEnabled: Bool, iconPath: String) async -> [DockAppsIconReply] {
-        dockAppsIconRequest = DockAppsIconRequest(isEnabled: isEnabled, iconPath: iconPath)
+    public func applyDockAppsIcon(isEnabled: Bool, iconBundlePath: String) async -> [DockAppsIconReply] {
+        dockAppsIconRequest = DockAppsIconRequest(isEnabled: isEnabled, iconBundlePath: iconBundlePath)
         // A snapshot: the dictionary can change while this awaits each payload in turn.
         let channels = Array(channelsByHostProcessIdentifier.values)
         var replies: [DockAppsIconReply] = []
         for channel in channels {
             do {
-                replies.append(try await channel.setDockAppsIcon(isEnabled: isEnabled, iconPath: iconPath))
+                replies.append(try await channel.setDockAppsIcon(isEnabled: isEnabled, iconBundlePath: iconBundlePath))
             } catch {
                 #log(.error, "A payload would not change the Apps tile: \(error.localizedDescription, privacy: .public)")
             }
@@ -302,7 +302,7 @@ public final class PayloadInjectionCoordinator {
         do {
             _ = try await channel.setDockAppsIcon(
                 isEnabled: dockAppsIconRequest.isEnabled,
-                iconPath: dockAppsIconRequest.iconPath
+                iconBundlePath: dockAppsIconRequest.iconBundlePath
             )
         } catch {
             #log(.error, "A payload would not take the Apps tile settings: \(error.localizedDescription, privacy: .public)")

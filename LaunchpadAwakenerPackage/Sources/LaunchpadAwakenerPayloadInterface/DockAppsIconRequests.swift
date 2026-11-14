@@ -7,7 +7,8 @@ import HelperCommunication
 /// bundle is, so the payload neither reads a preference domain of the app's nor guesses an install
 /// location. A payload that is never told keeps the Dock's own icon.
 
-/// Asks the payload to put `iconPath` on the Dock's Apps tile, or to give the tile back to the Dock.
+/// Asks the payload to put the icon of the bundle at `iconBundlePath` on the Dock's Apps tile, or to give
+/// the tile back to the Dock.
 public struct DockAppsIconRequest: Codable, Sendable, Request {
     public typealias Response = DockAppsIconReply
 
@@ -15,15 +16,19 @@ public struct DockAppsIconRequest: Codable, Sendable, Request {
 
     public let isEnabled: Bool
 
-    /// Absolute path of the image to use, sent whether or not it is wanted right now.
+    /// Absolute path of the *bundle* whose icon to use, sent whether or not it is wanted right now.
+    ///
+    /// A bundle rather than an image file because an image file holds one appearance, while the payload
+    /// has to follow the light, dark and tinted ones the Dock draws in; only IconServices renders those,
+    /// and it renders them from a bundle. The app prepares that bundle — see `DockAppsIconHost`.
     ///
     /// Always carried, so that switching the override on needs no second request and a payload that
     /// reconnects has the path from the first thing it is told.
-    public let iconPath: String
+    public let iconBundlePath: String
 
-    public init(isEnabled: Bool, iconPath: String) {
+    public init(isEnabled: Bool, iconBundlePath: String) {
         self.isEnabled = isEnabled
-        self.iconPath = iconPath
+        self.iconBundlePath = iconBundlePath
     }
 }
 

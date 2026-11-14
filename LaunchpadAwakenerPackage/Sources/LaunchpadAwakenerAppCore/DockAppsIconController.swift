@@ -12,54 +12,61 @@ import OSToolbox
 /// reading a preference domain of the app's or guessing where the app is installed. Sending happens
 /// through ``PayloadInjectionCoordinator``, which also hands the settings to each payload as it connects,
 /// so a Dock restart or an app relaunch needs nothing from here.
+///
+/// What is sent is a *bundle*, not an image file: the payload renders the icon through IconServices so
+/// that it follows the light, dark and tinted appearances, and IconServices renders from a bundle. The
+/// app assembles that bundle on first use — see ``DockAppsIconHost``.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "DockAppsIconController")
 @Observable
 @MainActor
 public final class DockAppsIconController {
-    /// Name of the icon in the app's bundle: the standalone Launchpad's own icon, copied in by the
-    /// "Embed Standalone Launchpad" build phase so that the Dock gets the Launchpad icon without the
-    /// gear this app's own icon carries.
-    public static let bundledIconResourceName = "LaunchpadDockIcon"
-
     /// Whether the Dock's Apps tile should show the Launchpad icon. Persisted; on by default.
     public private(set) var isEnabled: Bool
 
     /// Most recent failure or refusal, cleared by the next successful change. For display.
     public private(set) var lastErrorDescription: String?
 
-    /// The icon this app hands the Dock; nil when the bundle has none, which no supported build should be.
-    public let iconPath: String?
+    /// Whether the switch can do anything at all. False on a build whose resources lost the icon, and
+    /// after assembling the icon's bundle has failed.
+    public private(set) var isAvailable: Bool
 
-    /// Whether the switch can do anything at all. False only on a build whose bundle lost the icon.
-    public var isAvailable: Bool { iconPath != nil }
+    /// The assembled bundle's path, once it has been assembled. Kept so the work happens once per run.
+    @ObservationIgnored
+    private var iconBundlePath: String?
 
     @ObservationIgnored
     private let userDefaults: UserDefaults
+
+    @ObservationIgnored
+    private let prepareIconBundle: @Sendable () throws -> URL
 
     @ObservationIgnored
     private let sendToPayloads: @MainActor (Bool, String) async -> [DockAppsIconReply]
 
     public convenience init(injectionCoordinator: PayloadInjectionCoordinator) {
         self.init(
-            iconPath: Bundle.main.url(forResource: Self.bundledIconResourceName, withExtension: "icns")?.path,
-            sendToPayloads: { [weak injectionCoordinator] isEnabled, iconPath in
-                await injectionCoordinator?.applyDockAppsIcon(isEnabled: isEnabled, iconPath: iconPath) ?? []
+            prepareIconBundle: { try DockAppsIconHost.prepare() },
+            sendToPayloads: { [weak injectionCoordinator] isEnabled, iconBundlePath in
+                await injectionCoordinator?.applyDockAppsIcon(
+                    isEnabled: isEnabled,
+                    iconBundlePath: iconBundlePath
+                ) ?? []
             }
         )
     }
 
     public init(
-        iconPath: String?,
+        prepareIconBundle: @escaping @Sendable () throws -> URL,
         userDefaults: UserDefaults = .standard,
         sendToPayloads: @escaping @MainActor (Bool, String) async -> [DockAppsIconReply]
     ) {
-        self.iconPath = iconPath
+        self.prepareIconBundle = prepareIconBundle
         self.userDefaults = userDefaults
         self.sendToPayloads = sendToPayloads
         isEnabled = userDefaults.object(forKey: PreferenceKey.isEnabled) as? Bool ?? true
-        if iconPath == nil {
-            #log(.error, "This build has no \(Self.bundledIconResourceName, privacy: .public).icns; the Apps tile keeps the Dock's own icon")
-        }
+        // Optimistic until something actually fails: whether the icon can be assembled is only known
+        // once it has been tried, and trying costs file work that does not belong in an initialiser.
+        isAvailable = true
     }
 
     /// Hands the stored setting to whatever payloads are reachable. Called once as the app starts.
@@ -83,11 +90,8 @@ public final class DockAppsIconController {
     }
 
     private func send(isEnabled: Bool) async {
-        guard let iconPath else {
-            lastErrorDescription = "This build does not carry the Launchpad icon."
-            return
-        }
-        let replies = await sendToPayloads(isEnabled, iconPath)
+        guard let iconBundlePath = await resolvedIconBundlePath() else { return }
+        let replies = await sendToPayloads(isEnabled, iconBundlePath)
         // One Dock per login session, so in practice there is one reply; a refusal from any of them is
         // worth showing, and the rest are the state the user asked for.
         let refusal = replies.compactMap { reply -> String? in
@@ -95,6 +99,30 @@ public final class DockAppsIconController {
             return reason
         }.first
         lastErrorDescription = refusal
+    }
+
+    /// The assembled bundle, assembling it the first time it is needed.
+    ///
+    /// Off the main actor: assembling copies the icon's resources, and the first run of a new build is
+    /// the one time that is more than two `stat`s.
+    private func resolvedIconBundlePath() async -> String? {
+        if let iconBundlePath { return iconBundlePath }
+        let prepareIconBundle = prepareIconBundle
+        do {
+            let hostBundleURL = try await Task.detached(priority: .userInitiated) {
+                try prepareIconBundle()
+            }.value
+            iconBundlePath = hostBundleURL.path
+            isAvailable = true
+            return hostBundleURL.path
+        } catch {
+            let description = (error as? DockAppsIconHost.Failure)?.errorDescription
+                ?? "The Launchpad icon could not be prepared: \(error.localizedDescription)"
+            #log(.error, "\(description, privacy: .public) The Apps tile keeps the Dock's own icon.")
+            lastErrorDescription = description
+            isAvailable = false
+            return nil
+        }
     }
 
     private enum PreferenceKey {

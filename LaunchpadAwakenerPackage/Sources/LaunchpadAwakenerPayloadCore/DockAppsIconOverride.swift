@@ -30,8 +30,8 @@ import LaunchpadAwakenerSpringboardCore
 enum DockAppsIconOverride {
     private struct Settings: Equatable, Sendable {
         var isEnabled = false
-        /// Absolute path of the image to use; nil until the app has sent one.
-        var iconPath: String?
+        /// Absolute path of the bundle whose icon to use; nil until the app has sent one.
+        var iconBundlePath: String?
     }
 
     private static let settings = OSAllocatedUnfairLock(initialState: Settings())
@@ -63,10 +63,11 @@ enum DockAppsIconOverride {
     ///
     /// Called from the Dock's rendering path for every tile it draws, so the checks are ordered by what
     /// they cost: the switch first, which skips resolving a bundle identifier entirely while the override
-    /// is off; then the tile's identity, which is cached; then the image, which is cached too.
+    /// is off; then the tile's identity, which is cached; then the rendering, which is only ever read from
+    /// the cache here — see ``DockAppsIconImage`` for why it is never rendered on this thread.
     static func substituteImage(for tile: AnyObject, replacing originalImage: AnyObject?) -> AnyObject? {
         let currentSettings = settings.withLock { settings in settings }
-        guard currentSettings.isEnabled, let iconPath = currentSettings.iconPath else { return nil }
+        guard currentSettings.isEnabled, let iconBundlePath = currentSettings.iconBundlePath else { return nil }
         guard DockAppsTile.isAppsTile(tile) else { return nil }
 
         // While the kill switch is on, clicking Apps opens the system's Apps, so the system's icon is the
@@ -75,15 +76,29 @@ enum DockAppsIconOverride {
         // the Dock set that tile's icon, which comes straight back through here.
         guard !SpringboardController.isDisabledByKillSwitch else { return nil }
 
-        // Nil here is a failure that was already logged — a missing or unreadable icon file. Forwarding
-        // the Dock's own image costs the user their icon, not their Dock.
-        guard let substituteImage = DockAppsIconImage.image(
-            atPath: iconPath,
+        // Nil when the Dock's icon appearance is out of reach, which is already logged there.
+        guard let cacheKey = DockAppsIconImage.cacheKey(
+            bundlePath: iconBundlePath,
             matchingWidthOf: DockAppsIconImage.asCoreGraphicsImage(originalImage)
         ) else { return nil }
 
-        noteFirstSubstitution()
-        return substituteImage
+        if let substituteImage = DockAppsIconImage.cachedImage(for: cacheKey) {
+            noteFirstSubstitution()
+            return substituteImage
+        }
+
+        // Rendering here would block the Dock while it draws. The Dock's own icon goes up for this pass,
+        // and the tile is asked to draw again once the rendering is in the cache — which is also what makes
+        // the icon follow a change of appearance: the Dock sets every tile's image when the appearance
+        // changes, that pass misses the cache, and the next one has the icon in the new appearance.
+        DockAppsIconImage.renderInBackground(for: cacheKey) {
+            Task { @MainActor in
+                for tile in DockAppsTile.appsTiles() {
+                    DockAppsTile.render(tile)
+                }
+            }
+        }
+        return nil
     }
 
     /// Whether the log already carries the line below.
@@ -119,11 +134,19 @@ enum DockAppsIconOverride {
             return .unsupported(reason: unsupportedReason)
         }
 
-        let newSettings = Settings(isEnabled: request.isEnabled, iconPath: request.iconPath)
-        let hasChanged = settings.withLock { settings -> Bool in
-            guard settings != newSettings else { return false }
+        let newSettings = Settings(isEnabled: request.isEnabled, iconBundlePath: request.iconBundlePath)
+        let (hasChanged, hasIconBundleChanged) = settings.withLock { settings -> (Bool, Bool) in
+            guard settings != newSettings else { return (false, false) }
+            let hasIconBundleChanged = settings.iconBundlePath != newSettings.iconBundlePath
             settings = newSettings
-            return true
+            return (true, hasIconBundleChanged)
+        }
+
+        // Only when the bundle itself changed, which is what a new build of the app looks like from here.
+        // Switching off and on again keeps what was rendered, so the icon comes back without a pass of the
+        // Dock's own icon in between.
+        if hasIconBundleChanged {
+            DockAppsIconImage.forgetRenderings()
         }
 
         let appsTileCount = await MainActor.run {

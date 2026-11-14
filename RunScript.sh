@@ -258,10 +258,15 @@ log "Embedded standalone app: $(du -h "$STANDALONE_ARCHIVE_PATH" | cut -f1) zipp
 # --- The icon the Dock's Apps tile is given ----------------------------------
 #
 # Copied out of the standalone app by the same phase: the Launchpad icon without the gear this app's own
-# icon carries. Without it the Apps tile keeps the system's icon, and nothing else fails.
-DOCK_ICON_PATH="$APP_PATH/Contents/Resources/LaunchpadDockIcon.icns"
-[[ -f "$DOCK_ICON_PATH" ]] || fail "expected the Launchpad icon for the Dock at $DOCK_ICON_PATH"
-log "Icon for the Dock's Apps tile: $(du -h "$DOCK_ICON_PATH" | cut -f1)"
+# icon carries. The parts, not a bundle — the app assembles them into one under Application Support, so
+# that no second .app ships inside this one (DockAppsIconHost). Without them the Apps tile keeps the
+# system's icon, and nothing else fails.
+DOCK_ICON_RESOURCES_PATH="$APP_PATH/Contents/Resources/LaunchpadDockIcon"
+for DOCK_ICON_RESOURCE_NAME in Assets.car AppIcon.icns; do
+    [[ -f "$DOCK_ICON_RESOURCES_PATH/$DOCK_ICON_RESOURCE_NAME" ]] \
+        || fail "expected the Launchpad icon for the Dock at $DOCK_ICON_RESOURCES_PATH/$DOCK_ICON_RESOURCE_NAME"
+done
+log "Icon resources for the Dock's Apps tile: $(du -sh "$DOCK_ICON_RESOURCES_PATH" | cut -f1)"
 
 if $LAUNCH; then
     log "Launching $APP_PATH"
