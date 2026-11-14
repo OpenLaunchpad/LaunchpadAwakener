@@ -1,6 +1,6 @@
 # Dock 的 Apps 图标：实现说明
 
-> 配套提案见[注入成功后把 Dock 的 Apps 图标换成 Launchpad 的图标](../Evolutions/draft-dock-apps-icon.md)。
+> 配套提案见[注入成功后把 Dock 的 Apps 图标换成 Launchpad 的图标](../Evolutions/0013-dock-apps-icon.md)。
 
 注入之后，Dock 里点 Apps 打开的是这个工具复刻的 Launchpad，图标却还是系统的 Apps 图标 —— 那是一张「点下去不会发生的事」的画。这份说明讲清它是怎么被换掉的，以及系统升级之后要核对什么。
 

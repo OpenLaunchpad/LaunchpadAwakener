@@ -1,7 +1,7 @@
 # LaunchpadAwakener 文档索引
 
 - [Evolutions/README.md](Evolutions/README.md) —— 提案状态总表
-- [Evolutions/draft-dock-apps-icon.md](Evolutions/draft-dock-apps-icon.md) —— 注入成功后把 Dock 的 Apps 图标换成 Launchpad 的图标，配置 App 的图标加齿轮标志区分（Draft）
+- [Evolutions/0013-dock-apps-icon.md](Evolutions/0013-dock-apps-icon.md) —— 注入成功后把 Dock 的 Apps 图标换成 Launchpad 的图标，配置 App 的图标加齿轮标志区分（Implemented）
 - [Evolutions/draft-launchpad-replica.md](Evolutions/draft-launchpad-replica.md) —— 在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad（In Progress）
 - [Evolutions/0012-multi-display.md](Evolutions/0012-multi-display.md) —— 多显示器：照 macOS 15 开在 Dock 所在的那块屏，显示期间拦住 Dock 换屏，显示器变化与失去键盘焦点时收起（Implemented）
 - [Evolutions/0011-runtime-dock-global-discovery.md](Evolutions/0011-runtime-dock-global-discovery.md) —— 在运行时找出 Dock 的两个全局变量，取消构建白名单：按类扫宿主的数据段，删掉构建档案（Implemented）
