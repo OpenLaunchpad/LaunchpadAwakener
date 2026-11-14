@@ -6,6 +6,10 @@ import OSToolbox
 /// Wraps a value that is only ever touched by one thread at a time but cannot say so to the compiler.
 package struct UncheckedSendableBox<Value>: @unchecked Sendable {
     package let value: Value
+
+    package init(value: Value) {
+        self.value = value
+    }
 }
 
 /// Application icons in the Dock's current icon style, rendered off the main thread and kept.

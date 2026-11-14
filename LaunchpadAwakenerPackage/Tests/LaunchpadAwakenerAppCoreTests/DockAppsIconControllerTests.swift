@@ -3,20 +3,26 @@ import Foundation
 import LaunchpadAwakenerPayloadInterface
 import Testing
 
+/// Stands in for the bundle the app assembles; nothing here reads it, only passes its path along.
+private let exampleBundleURL = URL(
+    fileURLWithPath: "/Users/example/Library/Application Support/LaunchpadAwakener/LaunchpadDockIcon.app"
+)
+
 /// The switch for the Launchpad icon on the Dock's Apps tile.
 ///
-/// The app decides and the payload is told, so what a payload is handed — the state *and* the path — is
-/// the observable behaviour here. These tests watch that, not the preference domain it came out of.
+/// The app decides and the payload is told, so what a payload is handed — the state *and* the bundle the
+/// icon is rendered from — is the observable behaviour here. These tests watch that, not the preference
+/// domain it came out of.
 @Suite("The Launchpad icon switch")
 @MainActor
 struct DockAppsIconControllerTests {
     /// What the payloads were handed, in order. Replies are whatever the test needs them to be.
     private final class PayloadRecorder {
-        private(set) var settingsSent: [(isEnabled: Bool, iconPath: String)] = []
+        private(set) var settingsSent: [(isEnabled: Bool, iconBundlePath: String)] = []
         var replies: [DockAppsIconReply] = []
 
-        func send(isEnabled: Bool, iconPath: String) -> [DockAppsIconReply] {
-            settingsSent.append((isEnabled: isEnabled, iconPath: iconPath))
+        func send(isEnabled: Bool, iconBundlePath: String) -> [DockAppsIconReply] {
+            settingsSent.append((isEnabled: isEnabled, iconBundlePath: iconBundlePath))
             return replies
         }
     }
@@ -31,14 +37,16 @@ struct DockAppsIconControllerTests {
     }
 
     private func makeController(
-        iconPath: String? = "/Applications/LaunchpadAwakener.app/Contents/Resources/LaunchpadDockIcon.icns",
+        prepareIconBundle: @escaping @Sendable () throws -> URL = { exampleBundleURL },
         userDefaults: UserDefaults,
         recorder: PayloadRecorder
     ) -> DockAppsIconController {
         DockAppsIconController(
-            iconPath: iconPath,
+            prepareIconBundle: prepareIconBundle,
             userDefaults: userDefaults,
-            sendToPayloads: { isEnabled, iconPath in recorder.send(isEnabled: isEnabled, iconPath: iconPath) }
+            sendToPayloads: { isEnabled, iconBundlePath in
+                recorder.send(isEnabled: isEnabled, iconBundlePath: iconBundlePath)
+            }
         )
     }
 
@@ -63,12 +71,13 @@ struct DockAppsIconControllerTests {
         }
     }
 
-    @Test("switching tells the payload the new state and where the icon is")
-    func sendsTheStateAndThePath() async {
+    @Test("switching tells the payload the new state and which bundle the icon comes from")
+    func sendsTheStateAndTheBundle() async {
         await withPreferences { userDefaults in
             let recorder = PayloadRecorder()
+            let bundleURL = URL(fileURLWithPath: "/tmp/Example/LaunchpadDockIcon.app")
             let controller = makeController(
-                iconPath: "/Applications/Example.app/Contents/Resources/LaunchpadDockIcon.icns",
+                prepareIconBundle: { bundleURL },
                 userDefaults: userDefaults,
                 recorder: recorder
             )
@@ -78,9 +87,30 @@ struct DockAppsIconControllerTests {
 
             #expect(recorder.settingsSent.map(\.isEnabled) == [false, true])
             #expect(
-                recorder.settingsSent.allSatisfy { $0.iconPath == "/Applications/Example.app/Contents/Resources/LaunchpadDockIcon.icns" },
-                "the path goes with every message, so switching on needs no second one"
+                recorder.settingsSent.allSatisfy { $0.iconBundlePath == bundleURL.path },
+                "the bundle goes with every message, so switching on needs no second one"
             )
+        }
+    }
+
+    @Test("the icon's bundle is assembled once, however often the switch moves")
+    func assemblesTheBundleOnce() async {
+        await withPreferences { userDefaults in
+            let preparationCount = Counter()
+            let controller = makeController(
+                prepareIconBundle: {
+                    preparationCount.increment()
+                    return exampleBundleURL
+                },
+                userDefaults: userDefaults,
+                recorder: PayloadRecorder()
+            )
+
+            await controller.applyStoredSetting()
+            await controller.setEnabled(false)
+            await controller.setEnabled(true)
+
+            #expect(preparationCount.value == 1)
         }
     }
 
@@ -138,18 +168,36 @@ struct DockAppsIconControllerTests {
         }
     }
 
-    @Test("a build whose bundle lost the icon cannot be switched on, and says why")
+    @Test("a build whose resources lost the icon cannot be switched on, and says why")
     func refusesWithoutAnIcon() async throws {
         try await withPreferences { userDefaults in
             let recorder = PayloadRecorder()
-            let controller = makeController(iconPath: nil, userDefaults: userDefaults, recorder: recorder)
+            let controller = makeController(
+                prepareIconBundle: { throw DockAppsIconHost.Failure.missingResources },
+                userDefaults: userDefaults,
+                recorder: recorder
+            )
 
-            #expect(!controller.isAvailable)
             await controller.setEnabled(false)
 
             #expect(recorder.settingsSent.isEmpty, "there is no icon to send")
+            #expect(!controller.isAvailable)
             let errorDescription = try #require(controller.lastErrorDescription)
             #expect(errorDescription.contains("Launchpad icon"))
+        }
+    }
+
+    /// Counts calls from a `@Sendable` closure without the test having to reason about isolation.
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+
+        var value: Int {
+            lock.withLock { count }
+        }
+
+        func increment() {
+            lock.withLock { count += 1 }
         }
     }
 }
