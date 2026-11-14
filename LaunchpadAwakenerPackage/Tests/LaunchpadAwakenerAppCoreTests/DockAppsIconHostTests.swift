@@ -5,6 +5,14 @@ import LaunchpadAwakenerPrivateInterfaces
 @testable import LaunchpadAwakenerSpringboardCore
 import Testing
 
+/// Whether this process has a window server session.
+///
+/// The "cannot be opened" decoration is LaunchServices', and it is only drawn where there is a graphical
+/// session: on GitHub's headless runners the same bundle renders without it. So the test that depends on
+/// it runs on a Mac someone is logged into — a development machine or a test machine — and is skipped in
+/// CI, rather than being written to pass everywhere and therefore prove less.
+private let hasWindowServerSession = CGSessionCopyCurrentDictionary() != nil
+
 /// The bundle the payload renders the Dock's Apps icon from.
 ///
 /// Two of these tests are the reason this bundle exists in the form it does, and both were found by
@@ -15,7 +23,9 @@ import Testing
 ///   the Dock around it goes dark.
 /// - A bundle whose `CFBundleExecutable` cannot be run is rendered with the "cannot be opened" slash
 ///   across it. Nothing in the code makes that visible — the icon simply comes back wrong — so it is
-///   checked here against the same bundle with the executable bit taken off.
+///   checked here against the same bundle with the executable bit taken off. That check needs a window
+///   server session and is skipped where there is none; that the assembled executable *is* executable is
+///   checked unconditionally in `assemblesABundle`.
 ///
 /// The icon's own resources come from a system app rather than this project's build products, so the
 /// tests say nothing about where anybody's build output happens to be.
@@ -123,7 +133,10 @@ struct DockAppsIconHostTests {
         #expect(light != dark, "the dark appearance came back identical to the light one")
     }
 
-    @Test("an executable that cannot run puts the cannot-open slash across the icon")
+    @Test(
+        "an executable that cannot run puts the cannot-open slash across the icon",
+        .enabled(if: hasWindowServerSession, "needs a window server session; see hasWindowServerSession")
+    )
     func needsARunnableExecutable() throws {
         let runnable = try TemporaryLocations()
         let hostBundleURL = try DockAppsIconHost.prepare(
