@@ -122,6 +122,17 @@ actor PayloadChannel {
         }
     }
 
+    /// How long the payload gets to change the Dock's Apps tile. It hops to the Dock's main thread to
+    /// redraw the tile, which may be in the middle of laying the Dock out.
+    static let dockAppsIconTimeLimit = Duration.seconds(5)
+
+    func setDockAppsIcon(isEnabled: Bool, iconPath: String) async throws -> DockAppsIconReply {
+        guard let peer else { throw ChannelError.notConnected }
+        return try await withTimeLimit(Self.dockAppsIconTimeLimit) {
+            try await peer.send(DockAppsIconRequest(isEnabled: isEnabled, iconPath: iconPath))
+        }
+    }
+
     func close() async {
         await peer?.cancel()
         peer = nil

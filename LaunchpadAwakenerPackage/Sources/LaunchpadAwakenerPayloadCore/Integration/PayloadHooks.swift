@@ -56,11 +56,20 @@ public enum PayloadHooks {
         SpotlightHooks.descriptors() + DockAppEventHandlerHooks.descriptors()
     }
 
-    /// The hooks the springboard can do without, installed as a batch of their own once ``descriptors()`` is
-    /// in: a Dock whose method no longer matches loses only what the hook does, not the springboard. Keeping
-    /// the Dock on its display while the springboard shows is one; without it the Dock moves as 26 and 27 let it.
+    /// Keeping the Dock on its display while the springboard shows: a batch of its own, installed once
+    /// ``descriptors()`` is in. A Dock whose method no longer matches loses only this, not the springboard —
+    /// the Dock then moves as 26 and 27 let it.
     public static func optionalDescriptors() -> [RuntimeMethodHook.Descriptor] {
         DockVisibilityHooks.descriptors()
+    }
+
+    /// The Launchpad icon on the Dock's Apps tile: a batch of its own, for the same reason, and separate
+    /// from ``optionalDescriptors()`` so that one of the two failing does not take the other with it.
+    ///
+    /// Empty when this Dock has neither spelling of its own icon setter; ``DockTileIconHooks`` logs which
+    /// ones it tried and what the Dock has instead.
+    public static func dockAppsIconDescriptors() -> [RuntimeMethodHook.Descriptor] {
+        DockTileIconHooks.descriptors()
     }
 }
 
@@ -128,5 +137,98 @@ struct DockVisibilityHooks {
         MainActor.assumeIsolated {
             SpringboardController.shared.dockWillChangeDisplay(to: displayIdentifier)
         }
+    }
+}
+
+/// Which spelling of the Dock's own icon path this host uses, and the hook for it.
+///
+/// ## Why there is more than one spelling
+///
+/// macOS 26 kept the glass compositing filter on `Tile` as a property, `glassImageCompositingFilter`, shared
+/// by the whole tile. macOS 27 deleted the property and made the filter an argument of every icon setter
+/// instead, so `setImage:preferredGlassBackgroundStyle:` gained a `glassCompositingFilter:` on the end
+/// (26.6.2 and 27.2 Dock metadata; the full account is in the sister project DockIconOverride's
+/// "Dock 图标的三条通路").
+///
+/// ## Why the order is load-bearing
+///
+/// Both spellings exist on macOS 27, both are still implemented, and both are still called — but not for
+/// the same tiles. Cross-referencing the two selector stubs in Dock 2571.1.29: every application-icon path
+/// moved to the new spelling (`-[DOCKFileTile render]`, `-[DOCKProcessTile render]`,
+/// `-[DockBar _handleLaunchNotification:data:]`), while the nine call sites left on the old one are all
+/// stack, trash, folder, URL and window tiles. Hooking the old spelling on macOS 27 therefore installs
+/// cleanly, logs success, and never sees an application icon — which is worse than an error, because
+/// nothing looks wrong. So the candidate with the filter is tried first.
+@Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "DockTileIconHooks")
+enum DockTileIconHooks {
+    /// The hook for the spelling this host both declares and matches; empty when it has neither.
+    ///
+    /// Empty is a deliberate outcome rather than a fallback: better a payload that leaves the Apps tile
+    /// alone than one that marshals arguments into a signature the Dock no longer has.
+    /// The spellings to try, most recent first. The order is what keeps macOS 27 working — see above.
+    static let candidates: [[RuntimeMethodHook.Descriptor]] = [
+        DockTileIconHooksWithCompositingFilter.descriptors(),
+        DockTileIconHooksWithoutCompositingFilter.descriptors(),
+    ]
+
+    static func descriptors() -> [RuntimeMethodHook.Descriptor] {
+        guard let matching = candidates.first(where: matchesHost) else {
+            for descriptor in candidates.flatMap({ $0 }) {
+                let liveTypeEncoding = RuntimeMethodInspector.typeEncoding(
+                    forClassNamed: descriptor.className,
+                    selector: descriptor.selector,
+                    isInstanceMethod: descriptor.isInstanceMethod
+                )
+                #log(
+                    .error,
+                    "-[\(descriptor.className, privacy: .public) \(NSStringFromSelector(descriptor.selector), privacy: .public)] expected \(descriptor.expectedTypeEncoding, privacy: .public), found \(liveTypeEncoding ?? "nothing", privacy: .public)"
+                )
+            }
+            return []
+        }
+        // Default level rather than info: this line is read after a system upgrade, and info does not
+        // survive in the log store that long. See ``PayloadEntry``.
+        #log(
+            .default,
+            "The Dock's icon setter on this host: \(matching.map { NSStringFromSelector($0.selector) }.joined(separator: ", "), privacy: .public)"
+        )
+        return matching
+    }
+
+    private static func matchesHost(_ descriptors: [RuntimeMethodHook.Descriptor]) -> Bool {
+        descriptors.allSatisfy { descriptor in
+            RuntimeMethodInspector.hasMethod(
+                className: descriptor.className,
+                selector: descriptor.selector,
+                matchingTypeEncoding: descriptor.expectedTypeEncoding,
+                isInstanceMethod: descriptor.isInstanceMethod
+            )
+        }
+    }
+}
+
+/// macOS 27's spelling of the Dock's own icon path, where the glass compositing filter is an argument.
+///
+/// Every tile the Dock draws for itself comes through here, so the substitution is kept to one question
+/// asked in one place: ``DockAppsIconOverride/substituteImage(for:replacing:)``, which answers nil for
+/// every tile but Apps and for Apps while the override is off.
+@RuntimeClassHook("Tile")
+struct DockTileIconHooksWithCompositingFilter {
+    /// `image` is a `CGImageRef`, typed as an object because that is how the Dock declares it;
+    /// `glassCompositingFilter` is forwarded untouched, so the tile keeps macOS 27's clear-icon treatment.
+    @RuntimeMethodReplacement
+    func setImage(_ image: AnyObject?, preferredGlassBackgroundStyle: Int, glassCompositingFilter: AnyObject?) {
+        let substituteImage = DockAppsIconOverride.substituteImage(for: host, replacing: image)
+        callOriginal(substituteImage ?? image, preferredGlassBackgroundStyle, glassCompositingFilter)
+    }
+}
+
+/// macOS 26's spelling, where the glass compositing filter is a property of the tile and not an argument.
+@RuntimeClassHook("Tile")
+struct DockTileIconHooksWithoutCompositingFilter {
+    @RuntimeMethodReplacement
+    func setImage(_ image: AnyObject?, preferredGlassBackgroundStyle: Int) {
+        let substituteImage = DockAppsIconOverride.substituteImage(for: host, replacing: image)
+        callOriginal(substituteImage ?? image, preferredGlassBackgroundStyle)
     }
 }

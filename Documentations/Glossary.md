@@ -18,6 +18,12 @@
 
 按英文名 / 标识符字母序排列。
 
+### Apps tile（Apps 格子）
+
+Dock 里打开 Apps 的那一格。Dock 没有「Apps 格子」这个概念——Apps（`/System/Applications/Apps.app`，标识符 `com.apple.apps.launcher`）在它眼里就是一个普通的 App 格子，所以复刻按格子代表的包来认它，读 `-[Tile fileURL]` 再比路径与标识符。注入成功后它显示的是 Launchpad 的图标，因为点它打开的已经是复刻的 Launchpad；配置 App 自己的图标另带一个齿轮，好把两者区分开。
+
+- **主要出现在**：`LaunchpadAwakenerPayloadCore/Host/DockAppsTile.swift`、[实现说明](Internal/DockAppsIcon.md)
+
 ### Dock gap（间隙）
 
 拖着东西停在 Dock 上时，Dock 在自己的图标之间让出的空位：它往图标列表里插一个占位图标（`dummyTile`），每帧按指针挪动，放下时新图标顶替它。拖 App 时只在 App 区出现（访达之后、分隔条之前）。Dock 的 `dummyTileInDock` 标志会误报——指针直接落到某个图标正中时它为真，却没有让出空位——所以复刻松手前在 Dock 的锁内确认占位图标真在图标列表里，才让 Dock 收下 App。

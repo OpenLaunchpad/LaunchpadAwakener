@@ -32,6 +32,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
     private let launchAtLoginController: LaunchAtLoginController
     private let textInputAgentController: TextInputAgentController
     private let killSwitchController: KillSwitchController
+    private let dockAppsIconController: DockAppsIconController
     private let standaloneLaunchpadController: StandaloneLaunchpadController
     private let launchProgress: ApplicationLaunchProgress
     /// While SIP is on, the panel is the banner pointing at the standalone app, and the launch at login row.
@@ -69,6 +70,8 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
     // Launchpad
     private let killSwitchSwitch = NSSwitch()
     private lazy var killSwitchRow = FormRowView(title: "Open the system's Apps instead", subtitle: "Switches itself off when the Mac restarts.", accessoryView: killSwitchSwitch)
+    private let dockAppsIconSwitch = NSSwitch()
+    private lazy var dockAppsIconRow = FormRowView(title: "Use the Launchpad icon for Apps", subtitle: "", accessoryView: dockAppsIconSwitch)
     private let dockBuildStatusView = StatusIndicatorView()
     private lazy var dockBuildRow = FormRowView(title: "Dock build", accessoryView: dockBuildStatusView)
     private let organizeButton = ControlPanelViewController.makeButton(title: "Organize…", controlSize: .regular)
@@ -93,6 +96,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         launchAtLoginController: LaunchAtLoginController,
         textInputAgentController: TextInputAgentController,
         killSwitchController: KillSwitchController,
+        dockAppsIconController: DockAppsIconController,
         standaloneLaunchpadController: StandaloneLaunchpadController,
         launchProgress: ApplicationLaunchProgress,
         isInjectionBlockedBySystemIntegrityProtection: Bool,
@@ -103,6 +107,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         self.launchAtLoginController = launchAtLoginController
         self.textInputAgentController = textInputAgentController
         self.killSwitchController = killSwitchController
+        self.dockAppsIconController = dockAppsIconController
         self.standaloneLaunchpadController = standaloneLaunchpadController
         self.launchProgress = launchProgress
         self.isInjectionBlockedBySystemIntegrityProtection = isInjectionBlockedBySystemIntegrityProtection
@@ -195,6 +200,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         textInputRow.toolTip = Self.textInputHelp
         restartTextInputButton.toolTip = "Ends the helper. launchd starts this app's copy the next time Launchpad opens."
         killSwitchRow.toolTip = "Every way of opening Apps goes to the system's Apps while this is on. Takes effect at once."
+        dockAppsIconRow.toolTip = "The Apps tile in the Dock shows Launchpad's icon while this is on, since that is what opening Apps now shows. This app's own icon carries a gear, so the two stay easy to tell apart. Takes effect at once; the Dock gets its own icon back when this goes off."
         layoutRow.toolTip = "Opens a window listing Launchpad's pages and folders. Changes go to the Dock right away and show the next time Launchpad opens."
         restartDockButton.toolTip = "Only needed after installing a new build: the payload already in the Dock cannot be replaced while it runs. The new Dock is injected right away."
         errorSection.headerTintColor = .systemRed
@@ -223,6 +229,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
             ]),
             FormSectionView(title: "Launchpad", symbolName: "square.grid.3x3.fill", rows: [
                 killSwitchRow,
+                dockAppsIconRow,
                 dockBuildRow,
                 layoutRow,
             ]),
@@ -273,6 +280,11 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         }
         killSwitchSwitch.box.setAction { [weak self] toggle in
             self?.killSwitchController.setEngaged(toggle?.state == .on)
+        }
+        dockAppsIconSwitch.box.setAction { [weak self] toggle in
+            guard let dockAppsIconController = self?.dockAppsIconController else { return }
+            let shouldEnable = toggle?.state == .on
+            Task { await dockAppsIconController.setEnabled(shouldEnable) }
         }
         organizeButton.box.setAction { [weak self] _ in
             self?.showOrganizer()
@@ -363,6 +375,18 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
 
         observe { [weak self] in
             guard let self else { return }
+            let isEnabled = dockAppsIconController.isEnabled
+            dockAppsIconSwitch.state = isEnabled ? .on : .off
+            dockAppsIconRow.subtitle = isEnabled
+                ? "The Dock's Apps tile shows Launchpad's icon."
+                : "Off: the Apps tile shows the system's own icon."
+            // Only a build whose bundle lost the icon, which is worth seeing rather than hiding the row.
+            dockAppsIconSwitch.isEnabled = dockAppsIconController.isAvailable
+            dockAppsIconRow.isEnabled = dockAppsIconController.isAvailable
+        }
+
+        observe { [weak self] in
+            guard let self else { return }
             let dockBuild = StatusLine.dockBuild(reportedBy: injectionCoordinator.residentPayloads.first)
             dockBuildStatusView.show(dockBuild)
             dockBuildRow.toolTip = dockBuild.help
@@ -423,6 +447,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
                 ("Injection", injectionCoordinator.lastErrorDescription),
                 ("Input method helper", textInputAgentController.lastErrorDescription),
                 ("Kill switch", killSwitchController.lastErrorDescription),
+                ("Apps tile icon", dockAppsIconController.lastErrorDescription),
                 ("Standalone Launchpad", standaloneLaunchpadController.lastErrorDescription),
             ].compactMap { label, description in description.map { (label: label, description: $0) } }
             errorSection.rows = errorDescriptions.map { FormRowView(contentView: ErrorDescriptionView(label: $0.label, description: $0.description)) }

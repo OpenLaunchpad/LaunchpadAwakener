@@ -90,6 +90,12 @@ hook 与 Dock 自己的类（Dock 不导出任何类）用 FrameworkToolbox 的 
 
 两个 App 的界面都是 AppKit，用 UIFoundation（开 `AppKitPlus` trait）、AppKitPlus、swift-navigation 与 SnapKit，仓库里不写 SwiftUI。写界面之前先读 `uifoundation-widgets`、`appkit-app-modernization`、`swift-navigation-bindings` 三个 skill；界面层的约定和只在真机上才看得出的坑见 [AppKit 界面层实现说明](Documentations/Internal/AppKitInterface.md)。改了 UIFoundation 的 trait 之后，Xcode 不会重编已经编过的依赖，要删掉整个构建目录再编。
 
+## 两个 App 的图标
+
+独立版 `LaunchpadAwakenerStandalone/AppIcon.icon` 是干净的 Launchpad 图标，注入版 `LaunchpadAwakener/AppIcon.icon` 是同一张图、把 3×3 网格右下角那块灰方块换成齿轮，表示它是配置 App。
+
+**不要给独立版也加齿轮**：Dock 里 Apps 格子显示的那张图就是从独立版产物拷出来的（「Embed Standalone Launchpad」阶段拷成注入版的 `Contents/Resources/LaunchpadDockIcon.icns`），两边都加齿轮，就没有东西能把配置 App 和启动台本身区分开了。图标改完重新构建即可，拷贝是构建阶段做的。细节、渲染预览的命令与升级后要核对的日志见 [Dock 的 Apps 图标](Documentations/Internal/DockAppsIcon.md)。
+
 ## 构建
 
 **用 `./RunScript.sh`，不要自己拼 xcodebuild 命令。**
@@ -161,7 +167,7 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 
 安装是原子的：任何一个描述符校验失败，整批都不装，payload 保持加载但什么也不做，并留一条日志。**不要为了让 hook 装上而放宽校验** —— 装了一半的宿主进程混合运行着 hook 过和没 hook 过的行为，那是谁都没设计过的状态。
 
-Launchpad 离了也能用的功能（比如显示期间把 Dock 留在原屏），hook 放进 `PayloadHooks.optionalDescriptors()`：主批装好之后另成一批原子安装，对不上只失去那项功能、留一条日志，「没有它」是事先想好的状态。打开 Launchpad 与接管事件的 hook 只能放主批。
+Launchpad 离了也能用的功能，hook 各自成一批：主批装好之后逐批原子安装，对不上只失去那一项、留一条日志，「没有它」是事先想好的状态。现在有两批——`optionalDescriptors()`（显示期间把 Dock 留在原屏）与 `dockAppsIconDescriptors()`（Apps 格子显示 Launchpad 的图标）。**再加这类功能就再开一批，不要并进已有的批**：并进去就等于让两项功能同生共死。打开 Launchpad 与接管事件的 hook 只能放主批。
 
 ## 两条注入路径
 

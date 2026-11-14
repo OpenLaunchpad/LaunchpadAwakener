@@ -91,6 +91,26 @@ public enum PayloadEntry {
         }
     }
 
+    /// Installs the hook that puts the Launchpad icon on the Dock's Apps tile, as a batch of its own;
+    /// returns how many hooks went in. Separate from ``installOptionalHooks()`` so that one of the two
+    /// failing does not take the other with it.
+    private static func installDockAppsIconHooks() -> Int {
+        let iconHooks = PayloadHooks.dockAppsIconDescriptors()
+        guard !iconHooks.isEmpty else {
+            // `DockTileIconHooks` has logged which spellings it tried and what the Dock has instead.
+            return 0
+        }
+        do {
+            try RuntimeMethodHook.installAtomically(iconHooks)
+            DockAppsIconOverride.noteHookInstalled()
+            logger.notice("Installed \(iconHooks.count, privacy: .public) hook(s) on the Dock's icon path: the Apps tile can show the Launchpad icon")
+            return iconHooks.count
+        } catch {
+            logger.error("The hook on the Dock's icon path is not installed: \(String(describing: error), privacy: .public); the Apps tile keeps the Dock's own icon")
+            return 0
+        }
+    }
+
     private static func installHooks() -> HookInstallation {
         let hooks = PayloadHooks.descriptors()
 
@@ -106,7 +126,7 @@ public enum PayloadEntry {
             // memory buffer and are gone from the log store within hours, and this line — with the
             // method check above it — is exactly what gets looked up after a system upgrade.
             logger.notice("Installed \(hooks.count, privacy: .public) hook(s)")
-            let optionalHookCount = installOptionalHooks()
+            let optionalHookCount = installOptionalHooks() + installDockAppsIconHooks()
             let missingVisibilityMembers = LiveDockVisibility.missingMembers()
             if missingVisibilityMembers.isEmpty {
                 logger.info("The Dock's visibility controller matches: the Dock is kept on screen, and slides away for an open folder")

@@ -255,6 +255,14 @@ zipinfo -1 "$STANDALONE_ARCHIVE_PATH" "Launchpad.app/Contents/MacOS/Launchpad" >
     || fail "$STANDALONE_ARCHIVE_PATH does not hold Launchpad.app"
 log "Embedded standalone app: $(du -h "$STANDALONE_ARCHIVE_PATH" | cut -f1) zipped"
 
+# --- The icon the Dock's Apps tile is given ----------------------------------
+#
+# Copied out of the standalone app by the same phase: the Launchpad icon without the gear this app's own
+# icon carries. Without it the Apps tile keeps the system's icon, and nothing else fails.
+DOCK_ICON_PATH="$APP_PATH/Contents/Resources/LaunchpadDockIcon.icns"
+[[ -f "$DOCK_ICON_PATH" ]] || fail "expected the Launchpad icon for the Dock at $DOCK_ICON_PATH"
+log "Icon for the Dock's Apps tile: $(du -h "$DOCK_ICON_PATH" | cut -f1)"
+
 if $LAUNCH; then
     log "Launching $APP_PATH"
     run open "$APP_PATH"

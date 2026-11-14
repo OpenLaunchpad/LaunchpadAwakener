@@ -1,6 +1,7 @@
 # LaunchpadAwakener 文档索引
 
 - [Evolutions/README.md](Evolutions/README.md) —— 提案状态总表
+- [Evolutions/draft-dock-apps-icon.md](Evolutions/draft-dock-apps-icon.md) —— 注入成功后把 Dock 的 Apps 图标换成 Launchpad 的图标，配置 App 的图标加齿轮标志区分（Draft）
 - [Evolutions/draft-launchpad-replica.md](Evolutions/draft-launchpad-replica.md) —— 在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad（In Progress）
 - [Evolutions/0012-multi-display.md](Evolutions/0012-multi-display.md) —— 多显示器：照 macOS 15 开在 Dock 所在的那块屏，显示期间拦住 Dock 换屏，显示器变化与失去键盘焦点时收起（Implemented）
 - [Evolutions/0011-runtime-dock-global-discovery.md](Evolutions/0011-runtime-dock-global-discovery.md) —— 在运行时找出 Dock 的两个全局变量，取消构建白名单：按类扫宿主的数据段，删掉构建档案（Implemented）
@@ -19,5 +20,6 @@
 - [Internal/AppKitInterface.md](Internal/AppKitInterface.md) —— 两个 App 的 AppKit 界面层的实现说明：外壳与模块、分组表单的尺寸、主菜单、登录时启动、只在真机上才看得出的坑
 - [Internal/ControlPanel.md](Internal/ControlPanel.md) —— 注入版 App 控制面板的实现说明：payload 通道、旧 payload 的识别、闪退保护、状态横幅的顺序
 - [Internal/LaunchpadOrganizer.md](Internal/LaunchpadOrganizer.md) —— 整理 Launchpad 窗口的实现说明：App 不碰数据库、编辑带版本号、一批编辑一个事务、拖动与分类
+- [Internal/DockAppsIcon.md](Internal/DockAppsIcon.md) —— Dock 的 Apps 图标的实现说明：两份图标的来源、只 hook 第一条通路、两个拼写的顺序、用 render 施加与撤销、升级后核对什么
 - [Internal/ReviewAdjudications.md](Internal/ReviewAdjudications.md) —— 代码审查的已裁决清单：判为误报或不修的发现与理由
 - [Glossary.md](Glossary.md) —— 术语表：间隙、全局扫描、DockSwipe、宿主、注入版、独立版、退回开关、payload 通道、闪退保护、常驻 payload、等价图层、离屏自检、Springboard、文本输入辅助进程

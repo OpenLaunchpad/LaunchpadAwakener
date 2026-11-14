@@ -51,6 +51,52 @@ struct PayloadHookSignatureTests {
         #expect(descriptor.isInstanceMethod)
         #expect(ObjCTypeEncodingNormalization.matches(descriptor.expectedTypeEncoding, "v20@0:8I16"))
     }
+
+    /// The Dock's own icon path, which the Launchpad icon on the Apps tile is substituted on.
+    ///
+    /// Two spellings, because macOS 27 moved the glass compositing filter off `Tile` and onto every icon
+    /// setter as a trailing argument. The offsets are not the 26 ones plus eight: in `v36@0:8@16B24@28`,
+    /// which is the replacement setters' 27 encoding, the `BOOL` takes four bytes. Which is the reason
+    /// these are read out of the Dock rather than worked out from the 26 ones.
+    @Test func dockIconHooksMatchTheDock() throws {
+        let withCompositingFilter = try #require(DockTileIconHooksWithCompositingFilter.descriptors().first)
+        #expect(DockTileIconHooksWithCompositingFilter.descriptors().count == 1)
+        #expect(withCompositingFilter.className == "Tile")
+        #expect(
+            NSStringFromSelector(withCompositingFilter.selector)
+                == "setImage:preferredGlassBackgroundStyle:glassCompositingFilter:"
+        )
+        #expect(withCompositingFilter.isInstanceMethod)
+        #expect(ObjCTypeEncodingNormalization.matches(withCompositingFilter.expectedTypeEncoding, "v40@0:8@16q24@32"))
+
+        let withoutCompositingFilter = try #require(DockTileIconHooksWithoutCompositingFilter.descriptors().first)
+        #expect(DockTileIconHooksWithoutCompositingFilter.descriptors().count == 1)
+        #expect(withoutCompositingFilter.className == "Tile")
+        #expect(NSStringFromSelector(withoutCompositingFilter.selector) == "setImage:preferredGlassBackgroundStyle:")
+        #expect(withoutCompositingFilter.isInstanceMethod)
+        #expect(ObjCTypeEncodingNormalization.matches(withoutCompositingFilter.expectedTypeEncoding, "v32@0:8@16q24"))
+    }
+
+    /// macOS 27 has both spellings and calls both, but application icons go only through the one with the
+    /// filter. Taking the other first would install cleanly, report success, and never see an application
+    /// icon — so this order is the whole feature on 27.
+    @Test("the icon setter with the compositing filter is tried first")
+    func dockIconHookPrefersTheSpellingApplicationIconsTravel() throws {
+        let firstCandidate = try #require(DockTileIconHooks.candidates.first?.first)
+
+        #expect(
+            NSStringFromSelector(firstCandidate.selector)
+                == "setImage:preferredGlassBackgroundStyle:glassCompositingFilter:"
+        )
+    }
+
+    /// Three batches, not two. A Dock that changed its icon setter must still keep the Dock on its display,
+    /// and a Dock that changed `forceDockOntoDisplay:` must still be able to show the Launchpad icon.
+    @Test("the Apps tile's icon is a batch of its own")
+    func theAppsTileIconIsABatchOfItsOwn() {
+        #expect(!PayloadHooks.springboardDescriptors().map(\.className).contains("Tile"))
+        #expect(!PayloadHooks.optionalDescriptors().map(\.className).contains("Tile"))
+    }
 }
 
 /// The selectors `requirements` name and the encodings derived for them, against the ones read from the Dock.
@@ -99,6 +145,26 @@ struct DockProxySignatureTests {
         expectRequirements(DockBarVisibilityAccessImplementation.methodRequirements, toMatch: [
             "visibilityController": "@16@0:8",
         ])
+    }
+
+    /// Reaching the Apps tile and asking the Dock to draw it again. Unchanged from 26.0 to 27.2.
+    ///
+    /// Deliberately absent from ``DockHostInterface/requiredMethods``: a Dock that changed any of these
+    /// should lose the Launchpad icon on its Apps tile, not the whole replica — which is what putting them
+    /// in that list would do.
+    @Test func appsTileAccess() {
+        #expect(DockTileIconAccessImplementation.runtimeClassName == "Tile")
+        expectRequirements(DockTileIconAccessImplementation.methodRequirements, toMatch: [
+            "fileURL": "@16@0:8",
+            "render": "v16@0:8",
+        ])
+        #expect(DockBarTileListImplementation.runtimeClassName == "DockBar")
+        expectRequirements(DockBarTileListImplementation.methodRequirements, toMatch: [
+            "tiles": "@16@0:8",
+        ])
+
+        let requiredSelectorNames = Set(DockHostInterface.requiredMethods.map(\.selectorName))
+        #expect(requiredSelectorNames.isDisjoint(with: ["fileURL", "render", "tiles"]))
     }
 
     @Test func displayDescriptor() {

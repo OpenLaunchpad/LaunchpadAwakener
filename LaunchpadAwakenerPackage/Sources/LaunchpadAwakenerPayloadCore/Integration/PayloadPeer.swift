@@ -86,6 +86,9 @@ actor PayloadPeer {
         peer.setMessageHandler(LayoutEditRequest.self) { request in
             await LayoutOrganizerService.reply(to: request)
         }
+        peer.setMessageHandler(DockAppsIconRequest.self) { request in
+            await DockAppsIconOverride.apply(request)
+        }
     }
 
     private func currentStatus() async -> PayloadStatus {
