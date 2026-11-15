@@ -61,6 +61,11 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 - **关闭**总由 Dock 发起：按钮、按键，或 Launchpad 开始收起（按取消处理，与 15 相同）。关闭后若辅助进程正托管着搜索框，把 key 窗口交还给那扇窗口，转发来的键才不落空。15 等服务关好才删；复刻关闭请求一发出就开始删除动画，气泡同时淡出。
 - **辅助进程不在时**：连不上或弹不出，退回界面层自己画的气泡（`SpringboardDeletionPanel`，照 ecap 的尺寸画的平面近似）；气泡显示中辅助进程退出，按取消处理。一次只问一个 App，与 15 相同。
 - **辅助进程 2 秒不回话也退回自己画的**（`TextInputHelperClient` 的 `presentationDeadline`）。等回话期间界面吞掉所有点按，不设时限，等不到就成了卡死、只能点 Dock 收起。等不到的情形真出现过：launchd 起不来辅助进程，却还留着它的 Mach 服务，请求就排在服务的队列里，既没人回，也不报错。那次是 launchd 里的任务挂着一条已经不在的登录项记录（`launchctl print` 里的 `BTM uuid` 在 `sfltool dumpbtm` 里查不到），每 10 秒拉起一次、每次 `EX_CONFIG` 失败，持续了一天，注销重新登录才能重建。超时后 payload 按辅助进程走了处理，放掉这个 session：之后才起来的辅助进程就算弹出了气泡，也会因为 Dock 走了而马上关掉；下一次请求再建新的 session，launchd 随之再试着拉起它。搜索框与改名框等不到回话时本来就在本地编辑，不吞点按，所以没设时限。
+- **辅助进程的登录项与 launchd 任务会对不上，而 `SMAppService` 照样报「已启用」。** 见过三种坏法：
+  - Ultra（2026-11-14 起）：任务挂着已经不在的登录项记录，起不来，Mach 服务却还在，请求石沉大海。出事前正式版 1.0（`/Applications`）与开发构建（同一个 bundle ID）轮流打开过。
+  - 测试 MacBook（至少从 2026-11-13 起）：登录项记着「已启用」，launchd 里却没有这个任务，连接在查找服务时就失败，删除确认当场退回自己画的，输入法不可用。
+  - 探针里（下文）：系统接口报「找不到」，注册与注销都报签名错误 `-67023`（资源目录或签名被改动过），旧任务还在照常拉起旧的辅助进程。
+  为找触发条件，在测试 MacBook 上用一个独立 bundle ID 的探针（两份同 ID 的小 App，各带一个 LaunchAgent）照 Ultra 的顺序轮流打开：开发版注册、正式版注册、开发版再打开并结束它正在跑的辅助进程、等 launchd 重新拉起。只轮流打开、只把正式版改用 Developer ID 签、只把开发版副本原地换成重新编译的版本，都不坏；后两样同时出现的两次里坏了一次（第三种坏法），所以更像时机上的竞争，没能定下触发条件。第二种坏法在探针里重现过，先 `unregister()` 再 `register()` 就恢复；第一种没能重现，这样修是否管用不知道。开发构建因此改了名字与 bundle ID（`LaunchpadAwakenerDebug.app`，`com.MxIris.LaunchpadAwakener.debug`），不再和装着的正式版共用一份登录项记录。查法：`launchctl print gui/<uid>/<label>` 看任务的 `state`、`BTM uuid`、`runs` 与 `last exit code`，`sfltool dumpbtm` 看登录项记录（经 ssh 在 MacBook 上跑要管理员授权，跑不了）。
 
 文案 27 的 Dock.app 里没有了，取自 15.5 Dock.app 的各语言 `Localizable.strings`（`SpringboardDeletionStrings`），两种气泡共用。确认后照 15 先用 0.5 秒把图标缩到一成并淡出，再调卸载器；成功后本页在 0.25 秒内补上空位（后面的页不前移），库删掉这个 App；失败时图标在原处恢复（15 是放到下一个空位）。卸载是永久删除，不进废纸篓，连同偏好设置与容器一起删，正在运行的会先被要求退出、再被强制结束，与 15 相同。
 

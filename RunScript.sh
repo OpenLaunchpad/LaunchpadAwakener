@@ -181,7 +181,14 @@ XCODEBUILD_LOG_NAME="build" run_piped xcodebuild build \
     ${EXTRA_BUILD_ARGUMENTS[@]+"${EXTRA_BUILD_ARGUMENTS[@]}"}
 
 PRODUCTS_DIR="$DERIVED_DATA/Build/Products/$CONFIGURATION"
-APP_PATH="$PRODUCTS_DIR/LaunchpadAwakener.app"
+# Debug builds get their own name and bundle ID (the target's PRODUCT_NAME and
+# PRODUCT_BUNDLE_IDENTIFIER), so that the system's login items, which it keeps by bundle ID, do not mix a
+# development build's records with an installed release's.
+case "$CONFIGURATION" in
+    Debug) APP_NAME="LaunchpadAwakenerDebug" ;;
+    *)     APP_NAME="LaunchpadAwakener" ;;
+esac
+APP_PATH="$PRODUCTS_DIR/$APP_NAME.app"
 
 if $DRY_RUN; then
     log "Skipping verification and launch (--dry-run)"

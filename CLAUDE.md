@@ -6,15 +6,15 @@
 
 ## 只在测试机上运行
 
-**开发机（两台 Mac Studio）上只编译、跑单元测试，绝不运行 App、注入 Dock 或重启 Dock。** 全屏窗口一旦失控，整台机器的输入都会被锁住，只能重启——这在 macOS 26 上真实发生过。运行与验证只在测试机上做：27 用测试用的 MacBook，`ssh JH@192.168.50.13`，macOS 27.2（26B123），SIP 已关，App 装在 `/Applications/LaunchpadAwakener.app`；26 用下面说的虚拟机（虚拟机里失控只锁住虚拟机）。
+**开发机（两台 Mac Studio）上只编译、跑单元测试，绝不运行 App、注入 Dock 或重启 Dock。** 全屏窗口一旦失控，整台机器的输入都会被锁住，只能重启——这在 macOS 26 上真实发生过。运行与验证只在测试机上做：27 用测试用的 MacBook，`ssh JH@192.168.50.13`，macOS 27.2（26B123），SIP 已关，开发构建装在 `/Applications/LaunchpadAwakenerDebug.app`；26 用下面说的虚拟机（虚拟机里失控只锁住虚拟机）。
 
 在开发机上编译后部署（`<agent>` 是 `claude` 或 `codex`，各用各的构建目录）：
 
 ```bash
 queued-build ./RunScript.sh --no-launch --derived-data /Volumes/DerivedData/Agents.noindex/<agent>/DerivedData/LaunchpadAwakener
-ssh JH@192.168.50.13 'osascript -e "tell application \"LaunchpadAwakener\" to quit"'
-rsync -a --delete /Volumes/DerivedData/Agents.noindex/<agent>/DerivedData/LaunchpadAwakener/Build/Products/Debug/LaunchpadAwakener.app/ JH@192.168.50.13:/Applications/LaunchpadAwakener.app/
-ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakener.app'
+ssh JH@192.168.50.13 'osascript -e "tell application \"LaunchpadAwakenerDebug\" to quit"'
+rsync -a --delete /Volumes/DerivedData/Agents.noindex/<agent>/DerivedData/LaunchpadAwakener/Build/Products/Debug/LaunchpadAwakenerDebug.app/ JH@192.168.50.13:/Applications/LaunchpadAwakenerDebug.app/
+ssh JH@192.168.50.13 'killall Dock; sleep 2; open /Applications/LaunchpadAwakenerDebug.app'
 ```
 
 日志的 subsystem 是 `com.MxIris.LaunchpadAwakener`，info 级要加 `--info`：`/usr/bin/log show --info --last 5m --predicate 'subsystem == "com.MxIris.LaunchpadAwakener"'`。经 ssh 跑时**必须写全路径**：MacBook 的登录 shell 是 zsh，zsh 有个同名的内建命令 `log`，裸写 `log show …` 只会报 `too many arguments`，配上 `2>/dev/null` 就成了「一条日志也没有」。
@@ -32,7 +32,7 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 
 带 `--self-check` 的开发构建只在离屏建一次界面、把宿主找到的东西（Dock 的位置与厚度、壁纸来源、图标样式、布局库、窗口）写进日志，15 秒后自己退出，不上屏。不带参数打开就是显示界面，属于交互操作，用户没提就不做。界面卡住时：`touch /tmp/LaunchpadAwakener.disabled` 后它不再显示，`pkill -x Launchpad` 直接结束它；主线程卡住超过 3 秒，它自己的看门狗也会经窗口服务器把窗口撤下。
 
-**macOS 26 上的验证**用 Ultra 上 VirtualBuddy 的 macOS 26 虚拟机：26.6.2（25G83），机器名 `VMdexuniji`，账户 `vm`，`ssh vm@<地址>` 免密（地址由 Ultra 的 `/var/db/dhcpd_leases` 按机器名查，2026-11-08 是 `192.168.64.16`），SIP 已关，App 装在 `/Applications/LaunchpadAwakener.app`，daemon 已在登录项里批准。部署照上面的命令，把地址换成虚拟机的。它和 15 的虚拟机一样没装开发工具（`otool`、`strings`、`python3` 会弹安装提示），查东西用 `md5`、`osascript -l JavaScript` 这类系统自带的命令。
+**macOS 26 上的验证**用 Ultra 上 VirtualBuddy 的 macOS 26 虚拟机：26.6.2（25G83），机器名 `VMdexuniji`，账户 `vm`，`ssh vm@<地址>` 免密（地址由 Ultra 的 `/var/db/dhcpd_leases` 按机器名查，2026-11-08 是 `192.168.64.16`），SIP 已关，App 装在 `/Applications/LaunchpadAwakener.app`（开发构建改名之前装的，换成 `LaunchpadAwakenerDebug.app` 时要重新批准 daemon），daemon 已在登录项里批准。部署照上面的命令，把地址换成虚拟机的。它和 15 的虚拟机一样没装开发工具（`otool`、`strings`、`python3` 会弹安装提示），查东西用 `md5`、`osascript -l JavaScript` 这类系统自带的命令。
 
 **用户要求看界面时**（截图、点击属于交互操作，用户没提就不做）：经 ssh 跑 `open -a Apps` 打开、`screencapture -x` 截图（能截到窗口内容）、`screencapture -v -V <秒>` 录屏后拷回本机用 ffmpeg 抽帧（录屏启动要零点几秒到一两秒，先开录、等一秒再操作）；点击与拖动用在 MacBook 上编译的一个发 `CGEvent` 的小工具，经 ssh 发的事件实测有效。开发构建 20 秒没有输入就自动收起，打开与操作要放在同一条命令里。拖动会改用户的布局，测完要还原。
 
@@ -190,10 +190,10 @@ daemon 的可执行文件在两种配置下都叫 `LaunchpadAwakenerDaemon`，**
 
 独立版的 bundle ID 也是两处：独立版 target 的 `PRODUCT_BUNDLE_IDENTIFIER`，与注入版认它用的 `StandaloneLaunchpadInstaller.bundleIdentifier`。对不上时，控制面板认不出装好的独立版。
 
-Debug 和 Release 用不同的服务名，这样开发中的构建和已安装的正式版不会互相抢 Mach 服务注册。
+Debug 和 Release 用不同的服务名，这样开发中的构建和已安装的正式版不会互相抢 Mach 服务注册。注入版 App 本身在 Debug 下也换了名字与 bundle ID（`LaunchpadAwakenerDebug.app`，`com.MxIris.LaunchpadAwakener.debug`）：系统的登录项按 bundle ID 记，同名时开发构建与装着的正式版共用一份记录。2026-11-14 辅助进程在 launchd 里的任务挂上一条已经不在的登录项记录、再也起不来时，正是两版轮流打开过（见实现说明「辅助进程 2 秒不回话也退回自己画的」），只是轮流打开本身没能复现它。`RunScript.sh` 按配置找产物。
 
 ## 运行前提
 
 - 注入其他进程通常需要关闭系统完整性保护（SIP）。目标启用了库校验时，无论用哪种注入方式都必须关。
-- App 启动时读一次 SIP 的实际配置（`SystemIntegrityProtectionConfiguration`）。只有 `csrutil disable` 那样整个关掉才走注入；没关（含只关了一部分）时不装 daemon、不注入，控制面板改为引导用户一键安装并打开独立版。两台测试机的 SIP 都关着，开发构建带启动参数 `--assume-system-integrity-protection-enabled` 走「没关」那条路：`open /Applications/LaunchpadAwakener.app --args --assume-system-integrity-protection-enabled`。那里的「Install Launchpad」会打开独立版、盖住整块屏幕，只在测试机上按。
+- App 启动时读一次 SIP 的实际配置（`SystemIntegrityProtectionConfiguration`）。只有 `csrutil disable` 那样整个关掉才走注入；没关（含只关了一部分）时不装 daemon、不注入，控制面板改为引导用户一键安装并打开独立版。两台测试机的 SIP 都关着，开发构建带启动参数 `--assume-system-integrity-protection-enabled` 走「没关」那条路：`open /Applications/LaunchpadAwakenerDebug.app --args --assume-system-integrity-protection-enabled`。那里的「Install Launchpad」会打开独立版、盖住整块屏幕，只在测试机上按。
 - daemon 需要用户在「系统设置 › 通用 › 登录项」批准一次，这一步无法跳过。App 的状态文字会说明当前卡在哪一步。
