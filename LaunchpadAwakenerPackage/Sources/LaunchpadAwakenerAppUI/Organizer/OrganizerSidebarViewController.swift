@@ -114,10 +114,14 @@ private final class OrganizerSidebarDataSource: NSOutlineViewDiffableDataSource<
         nil
     }
 
+    /// Always onto the row under the pointer: the sidebar has no order of its own to insert into. Near a
+    /// row's top or bottom edge AppKit proposes a drop between rows, under the row's parent — the page a
+    /// folder is on, or none at all between pages — and taking that proposal made the highlight jump
+    /// between the folder and its page as the pointer moved, and the drop land on the page.
     override func outlineView(_ outlineView: NSOutlineView, validateDrop info: any NSDraggingInfo, proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
-        guard dropOperation(info, onto: item) != nil else { return [] }
-        // Always onto the row itself: the sidebar has no order of its own to insert into.
-        outlineView.setDropItem(item, dropChildIndex: NSOutlineViewDropOnItemIndex)
+        let rowUnderPointer = outlineView.row(at: outlineView.convert(info.draggingLocation, from: nil))
+        guard rowUnderPointer >= 0, let itemUnderPointer = outlineView.item(atRow: rowUnderPointer), dropOperation(info, onto: itemUnderPointer) != nil else { return [] }
+        outlineView.setDropItem(itemUnderPointer, dropChildIndex: NSOutlineViewDropOnItemIndex)
         return .move
     }
 

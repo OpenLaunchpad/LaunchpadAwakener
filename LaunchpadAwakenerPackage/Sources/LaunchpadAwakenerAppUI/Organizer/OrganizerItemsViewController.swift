@@ -126,7 +126,7 @@ final class OrganizerItemsViewController: XiblessViewController<XiblessView>, NS
 
         observe { [weak self] in
             guard let self else { return }
-            statusBar.show(isApplying: viewModel.organizer.isApplying, errorDescription: viewModel.organizer.lastErrorDescription)
+            statusBar.show(isApplying: viewModel.organizer.showsApplyingProgress, errorDescription: viewModel.organizer.lastErrorDescription)
         }
     }
 
@@ -360,11 +360,17 @@ final class OrganizerStatusBarView: XiblessView {
         let topBorder = NSBox()
         topBorder.boxType = .separator
 
+        // The message takes the room the spinner leaves. Sized to its text instead, the label's width came
+        // from the wrap width that `layout()` reads back from that width, so an empty label's few points
+        // stuck, and the first message broke after every letter.
         let stackView = NSStackView(views: [progressIndicator, messageLabel])
         stackView.orientation = .horizontal
         stackView.alignment = .centerY
+        stackView.distribution = .fill
         stackView.spacing = 8
         stackView.detachesHiddenViews = true
+        progressIndicator.setContentHuggingPriority(.required, for: .horizontal)
+        messageLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         hierarchy {
             effectView

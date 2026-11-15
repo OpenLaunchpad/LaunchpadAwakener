@@ -56,7 +56,8 @@ LaunchpadAwakenerPackage/Sources/
 
 **主菜单拼成 SwiftUI 那一套。** 用 UIFoundation 的 `MainMenu` 拼出：没有 File 菜单，Close 在 Window 菜单顶上，两个窗口的打开命令列在 Window 菜单里（窗口自己设 `isExcludedFromWindowsMenu`，免得列两遍）。关掉了窗口标签页（`allowsAutomaticWindowTabbing`），否则 View 与 Window 菜单会多出一组标签页命令。View 菜单在前台窗口没有工具栏、不能自定义工具栏、没有侧栏时隐藏对应的项。独立版「Settings…」的齿轮在 macOS 27 上要设 `preferredImageVisibility = .visible`：27 默认隐藏菜单项的图片。
 
-**三个只在屏幕上才看得出的坑。**
+**四个只在屏幕上才看得出的坑。**
+- 换行标签在 `layout()` 里把自己的宽度写回 `preferredMaxLayoutWidth`，前提是宽度由外面定：两边钉住，或放在 `.fill` 分布的栈视图里、横向抱紧调低。整理窗口的状态条原来放在默认分布的栈视图里，标签按文字定宽，空标签的几点宽被写回去后再也撑不开，第一条消息逐字换行成「U / p」。
 - 菜单工具栏项（`NSMenuToolbarItem`）把菜单当下拉菜单用，第一项被当成按钮标题、不显示。「Move To」会丢掉「Page 1」、「Arrange」会丢掉「Sort by Name」，所以重建菜单时开头垫一个空项。
 - AppKitPlus 的 `NSScrollViewController` 只对关掉了 `translatesAutoresizingMaskIntoConstraints` 的文档视图做 Auto Layout，否则按它的 frame 摆。按分类归类的分组列表因此一片空白；控制面板的表单没出事，只是因为 SnapKit 给它自身加约束时顺手关掉了这个开关。两处都改成显式关掉。
 - swift-navigation 2.11.101 在窗口上用绑定弹 `NSAlert` 时，把 alert 的窗口直接挂成 sheet，跳过了 `beginSheetModal(for:)`，alert 没排版，露出 nib 里的占位控件（空按钮、帮助按钮、「<Do not show this message again>」）。解散确认改为在 `observe {}` 里直接 `beginSheetModal(for:)`，关闭时写回 nil。fork 的 `main` 上已重做了弹出 API，升到包含它的版本后可以改回绑定。
@@ -72,7 +73,7 @@ LaunchpadAwakenerPackage/Sources/
 
 ## 验证
 
-- 单元测试：AppCore 的 `ReadinessPresentationTests`、`StatusLineTests`、`LaunchpadOrganizerViewModelTests`；SharedUI 的 `FormViewTests`（行高、节高、隐藏行与分隔线）、`ContentSizedWindowPlacementTests`、`ApplicationMainMenuTests`、`ApplicationLaunchTests`（用构造的 Apple 事件）。
+- 单元测试：AppCore 的 `ReadinessPresentationTests`、`StatusLineTests`、`LaunchpadOrganizerViewModelTests`；SharedUI 的 `FormViewTests`（行高、节高、隐藏行与分隔线）、`ContentSizedWindowPlacementTests`、`ApplicationMainMenuTests`、`ApplicationLaunchTests`（用构造的 Apple 事件）；AppUI 的 `OrganizerSidebarDropTests`（在不上屏的窗口里按指针位置驱动侧栏的拖放）与 `OrganizerStatusBarTests`。
 - 构建：`RunScript.sh` 两个 scheme 都编过，daemon 与 payload 仍是 `x86_64 arm64 arm64e`，App 是 `x86_64 arm64`；旧 package 构建器下 UIFoundation 的编译参数带 `-DAppKitPlus`。
 - 测试 MacBook（27.2）上与改写前的截图逐张对照：控制面板、菜单栏菜单、五个主菜单、整理窗口（侧栏、列表、搜索结果、选中文件夹、Arrange 与 Move To 菜单、改名 sheet、解散确认、按分类归类 sheet）、独立版设置窗口与它的 App 菜单。
 - 测试 MacBook 上的交互：开机启动开着时用 `open` 手动打开 App，控制面板弹出（日志「Launched by the user」）；退回开关开、关与横幅的「Turn Back On」；自动再注入开、关；「Restart Dock」后换了 Dock 进程并自动再注入；关掉窗口后 App 变回 UIElement、没有 Dock 图标，再打开时回到前台并弹出控制面板；从菜单栏菜单打开整理窗口；列表改用可重排数据源后的四种拖放（同一文件夹里重排，录屏里看得到行在滑动；拖到文件夹行上放进去；拖到侧栏的页上；从搜索结果拖到侧栏的文件夹上），测前备份布局库，测后还原并在整理窗口里核对过。

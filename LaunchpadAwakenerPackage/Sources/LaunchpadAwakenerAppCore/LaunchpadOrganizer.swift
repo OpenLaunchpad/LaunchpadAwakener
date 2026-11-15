@@ -26,11 +26,17 @@ public final class LaunchpadOrganizer {
     public private(set) var lastErrorDescription: String?
     /// Whether a batch of edits is on its way to the Dock.
     public private(set) var isApplying = false
+    /// Whether the window says an edit is under way: once one has waited for the Dock's answer longer
+    /// than the delay given at creation, until the answer comes. The Dock usually answers within a tenth
+    /// of a second, and saying so for that long only makes the window flicker. For display.
+    public private(set) var showsApplyingProgress = false
 
     @ObservationIgnored
     private let lookUpChannel: @MainActor () -> LayoutChannelLookup
     @ObservationIgnored
     private let categoryName: @Sendable (URL) -> String?
+    @ObservationIgnored
+    private let applyingProgressDelay: Duration
     /// The channel the current layout came through. A new Dock starts counting revisions afresh.
     @ObservationIgnored
     private var layoutChannelIdentifier: ObjectIdentifier?
@@ -44,9 +50,14 @@ public final class LaunchpadOrganizer {
         )
     }
 
-    init(lookUpChannel: @escaping @MainActor () -> LayoutChannelLookup, categoryName: @escaping @Sendable (URL) -> String?) {
+    init(
+        lookUpChannel: @escaping @MainActor () -> LayoutChannelLookup,
+        categoryName: @escaping @Sendable (URL) -> String?,
+        applyingProgressDelay: Duration = .milliseconds(500)
+    ) {
         self.lookUpChannel = lookUpChannel
         self.categoryName = categoryName
+        self.applyingProgressDelay = applyingProgressDelay
     }
 
     // MARK: - Reading
@@ -161,7 +172,17 @@ public final class LaunchpadOrganizer {
             return
         }
         isApplying = true
-        defer { isApplying = false }
+        let progressAnnouncement = Task { [weak self, applyingProgressDelay] in
+            try? await Task.sleep(for: applyingProgressDelay)
+            // Cancelled on the main actor before this resumes there when the answer came in time.
+            guard !Task.isCancelled else { return }
+            self?.showsApplyingProgress = true
+        }
+        defer {
+            progressAnnouncement.cancel()
+            isApplying = false
+            showsApplyingProgress = false
+        }
         do {
             let reply = try await channel.applyLayoutEdits(edits, expectedRevision: layout.revision)
             switch reply {

@@ -268,10 +268,11 @@ public final class LaunchpadOrganizerViewModel {
         selectedItems.contains(itemIdentifier) ? selectedItems : [itemIdentifier]
     }
 
-    /// Whether `itemIdentifiers` can make a new folder: two applications or more, and no edit under way.
+    /// Whether `itemIdentifiers` can make a new folder: two applications or more, and no edit shown as
+    /// under way. An edit sent while a quicker one is still out is dropped by the organizer.
     public func canMakeFolder(from itemIdentifiers: Set<ItemIdentifier>) -> Bool {
         guard let layout else { return false }
-        return !organizer.isApplying && itemIdentifiers.count >= 2 && layout.areAllApplications(itemIdentifiers)
+        return !organizer.showsApplyingProgress && itemIdentifiers.count >= 2 && layout.areAllApplications(itemIdentifiers)
     }
 
     /// Whether any of `itemIdentifiers` sits in a folder.

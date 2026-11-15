@@ -63,12 +63,13 @@ final class OrganizerWindowController: ActivationTrackingWindowController {
         observe { [weak self] in
             guard let self else { return }
             let selectedItems = viewModel.selectedItems
-            let isApplying = viewModel.organizer.isApplying
+            // Greyed out only once an edit is shown as under way, or every quick edit flickers them.
+            let showsApplyingProgress = viewModel.organizer.showsApplyingProgress
             backItem?.isEnabled = viewModel.canGoBack
-            moveToItem?.isEnabled = viewModel.layout != nil && !selectedItems.isEmpty && !isApplying
+            moveToItem?.isEnabled = viewModel.layout != nil && !selectedItems.isEmpty && !showsApplyingProgress
             newFolderItem?.isEnabled = viewModel.canMakeFolder(from: selectedItems)
-            moveOutItem?.isEnabled = viewModel.isAnyInFolder(selectedItems) && !isApplying
-            arrangeItem?.isEnabled = viewModel.layout != nil && !isApplying
+            moveOutItem?.isEnabled = viewModel.isAnyInFolder(selectedItems) && !showsApplyingProgress
+            arrangeItem?.isEnabled = viewModel.layout != nil && !showsApplyingProgress
         }
         searchField.bind(text: $viewModel.searchText)
     }

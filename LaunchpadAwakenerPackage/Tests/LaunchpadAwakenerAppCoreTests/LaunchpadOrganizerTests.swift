@@ -219,6 +219,83 @@ struct LaunchpadOrganizerTests {
         #expect(organizer.layout == nil)
         #expect(organizer.availability == .unavailable(LayoutUnavailability.stalePayload.description))
     }
+
+    // MARK: - Saying an edit is under way
+
+    @Test("an edit the Dock answers before the delay is never shown as under way")
+    func quickEditShowsNoProgress() async throws {
+        let channel = HeldEditLayoutChannel(snapshot: Sample.snapshot(revision: 4))
+        let organizer = LaunchpadOrganizer(lookUpChannel: { .available(channel) }, categoryName: { _ in nil }, applyingProgressDelay: .seconds(60))
+        await organizer.refresh()
+
+        let edit = Task { await organizer.dissolveFolder(.init(rawValue: Sample.tools)) }
+        try await Self.waitUntil { await channel.isHoldingAnEdit }
+        #expect(organizer.isApplying)
+        #expect(!organizer.showsApplyingProgress)
+
+        await channel.answer()
+        await edit.value
+        #expect(!organizer.showsApplyingProgress)
+    }
+
+    @Test("an edit the Dock takes longer than the delay to answer is shown as under way until it is answered")
+    func slowEditShowsProgressUntilAnswered() async throws {
+        let channel = HeldEditLayoutChannel(snapshot: Sample.snapshot(revision: 4))
+        let organizer = LaunchpadOrganizer(lookUpChannel: { .available(channel) }, categoryName: { _ in nil }, applyingProgressDelay: .zero)
+        await organizer.refresh()
+
+        let edit = Task { await organizer.dissolveFolder(.init(rawValue: Sample.tools)) }
+        try await Self.waitUntil { await channel.isHoldingAnEdit && organizer.showsApplyingProgress }
+
+        await channel.answer()
+        await edit.value
+        #expect(!organizer.isApplying)
+        #expect(!organizer.showsApplyingProgress)
+    }
+
+    /// Waits up to two seconds for `condition`, and fails the test when it never holds.
+    private static func waitUntil(_ condition: @MainActor () async -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while await !condition() {
+            guard ContinuousClock.now < deadline else {
+                Issue.record("the condition did not hold within two seconds", sourceLocation: sourceLocation)
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+}
+
+/// Stands in for a Dock that takes its time over an edit: holds the batch it is sent until the test has it
+/// answered.
+final actor HeldEditLayoutChannel: LayoutChannel {
+    private let snapshot: LayoutSnapshot
+    private var heldAnswer: CheckedContinuation<Void, Never>?
+
+    init(snapshot: LayoutSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    var isHoldingAnEdit: Bool {
+        heldAnswer != nil
+    }
+
+    func fetchLayout(knownRevision: Int?) async throws -> LayoutSnapshotReply {
+        .snapshot(snapshot)
+    }
+
+    func applyLayoutEdits(_ edits: [LayoutEdit], expectedRevision: Int) async throws -> LayoutEditReply {
+        await withCheckedContinuation { continuation in
+            heldAnswer = continuation
+        }
+        return .applied(snapshot)
+    }
+
+    /// Answers the batch being held.
+    func answer() {
+        heldAnswer?.resume()
+        heldAnswer = nil
+    }
 }
 
 @Suite("Layout requests on the wire")

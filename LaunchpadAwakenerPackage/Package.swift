@@ -273,6 +273,18 @@ let package = Package(
             dependencies: ["LaunchpadAwakenerSharedUI"]
         ),
 
+        // The organizer window's views in a window that is never ordered front: where a drop on the
+        // sidebar lands, and how the status bar lays out its message. A stand-in for the payload channel
+        // feeds the view model a layout, so nothing here touches the Dock.
+        .testTarget(
+            name: "LaunchpadAwakenerAppUITests",
+            dependencies: [
+                "LaunchpadAwakenerAppUI",
+                "LaunchpadAwakenerAppCore",
+                "LaunchpadAwakenerPayloadInterface",
+            ]
+        ),
+
         // The app's decision-making: daemon repair, which targets to inject, when displayed state has
         // gone stale, what the window's banner says. The daemon needs root and the payload only means
         // anything inside the Dock, so neither is exercised here.
