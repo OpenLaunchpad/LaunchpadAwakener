@@ -483,6 +483,63 @@ struct TextInputHelperClientTests {
         #expect(interruptions == 0)
     }
 
+    /// The stand-in's session, kept so that it can tell when the Dock lets it go. `XPCSession` declares no
+    /// `Sendable` before macOS 26.
+    private struct LateHelperSession: @unchecked Sendable {
+        let session: XPCSession
+    }
+
+    @Test("a helper that does not answer in time leaves the question to the springboard, and is let go so that the popover it shows late closes")
+    func remoteConfirmationAnsweredLate() async throws {
+        // A helper launchd cannot start answers nothing and never goes away either: the request waits in its
+        // Mach service's queue. One that starts at last answers that it shows the popover, long after.
+        let lateHelperQueue = DispatchQueue(label: "late helper")
+        let sessions = Recorder<LateHelperSession>()
+        let sessionEndings = Recorder<String>()
+        let listener = XPCListener { request in
+            let (decision, session): (XPCListener.IncomingSessionRequest.Decision, XPCSession) = request.accept(
+                incomingMessageHandler: { (message: XPCReceivedMessage) -> (any Encodable)? in
+                    message.handoffReply(to: lateHelperQueue) {
+                        // Three times the deadline the client is given below.
+                        Thread.sleep(forTimeInterval: 0.6)
+                        message.reply(DeletionConfirmationPresentation(isShown: true))
+                    }
+                },
+                cancellationHandler: { error in
+                    sessionEndings.append(error.debugDescription)
+                }
+            )
+            sessions.append(LateHelperSession(session: session))
+            return decision
+        }
+        let client = TextInputHelperClient(destination: .endpoint(listener.endpoint), presentationDeadline: .milliseconds(200))
+        defer {
+            client.cancel()
+            listener.cancel()
+        }
+        let confirmation = Self.remoteConfirmation(client: client)
+        var failures = 0
+        var interruptions = 0
+        var choices: [SpringboardDeletionChoice] = []
+        confirmation.presentationDidFail = {
+            failures += 1
+        }
+        confirmation.interruptionHandler = {
+            interruptions += 1
+        }
+        confirmation.answerHandler = { choice in
+            choices.append(choice)
+        }
+
+        confirmation.present()
+
+        #expect(await waitUntil { failures == 1 }, "The springboard takes every click while it waits, so waiting for good looks like a hang")
+        #expect(await waitUntil { sessionEndings.recorded.count == 1 }, "The helper closes its popover when the Dock lets the session go")
+        #expect(failures == 1)
+        #expect(interruptions == 0)
+        #expect(choices.isEmpty)
+    }
+
     @Test("the helper going away while it shows the confirmation ends the question")
     func remoteConfirmationInterrupted() async throws {
         let helper = StandInHelper(hosting: Self.hosting)

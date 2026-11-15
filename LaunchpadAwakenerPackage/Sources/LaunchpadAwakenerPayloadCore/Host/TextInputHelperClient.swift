@@ -44,12 +44,15 @@ final class TextInputHelperClient {
     var deletionConfirmationInterruptionHandler: (() -> Void)?
 
     private let destination: Destination
+    /// How long showing the deletion confirmation waits for the helper to say whether it shows it.
+    private let presentationDeadline: Duration
     private var session: XPCSession?
     /// Counts the sessions opened, so that a session's handlers can tell whether it is still the current one.
     private var sessionGeneration = 0
 
-    init(destination: Destination) {
+    init(destination: Destination, presentationDeadline: Duration = .seconds(2)) {
         self.destination = destination
+        self.presentationDeadline = presentationDeadline
     }
 
     /// Sets the field up in the helper; `completion` gets what showing it takes, or nil when the helper
@@ -121,21 +124,35 @@ final class TextInputHelperClient {
     // MARK: - The deletion confirmation
 
     /// Has the helper show the confirmation for deleting an application; `completion` gets whether it is on
-    /// screen. Its buttons come back through ``deletionConfirmationAnswerHandler``.
+    /// screen, once. Its buttons come back through ``deletionConfirmationAnswerHandler``.
+    ///
+    /// No answer by the deadline counts as not shown, and the session is let go as if the helper had gone
+    /// away. The springboard takes every click while it waits, so waiting for good looks like a hang, and
+    /// that is what a helper launchd cannot start gives: its Mach service stays registered, so the request
+    /// waits in the service's queue, neither answered nor refused. Letting the session go also has a
+    /// helper that shows the popover late close it again, as it does when the Dock goes.
     func presentDeletionConfirmation(_ configuration: DeletionConfirmationConfiguration, completion: @escaping @MainActor (Bool) -> Void) {
         guard let session = currentSession() else {
             completion(false)
             return
         }
+        let answer = FirstAnswer(completion)
+        let generation = sessionGeneration
+        answer.deadline = Task { [weak self, presentationDeadline] in
+            try? await Task.sleep(for: presentationDeadline)
+            guard !Task.isCancelled, !answer.isGiven else { return }
+            self?.letSessionGo(sessionGeneration: generation, reason: "The text input helper did not answer within \(presentationDeadline) whether it shows the deletion confirmation")
+            answer.give(false)
+        }
         do {
             try session.send(TextInputRequest.presentDeletionConfirmation(configuration)) { (result: Result<DeletionConfirmationPresentation, any Error>) in
                 TextInputHelperClient.onMainActor {
-                    completion(TextInputHelperClient.isShown(from: result))
+                    answer.give(TextInputHelperClient.isShown(from: result))
                 }
             }
         } catch {
             #log(.error, "Could not ask the text input helper to show the deletion confirmation: \(error.localizedDescription, privacy: .public)")
-            completion(false)
+            answer.give(false)
         }
     }
 
@@ -239,6 +256,19 @@ final class TextInputHelperClient {
         }
     }
 
+    /// Lets the session go as if the helper had gone away: what it was asked to host or show is not coming,
+    /// and the next request opens another session, which has launchd try to start the helper again.
+    private func letSessionGo(sessionGeneration generation: Int, reason: String) {
+        guard generation == sessionGeneration, let session else { return }
+        // The session's own cancellation handler then reports nothing.
+        sessionGeneration += 1
+        self.session = nil
+        session.cancel(reason: reason)
+        #log(.error, "\(reason, privacy: .public); letting it go")
+        interruptionHandler?()
+        deletionConfirmationInterruptionHandler?()
+    }
+
     /// The helper exited, refused the Dock, or was never there; launchd starts it again for the next session.
     private func sessionDidEnd(sessionGeneration generation: Int, reason: String) {
         guard generation == sessionGeneration else { return }
@@ -294,4 +324,27 @@ final class TextInputHelperClient {
         guard let symbol = dlsym(dlopen(nil, RTLD_NOW), "CGEventSetWindowLocation") else { return nil }
         return unsafeBitCast(symbol, to: SetWindowLocationFunction.self)
     }()
+}
+
+/// Hands a completion the first of two competing answers, the helper's or a deadline's, and stops the
+/// deadline once it has.
+@MainActor
+private final class FirstAnswer<Value> {
+    private var completion: (@MainActor (Value) -> Void)?
+    var deadline: Task<Void, Never>?
+
+    init(_ completion: @escaping @MainActor (Value) -> Void) {
+        self.completion = completion
+    }
+
+    var isGiven: Bool {
+        completion == nil
+    }
+
+    func give(_ value: Value) {
+        guard let completion else { return }
+        self.completion = nil
+        deadline?.cancel()
+        completion(value)
+    }
 }
