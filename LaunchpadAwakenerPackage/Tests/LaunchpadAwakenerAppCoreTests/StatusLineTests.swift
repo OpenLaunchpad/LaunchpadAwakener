@@ -178,4 +178,21 @@ struct StatusLineTests {
         #expect(elsewhere.tint == .caution)
         #expect(elsewhere.help.contains(Self.helperPath))
     }
+
+    @Test("an enabled helper launchd does not start, even registered again, asks for logging out and back in")
+    func helperDoesNotStart() {
+        let line = StatusLine.textInputHelper(registrationStatus: .enabled, helperState: .notRunning, startCheckOutcome: .doesNotStart)
+
+        #expect(line.text == "Registered, but launchd does not start it — log out and back in.")
+        #expect(line.tint == .critical)
+    }
+
+    @Test("a running helper is shown as running whatever the check at launch found", arguments: [
+        TextInputHelperStartCheck.Outcome.starts, .startsAfterRegisteringAgain, .doesNotStart,
+    ])
+    func runningHelperOutranksTheCheck(outcome: TextInputHelperStartCheck.Outcome) {
+        let line = StatusLine.textInputHelper(registrationStatus: .enabled, helperState: .current(Self.helper), startCheckOutcome: outcome)
+
+        #expect(line == StatusLine(text: "Running · process 4182", tint: .positive, help: Self.helperPath))
+    }
 }

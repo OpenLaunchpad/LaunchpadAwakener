@@ -90,7 +90,12 @@ extension StatusLine {
 extension StatusLine {
     /// The input method helper row: its LaunchAgent's registration until that is enabled, then which copy
     /// of the helper runs.
-    public static func textInputHelper(registrationStatus: SMAppService.Status, helperState: TextInputHelperState) -> StatusLine {
+    /// - Parameter startCheckOutcome: Whether launchd started the helper when the app checked at launch.
+    static func textInputHelper(
+        registrationStatus: SMAppService.Status,
+        helperState: TextInputHelperState,
+        startCheckOutcome: TextInputHelperStartCheck.Outcome? = nil
+    ) -> StatusLine {
         let registrationTint = StatusTint(registrationStatus)
         switch registrationStatus {
         case .enabled:
@@ -105,6 +110,12 @@ extension StatusLine {
             return StatusLine(text: "Unknown status (\(registrationStatus.rawValue)).", tint: registrationTint)
         }
         switch helperState {
+        case .notRunning where startCheckOutcome == .doesNotStart:
+            return StatusLine(
+                text: "Registered, but launchd does not start it — log out and back in.",
+                tint: .critical,
+                help: "System Settings lists the helper as enabled, but launchd did not start it, even after the app registered it again. Logging out and back in has launchd load it afresh. Until then the search and rename fields work without input methods."
+            )
         case .notRunning:
             return StatusLine(
                 text: "Registered — starts when Launchpad opens.",

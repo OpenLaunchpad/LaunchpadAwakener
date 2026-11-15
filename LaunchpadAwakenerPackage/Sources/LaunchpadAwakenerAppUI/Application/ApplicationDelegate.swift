@@ -115,9 +115,13 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
 
         // Needs no daemon either: launchd only starts the helper when a payload connects to it. A helper
         // left running from before this build was installed still runs the old code; it is ended, and launchd
-        // starts this one the next time Launchpad opens.
+        // starts this one the next time Launchpad opens. An enabled agent does not promise that launchd can
+        // start it, so the app then connects once and registers the agent again if nothing starts.
         textInputAgentController.registerIfNeeded()
         textInputAgentController.restartHelperIfReplaced()
+        Task { [textInputAgentController] in
+            await textInputAgentController.repairIfHelperDoesNotStart()
+        }
 
         // Only the launch at login keeps the window closed; the app then waits in the menu bar. Opened by
         // the user — from the Finder, the Dock, `open` — it shows the control panel whether or not

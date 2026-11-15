@@ -14,7 +14,8 @@ import ServiceManagement
 /// Once started, the helper stays up until the user logs out, so a new build or installation of the app
 /// leaves the old helper running; reinstalling the daemon does not touch it. ``helperState`` says which
 /// copy runs, ``restartHelper()`` ends it so that launchd starts this app's copy the next time Launchpad
-/// opens, and ``restartHelperIfReplaced()`` does that by itself at launch.
+/// opens, and ``restartHelperIfReplaced()`` does that by itself at launch. ``repairIfHelperDoesNotStart()``
+/// then checks that launchd starts it at all, which an enabled agent does not promise.
 @Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "TextInputAgentController")
 @Observable
 @MainActor
@@ -24,9 +25,12 @@ public final class TextInputAgentController {
     /// Which copy of the helper is running, read from the process table.
     public private(set) var helperState: TextInputHelperState = .notRunning
 
+    /// Whether launchd started the helper when the app checked at launch; nil until it has.
+    private(set) var startCheckOutcome: TextInputHelperStartCheck.Outcome?
+
     /// What the control panel's row says: the registration until the agent is enabled, then the helper.
     public var statusLine: StatusLine {
-        .textInputHelper(registrationStatus: registrationStatus, helperState: helperState)
+        .textInputHelper(registrationStatus: registrationStatus, helperState: helperState, startCheckOutcome: startCheckOutcome)
     }
 
     /// Whether there is a helper process to restart.
@@ -45,11 +49,23 @@ public final class TextInputAgentController {
     @ObservationIgnored
     private var activationObservationTask: Task<Void, Never>?
 
+    /// The helper ``restartHelper()`` ended last, which launchd may not have reaped yet.
+    @ObservationIgnored
+    private var endedProcessIdentifier: pid_t?
+
+    @ObservationIgnored
+    private let startCheck: TextInputHelperStartCheck
+
     private static var service: SMAppService {
         SMAppService.agent(plistName: TextInputServiceIdentity.agentPropertyListName)
     }
 
-    public init() {
+    public convenience init() {
+        self.init(startCheck: .live())
+    }
+
+    init(startCheck: TextInputHelperStartCheck) {
+        self.startCheck = startCheck
         refreshStatus()
         activationObservationTask = Task { [weak self] in
             let activations = NotificationCenter.default.notifications(named: NSApplication.didBecomeActiveNotification)
@@ -76,6 +92,7 @@ public final class TextInputAgentController {
         guard let process = helperState.process else { return }
         switch ProcessTermination.terminate(process.processIdentifier) {
         case .terminated, .alreadyGone:
+            endedProcessIdentifier = process.processIdentifier
             lastErrorDescription = nil
             #log(.info, "Ended the input method helper, process \(process.processIdentifier, privacy: .public)")
         case .belongsToAnotherUser:
@@ -98,6 +115,34 @@ public final class TextInputAgentController {
         guard helperState.isRestartedAutomatically else { return }
         #log(.info, "This build replaced the running input method helper; restarting it")
         restartHelper()
+    }
+
+    /// At launch, after ``restartHelperIfReplaced()``: checks that launchd starts the helper, which an
+    /// enabled agent does not promise (see ``TextInputHelperStartCheck``), and when it does not, unregisters
+    /// and registers the agent again. Takes up to half a minute; nothing waits for it.
+    public func repairIfHelperDoesNotStart() async {
+        refreshStatus()
+        guard registrationStatus == .enabled else { return }
+        let outcome = await startCheck.run(besides: endedProcessIdentifier) {
+            #log(.error, "launchd did not start the text input helper although its agent is enabled; registering the agent again")
+            do {
+                // The asynchronous form returns once the job is gone, so that registering hands launchd a new one.
+                try await Self.service.unregister()
+                try Self.service.register()
+            } catch {
+                #log(.error, "Could not register the text input agent again: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        startCheckOutcome = outcome
+        switch outcome {
+        case .starts:
+            #log(.info, "launchd starts the text input helper")
+        case .startsAfterRegisteringAgain:
+            #log(.default, "launchd starts the text input helper now that its agent was registered again")
+        case .doesNotStart:
+            #log(.error, "launchd does not start the text input helper, even with its agent registered again")
+        }
+        refreshStatus()
     }
 
     /// Registers the agent unless it already is; a user who switched it off in Login Items stays

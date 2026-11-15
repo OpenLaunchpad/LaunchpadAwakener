@@ -22,6 +22,7 @@
 | `AppCore/MachOFileUUIDReader.swift` | 读包里 payload 每个切片的 `LC_UUID` |
 | `AppCore/LaunchAtLoginController.swift`、`TextInputAgentController.swift`、`KillSwitchController.swift` | 开机启动、文本输入辅助进程、[退回开关](../Glossary.md#kill-switch退回开关)三个开关的状态，每次都从系统读回；辅助进程还有它在不在运行、是不是旧版，以及重启 |
 | `AppCore/TextInputHelperState.swift`、`ProcessTable.swift` | 从进程表认出正在运行的输入法辅助进程，判断它是不是这个 App 里的那份、启动后有没有被换过 |
+| `AppCore/TextInputHelperStartCheck.swift` | 启动时连一次输入法辅助进程，看 launchd 拉不拉得起它；拉不起来就重新注册再看 |
 | `AppCore/SystemIntegrityProtectionConfiguration.swift` | 读内核正在执行的 SIP 配置，判断这次启动能不能注入 |
 | `AppCore/StandaloneLaunchpadInstaller.swift`、`StandaloneLaunchpadController.swift` | 从包里的 `Launchpad.zip` 安装独立版、认出已装的那份、打开它 |
 | `PayloadInterface/PayloadRequests.swift` | 通道上的请求与回报类型，两边只共享这一个文件 |
@@ -30,6 +31,8 @@
 ## 关键设计决策
 
 **输入法辅助进程看进程表，旧版本自动换掉。** 辅助进程是 LaunchAgent，launchd 拉起后一直常驻到注销，重新构建或覆盖安装 App 都不会换掉它，重装 daemon 也不碰它；旧进程读不懂新消息时输入法就失效（提案 [在控制面板里显示输入法辅助进程，并自动换掉旧版本](../Evolutions/0009-text-input-helper-status.md)）。所以「Input method helper」一行在注册启用之后，改为显示进程的状态：没在运行（下次打开 Launchpad 时由 launchd 拉起）、在运行且是当前版本、在运行但是旧版本。旧版本分两种：这个 App 里的那份在进程启动后被换过，或者运行的是别处的一份。认进程按可执行文件名加所在 `.app` 的 bundle ID，Debug 与 Release 不会混。「被换过」比的是文件的状态变更时间（ctime）与进程的启动时间：构建、拷贝、改名都会更新 ctime，而 `rsync -a` 会把修改时间（mtime）拷成源文件的，不能用来比。路径按 `realpath` 解析，与 `proc_pidpath` 报的一致（`URL.resolvingSymlinksInPath()` 会把 `/private/var` 写回 `/var`）。行上的「Restart」给它发 `SIGTERM`，下次打开 Launchpad 时 launchd 拉起这个 App 里的那份。App 启动时只自动重启「这个 App 里的那份被换过」的情况，与 daemon 版本不符时自动重装一个道理；「别处的一份」只提示不自动处理：同一个服务名可能正被另一份构建注册着，自动重启会让两份来回抢。
+
+**启动时确认 launchd 拉得起辅助进程，拉不起来就重新注册。** `SMAppService` 报「已启用」并不保证 launchd 拉得起它：登录项记录与 launchd 的任务会对不上（见 [Launchpad 复刻的实现说明](LaunchpadReplica.md)「辅助进程的登录项与 launchd 任务会对不上」），App 和 Launchpad 都不会收到任何通知，只是从此没有输入法。所以 App 启动、做完上面的自动重启之后，在后台像 payload 那样连一次它的 Mach 服务、发一条 `end`，再看进程表里有没有它（`TextInputHelperStartCheck`）。辅助进程只认 Dock，会马上拒掉这条连接，看的是 launchd 拉起的那个进程，不看回话；查不到服务、或 15 秒内没有进程（超过 launchd 对刚被结束的任务 10 秒的重启间隔），就先 `unregister()` 再 `register()`、再看一次。还是没有，这一行改成红色的「Registered, but launchd does not start it — log out and back in.」。重新注册修得好「登录项记着已启用、launchd 里却没有任务」，修不好「任务挂的登录项记录指着一份已经删掉的 App」（两种坏法见 Launchpad 复刻的实现说明），后者只能靠注销重新登录。辅助进程从别的一份 App 里起来也算拉得起（这一行显示「Another copy is running」），因为输入法能用；同一个标签被几份 App 注册时，launchd 认的是最先注册的那份，从这份 App 重新注册改不过来。2026-11-15 在测试 MacBook 上验证：新 App 第一次启动就修好了那台至少从 11-13 起就没有任务的辅助进程（重新注册后 0.3 秒拉起）；`launchctl bootout` 掉任务再开 App，又修好一次；辅助进程好好的、或刚被自动重启结束时，不重新注册。刚被自动重启结束的那个进程在被回收之前不算数。代价是辅助进程在 App 启动时就被拉起，而不是等第一次打开 Launchpad；重新注册时系统可能再弹一次「已添加后台项目」的通知。
 
 **payload 是不是旧的，比镜像 UUID。** payload 是映射进 Dock 的镜像，卸不掉；重新编译后再注入，Dock 里跑的还是旧代码。DockIconOverride 让 payload 报一个手写的版本号，这边 payload 改得太勤，版本号一定会忘了递增。所以 payload 报自己镜像的 `LC_UUID`（`#dsohandle` 指向的头），App 读包里 payload 每个切片的 UUID，都对不上才算旧的。链接器按内容算 UUID，代码不变 UUID 就不变，正好是「是不是同一份代码」。包里那份读不出来时不判旧，免得叫用户白白重启 Dock。
 
