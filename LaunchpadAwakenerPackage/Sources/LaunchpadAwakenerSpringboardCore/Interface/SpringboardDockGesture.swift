@@ -19,7 +19,7 @@ package struct SpringboardDockGesture: Equatable, Sendable {
     /// Where the button went down, in global coordinates.
     package let startLocation: CGPoint
     /// Whether the press has turned into a drag; it never turns back.
-    package private(set) var hasBecomeDrag = false
+    private var hasBecomeDrag = false
 
     package init(startLocation: CGPoint) {
         self.startLocation = startLocation
@@ -36,5 +36,57 @@ package struct SpringboardDockGesture: Equatable, Sendable {
     /// a drag.
     package var endsInClick: Bool {
         !hasBecomeDrag
+    }
+}
+
+/// Sorts the springboard's left-button events into the Dock's and its own, one gesture at a time.
+///
+/// A press on the Dock starts a ``SpringboardDockGesture``, and every event up to the release is the Dock's. A
+/// press anywhere else is the springboard's, with its drags and its release, and ends any gesture on the Dock
+/// whose release went unseen.
+package struct SpringboardDockGestureTracker: Sendable {
+    /// What the release of a left-button gesture means to the springboard.
+    package enum Release: Equatable, Sendable {
+        /// The gesture began off the Dock: the springboard handles the release itself.
+        case springboard
+        /// The Dock takes the release as a click and opens what was clicked, so the springboard closes.
+        case dockClick
+        /// The Dock takes the release as the end of a drag, so the springboard stays.
+        case dockDrag
+    }
+
+    private var gesture: SpringboardDockGesture?
+
+    package init() {}
+
+    /// Whether a gesture that began on the Dock is going on: the Dock's handling of any of its drag events may
+    /// start, or carry on, a drag of one of the Dock's icons.
+    package var isDockGestureInProgress: Bool {
+        gesture != nil
+    }
+
+    /// A left press. Returns whether it is the Dock's.
+    package mutating func press(at location: CGPoint, isOnDock: Bool) -> Bool {
+        gesture = isOnDock ? SpringboardDockGesture(startLocation: location) : nil
+        return isOnDock
+    }
+
+    /// A left drag event. Returns whether it is the Dock's.
+    package mutating func drag(to location: CGPoint) -> Bool {
+        guard gesture != nil else { return false }
+        gesture?.pointerDragged(to: location)
+        return true
+    }
+
+    /// The left button coming up, which ends the gesture.
+    package mutating func release() -> Release {
+        defer { gesture = nil }
+        guard let gesture else { return .springboard }
+        return gesture.endsInClick ? .dockClick : .dockDrag
+    }
+
+    /// Forgets a gesture whose release went unseen, as one that ended while the springboard was hidden.
+    package mutating func reset() {
+        gesture = nil
     }
 }

@@ -45,9 +45,8 @@ package final class SpringboardController {
     /// When a click on the Dock last closed the springboard, until the next request to open Apps;
     /// see ``SpringboardEntry``.
     private var lastDockClickDismissal: ContinuousClock.Instant?
-    /// A left-button gesture that began on the Dock while the springboard showed, until the button comes up:
-    /// its events all go to the Dock.
-    private var dockGesture: SpringboardDockGesture?
+    /// Which left-button events are the Dock's: those of a gesture that began on it, until the button comes up.
+    private var dockGestures = SpringboardDockGestureTracker()
     private let dockDragPassThrough = SpringboardPointerPassThrough()
 
     /// A pinch in progress: whether it opens, and how visible it has made the springboard.
@@ -124,7 +123,7 @@ package final class SpringboardController {
         window = newWindow
         interface = newInterface
         // A gesture on the Dock from an earlier showing ended while nothing was watching.
-        dockGesture = nil
+        dockGestures.reset()
         newInterface.folderOpennessDidChange = { [weak self] in
             self?.updateDockVisibility()
         }
@@ -357,30 +356,27 @@ package final class SpringboardController {
         case let .mouseDown(.left, clickCount):
             // Presses on the Dock stay the Dock's, as they did over macOS 15's Launchpad, and so does the
             // rest of the gesture; see ``SpringboardDockGesture``.
-            guard !isInsideDockBar(inputEvent.location) else {
-                dockGesture = SpringboardDockGesture(startLocation: inputEvent.location)
+            guard !dockGestures.press(at: inputEvent.location, isOnDock: isInsideDockBar(inputEvent.location)) else {
                 return false
             }
-            dockGesture = nil
             restartIdleTimer()
             perform(interface.handleMouseDown(at: containerPoint, timestamp: inputEvent.timestamp, modifierFlags: inputEvent.modifierFlags, clickCount: clickCount))
             return true
         case .mouseDragged(.left):
             restartIdleTimer()
-            if dockGesture != nil {
-                dockGesture?.pointerDragged(to: inputEvent.location)
-                return false
-            }
+            guard !dockGestures.drag(to: inputEvent.location) else { return false }
             perform(interface.handleMouseDragged(to: containerPoint, timestamp: inputEvent.timestamp))
             return true
         case .mouseUp(.left):
-            if let endingDockGesture = dockGesture {
-                dockGesture = nil
-                // A drag of a Dock icon leaves the springboard up, as 15's did: only a click opens something.
-                if endingDockGesture.endsInClick {
-                    closeAfterDockClick()
-                }
+            switch dockGestures.release() {
+            case .dockClick:
+                closeAfterDockClick()
                 return false
+            case .dockDrag:
+                // A drag of a Dock icon leaves the springboard up, as 15's did: only a click opens something.
+                return false
+            case .springboard:
+                break
             }
             guard interface.dragSession != nil || !isInsideDockBar(inputEvent.location) else {
                 closeAfterDockClick()
@@ -419,7 +415,7 @@ package final class SpringboardController {
     /// on until the button comes up before the Dock returns; the springboard's window lets the pointer through
     /// meanwhile — see ``SpringboardPointerPassThrough``.
     package func dockWillHandle(_ inputEvent: SpringboardInputEvent) -> Bool {
-        guard dockGesture != nil, inputEvent.kind == .mouseDragged(.left) else { return false }
+        guard dockGestures.isDockGestureInProgress, inputEvent.kind == .mouseDragged(.left) else { return false }
         dockDragPassThrough.begin(with: window ?? hidingWindow)
         return true
     }

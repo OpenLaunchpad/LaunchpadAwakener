@@ -23,7 +23,7 @@ macOS 15 的 Launchpad 开着时，Dock 栏照常可用：可以按住 Dock 里�
 
 ### 要做的
 
-1. **Dock 上开始的手势整段归 Dock**：左键在 Dock 栏上按下时记下这次手势（`SpringboardDockGesture`）；之后的拖动与松手不论指针在哪都交给 Dock，不经复刻。指针离按下点在任一方向超过 5 点即算拖动，与 Dock 的判断相同；松手时只有没算拖动的才照旧收起复刻（点了 Dock 上的东西），拖过的不收起。
+1. **Dock 上开始的手势整段归 Dock**：左键在 Dock 栏上按下时记下这次手势（`SpringboardDockGesture`，控制器经 `SpringboardDockGestureTracker` 分流）；之后的拖动与松手不论指针在哪都交给 Dock，不经复刻。指针离按下点在任一方向超过 5 点即算拖动，与 Dock 的判断相同；松手时只有没算拖动的才照旧收起复刻（点了 Dock 上的东西），拖过的不收起。
 2. **Dock 拖图标期间，复刻的窗口让指针穿过**：把这次手势的拖动事件交给 Dock 之前，给复刻的窗口加上窗口服务器的「忽略鼠标事件」标记（`CGSSetWindowTags` 第 9 位，`-[NSWindow setIgnoresMouseEvents:]` 设的也是它），Dock 处理完这个事件再恢复成建窗时的「接收鼠标事件」（第 10 位）。Dock 拖图标是在其中某个事件里同步跑完的，所以整个拖动期间落点都穿过复刻的窗口，到达底下的窗口，与没开 Launchpad 时一样：越过移除线就移除，否则放回。拖动中嵌套进来的事件不重复设置，只由最外层恢复（`SpringboardPointerPassThrough`）。
 3. 文档：实现说明补一段「Dock 上开始的拖动归 Dock」、与 15 的差异与已知降级；逆向结论写进 `/Volumes/RE/Dock/27.2/Notes/DockTileDrag.md`。
 
@@ -38,7 +38,7 @@ macOS 15 的 Launchpad 开着时，Dock 栏照常可用：可以按住 Dock 里�
 
 ### 落地步骤
 
-1. ✅ 手势分流：`SpringboardDockGesture`（纯值类型，带单元测试）与 `SpringboardController.handle(_:)` 的左键分支。
+1. ✅ 手势分流：`SpringboardDockGesture` 与 `SpringboardDockGestureTracker`（纯值类型，带单元测试）、`SpringboardController.handle(_:)` 的左键分支。
 2. ✅ 拖动时窗口穿透：`SpringboardPointerPassThrough`（带单元测试）、`SpringboardWindow.setPassesPointerEventsThrough(_:)`、Dock 宿主的实现、事件 hook 在交给 Dock 前后调用控制器。
 3. ✅ 文档与验证。
 
@@ -58,3 +58,4 @@ macOS 15 的 Launchpad 开着时，Dock 栏照常可用：可以按住 Dock 里�
 | 2026-11-16 | 每个交给 Dock 的拖动事件前后都设、恢复标记，不只在越过 5 点的那一次 | 与 Dock 的判断在边界上（Sidecar 的事件用 10 点）有出入时也不会漏；设标记只是一次窗口服务器调用 |
 | 2026-11-16 | 用虚拟机实拖验证，并在 15.5 上先录原版 | 用户开好了两台虚拟机。原版：图标移除、启动台不收起，与假设一致。复刻：把新 payload 换进 26.6.2 上旧开发构建的包里注入（换整个 App 要重新批准 daemon），移除、点击收起、栏内重排都与预期一致；测完两台的 Dock 设置与原 payload 都还原 |
 | 2026-11-16 | 窗口标记的单元测试只核对调用成功，不读回位 | `CGSGetWindowTags` 对没上过屏的窗口报不出这两位，AppKit 自己设 `ignoresMouseEvents` 后读回来也一样；在开发机上把测试窗口放上屏不合适，效果改由虚拟机里的实拖证明 |
+| 2026-11-16 | 自审（code-review medium）：10 条发现。改 3 条：控制器的 Dock 手势规则抽成 `SpringboardDockGestureTracker` 并补 6 个单元测试（原先只有两个辅助类型有测试）；建窗标记改为引用 `SkyLightBridge.takesPointerEventsWindowTag`，不再两处各写 1024；`SpringboardDockGesture` 只留 `endsInClick` 一个对外的判断。另把每次切换窗口标记的日志降到 debug 级：按着访达这类拖不动的图标来回拖时，每个拖动事件都切换一次。6 条判为误报或不修，记在[已裁决清单](../Internal/ReviewAdjudications.md) | 前三条都不是行为错误（没有能变红的复现），是覆盖缺口与重复定义，所以只补测试与整理，不写「修前失败」的回归测试；「每个事件都切换标记」本身保留，理由见前面「每个交给 Dock 的拖动事件前后都设、恢复标记」那一行 |
