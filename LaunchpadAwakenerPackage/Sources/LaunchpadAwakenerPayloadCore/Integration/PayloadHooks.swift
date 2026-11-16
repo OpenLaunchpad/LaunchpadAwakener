@@ -96,22 +96,36 @@ struct SpotlightHooks {
 /// `-[DockAppEventHandler handleDockBarEvent:type:]`, from `-[DockAppEventHandler handleMachMessage:size:]`
 /// — the same funnel where macOS 15 offered each event to Launchpad before the Dock bar. While the
 /// springboard is hidden this only forwards.
+///
+/// The Dock's own handling of an event can last: a drag of one of its icons runs to the end inside the drag
+/// event that started it, and the events of that drag come back through here meanwhile. The springboard is told
+/// before and after (``SpringboardController/dockWillHandle(_:)``), never across the call.
 @RuntimeClassHook("DockAppEventHandler")
 struct DockAppEventHandlerHooks {
     /// `eventObject` is the event's `CGEvent`, typed as an object because that is how the Dock declares it.
     @RuntimeMethodReplacement
     func handleDockBarEvent(_ eventObject: AnyObject?, type eventType: UInt32) {
-        if let eventObject, Thread.isMainThread {
-            let event = unsafeDowncast(eventObject, to: CGEvent.self)
-            let inputEvent = SpringboardInputEvent(event: event, eventType: eventType)
-            SpringboardCurrentEvent.event = event
-            let isConsumed = MainActor.assumeIsolated {
-                SpringboardController.shared.handle(inputEvent)
-            }
-            SpringboardCurrentEvent.event = nil
-            if isConsumed { return }
+        guard let eventObject, Thread.isMainThread else {
+            callOriginal(eventObject, eventType)
+            return
+        }
+        let event = unsafeDowncast(eventObject, to: CGEvent.self)
+        let inputEvent = SpringboardInputEvent(event: event, eventType: eventType)
+        SpringboardCurrentEvent.event = event
+        let isConsumed = MainActor.assumeIsolated {
+            SpringboardController.shared.handle(inputEvent)
+        }
+        SpringboardCurrentEvent.event = nil
+        if isConsumed { return }
+        let isFollowedUp = MainActor.assumeIsolated {
+            SpringboardController.shared.dockWillHandle(inputEvent)
         }
         callOriginal(eventObject, eventType)
+        if isFollowedUp {
+            MainActor.assumeIsolated {
+                SpringboardController.shared.dockDidHandleEvent()
+            }
+        }
     }
 }
 

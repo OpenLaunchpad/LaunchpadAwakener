@@ -39,7 +39,7 @@ macOS 15 的 Launchpad 开着时，Dock 栏照常可用：可以按住 Dock 里�
 ### 落地步骤
 
 1. ✅ 手势分流：`SpringboardDockGesture`（纯值类型，带单元测试）与 `SpringboardController.handle(_:)` 的左键分支。
-2. 拖动时窗口穿透：`SpringboardPointerPassThrough`（带单元测试）、`SpringboardWindow.setPassesPointerEventsThrough(_:)`、Dock 宿主的实现、事件 hook 在交给 Dock 前后调用控制器。
+2. ✅ 拖动时窗口穿透：`SpringboardPointerPassThrough`（带单元测试）、`SpringboardWindow.setPassesPointerEventsThrough(_:)`、Dock 宿主的实现、事件 hook 在交给 Dock 前后调用控制器。
 3. 文档与非交互验证。
 
 ### 后续项

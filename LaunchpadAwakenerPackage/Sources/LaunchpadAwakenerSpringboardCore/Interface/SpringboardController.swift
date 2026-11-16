@@ -48,6 +48,7 @@ package final class SpringboardController {
     /// A left-button gesture that began on the Dock while the springboard showed, until the button comes up:
     /// its events all go to the Dock.
     private var dockGesture: SpringboardDockGesture?
+    private let dockDragPassThrough = SpringboardPointerPassThrough()
 
     /// A pinch in progress: whether it opens, and how visible it has made the springboard.
     private var pinch: (isOpening: Bool, visibility: Double)?
@@ -409,6 +410,23 @@ package final class SpringboardController {
         case .mouseMoved, .other, .dockSwipe, .systemGestureCancelled:
             return false
         }
+    }
+
+    /// Called by the host's event hook just before the Dock handles an event the springboard left to it. Returns
+    /// whether ``dockDidHandleEvent()`` must follow once the Dock is done with the event.
+    ///
+    /// A drag event of a gesture that began on the Dock may start the Dock dragging one of its icons, which goes
+    /// on until the button comes up before the Dock returns; the springboard's window lets the pointer through
+    /// meanwhile — see ``SpringboardPointerPassThrough``.
+    package func dockWillHandle(_ inputEvent: SpringboardInputEvent) -> Bool {
+        guard dockGesture != nil, inputEvent.kind == .mouseDragged(.left) else { return false }
+        dockDragPassThrough.begin(with: window ?? hidingWindow)
+        return true
+    }
+
+    /// Called once the Dock is done with an event ``dockWillHandle(_:)`` answered true for.
+    package func dockDidHandleEvent() {
+        dockDragPassThrough.end()
     }
 
     /// The window server says the keyboard left: another application took it — clicked on another display,

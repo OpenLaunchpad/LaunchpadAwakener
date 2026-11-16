@@ -86,6 +86,21 @@ final class DockSpringboardWindow: SpringboardWindow {
         hasKeyFocus = false
     }
 
+    /// Switches the window between the two tags `-[NSWindow setIgnoresMouseEvents:]` uses; it was created
+    /// taking pointer events (``windowTags``).
+    func setPassesPointerEventsThrough(_ passesThrough: Bool) {
+        let result = SkyLightBridge.setIgnoresPointerEvents(
+            passesThrough,
+            ofWindowWithIdentifier: windowIdentifier,
+            onConnection: connectionIdentifier
+        )
+        if result == 0 {
+            #log(.info, "Window \(self.windowIdentifier, privacy: .public) \(passesThrough ? "lets the pointer through" : "takes the pointer again", privacy: .public)")
+        } else {
+            #log(.error, "Window \(self.windowIdentifier, privacy: .public) could not \(passesThrough ? "let the pointer through" : "take the pointer again", privacy: .public): result \(result ?? -1, privacy: .public)")
+        }
+    }
+
     func orderOut() {
         guard isOrderedIn else { return }
         window.order(0, otherWindow: 0)
