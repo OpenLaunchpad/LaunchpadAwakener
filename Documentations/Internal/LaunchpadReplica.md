@@ -90,6 +90,16 @@ payload 注入 macOS 26.0 到 27.2 的 Dock，接管所有「打开 Apps」的�
 - **被拖的图标从拖起到放下，一直在一扇高于 Dock 的透明窗口里**（`DockDragWindow`，层级 500，即 15 的拖动窗口所在的 `kCGDraggingWindowLevel`）：Launchpad 的窗口在 27 层、Dock 的窗口被抬到 29 层，图标留在 Launchpad 的窗口里，压到 Dock 上的那部分就会被 Dock 盖住。最初只在指针进入 Dock 栏后才挪进这扇窗口，用户拿 15 的录屏对照指出：原版图标始终在 Dock 之上，复刻在进栏之前、图标已经压到 Dock 上时被盖住了。那扇窗口里的容器与 Launchpad 的容器布局相同，却是另一棵图层树，所以被拖图标的几何一律先经 `rectInContainer(_:of:)` 换算到容器坐标再用（判断是否离开文件夹面板、图片飞进文件夹缩略图），不跨树直接 `convert`；回归测试给假窗口的根图层设了偏移，直接跨树换算就会算错。Launchpad 收起时先把图标挪回自己的容器，随界面一起淡出。图标在 Dock 上时界面自己不让位、不弹开文件夹、不翻页：否则停在 Dock 上会被悬停计时弹开文件夹，页面也会把图标排到页末，而松手时它却归了 Dock。
 - 用到的 18 个方法在 26.6.2 与 27.2 签名相同，payload 启动时另成一批核对，不符只停用这一项；`DragController` 照 `DockBar` 的办法按类从全局里认出来（同在 `__DATA,__common`），第一次拖到 Dock 时才扫。独立版的窗口盖住了 Dock，不支持拖到 Dock。
 
+**Dock 上开始的拖动归 Dock：整段手势交给 Dock，Dock 拖图标期间窗口让指针穿过。** 15 开着 Launchpad 时 Dock 栏照常可用，按住 Dock 里的图标拖出去松手，图标就从 Dock 里移除，Launchpad 不收起（2026-11-16 在 15.5 虚拟机里录屏核对过）。复刻起初只把 Dock 上的按下交给 Dock，之后的拖动全被界面收下，Dock 根本拖不动图标。做法（提案 [Launchpad 开着时拖动 Dock 栏里的图标](../Evolutions/draft-dock-icon-dragging.md)）：
+
+- **整段手势归 Dock**：左键在 Dock 栏上按下时记下这次手势（`SpringboardDockGesture`，控制器经 `SpringboardDockGestureTracker` 分流左键事件），此后的拖动与松手不论指针在哪都不经界面、交给 Dock。松手时只有点击才照旧收起界面，判断照 Dock 自己的规则：指针离按下点在任一方向超过 5 点就算拖动，一旦算了就一直算（`-[DockBarMouseEventHandler _handleTileClickEvent:type:]`，27.2 `0x1000837CC`、26.6.2 `0x1001129A4`）。15 收起 Launchpad 是在图标的点击动作里（15.5 `0x10002CE10`），拖动不收起。
+- **Dock 拖图标是同步的**：超过 5 点的那个拖动事件里，Dock 建 CoreDrag、调 `CoreDragStartDragging`，一直跟到松手才返回（27.2 `sub_100021EA0` → `sub_100105F8C`）；其间的鼠标事件照样经事件 hook 进来，Dock 用它们调 `-[DragController updateRemoveWithEvent:atLocation:]` 判断是否越过了「移除线」。所以这些嵌套进来的事件也必须交给 Dock，交不到图标就移除不了。
+- **落点要穿过复刻的窗口**：Dock 的 CoreDrag 接收函数装在整个 Dock 连接上（`-[DockBar installCoreDragEventHandlers]`，窗口参数为 0），复刻的窗口也在这个连接上。松手落在复刻上，Dock 会当成放回 Dock：没有间隙时 `-[DockBar handleDockEventDropInternal:tile:oldPos:context:]` 把图标插回原位，不移除。15 是让 Dock 在 Launchpad 开着时把跟踪与接收消息都转给 Launchpad（15.5 `sub_100118D98`、`sub_100119510` 看 `springboardIsCapturingEvents`）；27 的 Dock 没有这层，接收函数又是 C 函数、ObjC hook 够不着，所以事件 hook 把这次手势的拖动事件交给 Dock 之前，给复刻的窗口换上「忽略鼠标事件」的窗口标记，Dock 处理完再换回（`SpringboardPointerPassThrough`）。每次切换写一条 debug 级日志（`Window … lets the pointer through` / `takes the pointer again`，要加 `--debug` 才看得到），失败时写 error 级。落点于是到达底下的窗口，与没开 Launchpad 时一样：越过移除线就移除，否则放回。
+- **标记就是 `-[NSWindow setIgnoresMouseEvents:]` 用的那两位**：AppKit 27.2 的 `_NSSetIgnoresMouseEvents` 忽略时设第 9 位（0x200）、恢复时设第 10 位（0x400），各自清掉另一位；复刻的窗口建时就带 0x400（15 的 `-[Springboard init]` 也是）。经 `dlsym` 取 `CGSSetWindowTags` 与 `CGSClearWindowTags`，26.0 到 27.2 各版 Dock 都导入这两个函数。读回标记的 `CGSGetWindowTags` 对没上过屏的窗口报不出这两位（AppKit 自己设的也一样），所以单元测试只核对调用成功，效果靠在虚拟机里实拖。
+- **嵌套只认最外层**：嵌套进来的事件也会走同一条路，只有最外层换标记、恢复的也是它换过的那扇窗口，即使其间界面收起或重开了。hook 在调 Dock 之前、之后各问一次控制器（`dockWillHandle(_:)`、`dockDidHandleEvent()`），不在跨过 Dock 调用的闭包里访问控制器的状态。
+- Dock 拖图标前后会抢、还一次键盘焦点（`CPSStealKeyFocusOnConnection(…, 128)`，15 与 27 相同）。实测 26.6.2 与 15.5 上之后都没有收到让界面收起的焦点通知，Launchpad 保持打开。
+- 拖进 Dock 栏松手照 27 的 Dock 让出间隙、调整顺序。15 那时把消息都转给了 Launchpad，栏内重排推断不生效；复刻不照搬这一点。
+
 **Launchpad 开着时 Dock 一直露着，文件夹开着时 Dock 滑走。** 15 显示 Launchpad 时，给 Dock 的显隐控制器 `DockVisibility` 设一个显示覆盖（`setOverrideShowType:1`），开了自动隐藏的 Dock 也会露出来。文件夹面板一开始打开，它就调 `forceDockHiddenWithReason:`，Dock 借自己的自动隐藏滑走，默认大小下约 0.24 秒。面板一开始关闭、或 Launchpad 开始退场时撤销这个隐藏，显示覆盖则等退场动画结束才撤（`-[Springboard groupShownForItem:atIndex:]`、`groupHiddenForItem:`，15.5 `0x100093500`、`0x1000935A4`）。5 行的文件夹面板底边正好落在给 Dock 留的那条线上，靠的就是这一步。复刻起初漏了它：27 的玻璃 Dock 比 15 的高，面板于是压进了 Dock 底下。现在的分工是：界面层记录文件夹是否开着（`isFolderOpen`，从面板开始打开到开始关闭）；控制器把它与显示、退场合成 `SpringboardDockVisibility` 交给宿主；注入版的 `DockBarVisibility` 只在状态变了时调 Dock。
 - 撤销一个 Dock 没登记过的原因，Dock 会抛异常、直接崩溃。所以只在拿过的那个对象上撤销，撤销前先读 `_dockForceHiddenReasons` 确认原因还在，原因也用自己的字符串 `LaunchpadAwakener-ShowGroup`。
 - 重新显示时，先不撤上一次的显示覆盖、显示完再设（`finishHiding(updatingDockVisibility:)`）。否则开了自动隐藏的 Dock 会先开始滑走，再被叫回来。
@@ -181,7 +191,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/
 ├── System/                             # 系统框架的私有接口，两个宿主都能用
 │   ├── QuartzCorePrivate.swift         # CA 私有滤镜与 CABackdropLayer
 │   ├── IconServicesBridge.swift        # IconServices 取图
-│   ├── SkyLightBridge.swift            # 连接、窗口层级、键盘焦点、窗口服务器记的 Dock 矩形
+│   ├── SkyLightBridge.swift            # 连接、窗口层级、键盘焦点、窗口服务器记的 Dock 矩形、让指针穿过的窗口标记
 │   ├── WallpaperSnapshot.swift         # 截壁纸窗口（27 归 WindowManager，26 归 Dock）
 │   ├── SystemPasteboard.swift          # HIServices 的 Pasteboard Manager
 │   └── ApplicationLauncher.swift       # LaunchServices 启动 App
@@ -195,6 +205,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore/
 └── Interface/                          # 界面层，按 15.5 的 ECSB* 划分
     ├── LaunchpadServices.swift         # 布局库的单例，配置取自宿主
     ├── SpringboardController.swift     # 显示、隐藏与进出场、事件分派、启动动画、捏合、保险机制
+    ├── SpringboardDockGesture.swift    # Dock 上开始的手势：整段归 Dock，按 Dock 的 5 点规则分点击与拖动（SpringboardDockGestureTracker 给控制器分流）
+    ├── SpringboardPointerPassThrough.swift # Dock 拖图标期间窗口让指针穿过，嵌套时只认最外层
     ├── SpringboardInputEvent*.swift    # 事件的跨线程表示，及从 CGEvent 的换算
     ├── SpringboardInterface.swift      # 页面、搜索、选中、点击、文件夹开合与改名、背景（ECSBSpringboard + ECSBLayer）
     ├── SpringboardInterface+Dragging.swift # 拖动整理（ECSBDragCapture 与各 DragState）
@@ -260,6 +272,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 文件夹改名同样经辅助进程接输入法；光标、选区、复制粘贴、撤销与 Esc 都照 15 的文本框（Esc 按当前文字提交）。
 - 拖动时文件夹不额外加一行。
 - 拖到 Dock 不经 CoreDrag，往 Dock 的事件队列里直接排事件（原因见上）；图标在 Dock 上时界面不让位、不弹开文件夹、不翻页，15 是否也这样没有查证。
+- 拖 Dock 自己的图标时，落点靠窗口标记穿过复刻，不是 15 那样把 Dock 的拖动消息转给 Launchpad（原因见上）；因此 Launchpad 开着时也能在 Dock 栏里重排，15 推断不能。
 - 捏合没有接入 27 的 Dock 手势系统（那里已经没有它），而是读原始 DockSwipe 事件，并且要用户先关掉 Spotlight 的捏合。
 - 背景默认照 15 截壁纸、加三个滤镜；另有 `springboard-background` 设为 `glass` 时的 Dock 液态玻璃，那时 App 的窗口会被模糊进来。
 - 点 Apps 图标关闭 Launchpad，靠「点 Dock 收起后 0.5 秒内的请求」认出这次点击，不是 15 那样按图标类型豁免（原因见上）。
@@ -298,7 +311,8 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - 删除确认改用辅助进程弹的 `NSPopover`（2026-11-10）：单元测试覆盖消息经真实 XPC 往返、Dock 一侧客户端（弹出的回答、按钮回报、关闭请求、辅助进程退出）、界面层的状态（问辅助进程要的内容与图标中心、按钮与按键都关掉它、一次只问一个、弹不出时退回自己画的、辅助进程退出时按取消、收起时撤下、答过之后迟到的按钮不算）、辅助进程里锚点的位置与 popover 的内容排版（与 nib 的框一致：问句 (82, 40, 308×34)，删除按钮右边缘 388）。之前先在 15.5 虚拟机里放了带空收据的「可删测试」，用户截到了原版的气泡。部署到 26.6.2 虚拟机（非交互）：认出 Dock 2427.6、23 个方法签名全部吻合、两个 hook 装上；同样放了「可删测试」后，对账把它加进第 2 页，自检报卸载器 69 个 App 里 1 个可删，正是它。用户在 26 虚拟机里看到 popover 照预期上屏、位置与内容都对，但「删除」没有画成默认按钮；锚点改成 nonactivating panel 后重新部署，单元测试锁住锚点的这几项（改前先失败）。改后用户看过，删除是蓝色的默认按钮，日志记的是 popover 窗口 `key true, application active true`。开发构建 20 秒没有输入就收起 Launchpad，点 popover 不算输入，所以那里的气泡最多停 20 秒。用户随后点「删除」：第一下就生效，半秒后卸载器删掉了 `/Applications/可删测试.app`，布局随即从 69 个 App 变成 68 个。27 上的样子没有试（MacBook 改装了 15）。
 - 拖到 Dock（2026-11-11）：单元测试用假的 Dock 目标驱动真实的界面——进入时交给 Dock、不透明度减半并挪进 Dock 上方的窗口，在 Dock 上不让位，离开、Esc、收起、拆除都让 Dock 合上间隙，在 Dock 上松手不滑回、不写库，松在废纸篓上对可删的 App 弹删除确认；另用记录调用的假 Dock 锁住进入、移动、放下、离开的顺序与成对（放下排在离开之前，废纸篓上与没有间隙时不排放下，每次拖动只收尾一次）；签名测试记下 18 个方法的编码，与 26.6.2、27.2 的声明逐个对过。部署到 26.6.2 虚拟机（非交互）：23 个方法签名全部吻合、两个 hook 装上，拖到 Dock 的 18 个方法也吻合，`Found DragController in __DATA,__common, 1 slot(s)`；开发构建的只读检查读到 Dock 栏 (34, 752, 1212×74) 与废纸篓 (1190, 752, 48×64)，Dock 没有崩溃。真把 App 拖到 Dock 上属于交互操作，没有做；27 上没有试（MacBook 改装了 15）。用户随后在 26 虚拟机里试了（放大器、启动转换助理、无边记都被 Dock 收下），并与 15.5 虚拟机里原版的录屏对照：原版被拖图标始终在 Dock 之上，复刻在指针进栏之前被 Dock 盖住。改成整个拖动都在 Dock 上方的窗口里之后，重新部署到 26.6.2 虚拟机（非交互）：签名、hook、拖到 Dock 的 18 个方法与 `DragController` 都照旧吻合，Dock 没有崩溃。
 - 删除确认等不到回话就卡死（2026-11-15，用户在 Ultra 上自己运行开发构建时遇到）：launchd 里辅助进程的任务挂着失效的登录项记录，见上文「辅助进程 2 秒不回话」。单元测试用一个过了时限才回话的替身辅助进程：界面在时限到时改为自己画气泡、只报一次，替身的 session 随即被放掉，迟到的回话不算。去掉时限时这个测试失败，修复后通过。没有在 Dock 里验证：出事的是开发机，不在上面运行注入；测试 MacBook 上辅助进程的任务根本没加载，请求当场失败、直接退回自己画的气泡，碰不到等待。
-- 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认在 27 上的样子；拖到 Dock（间隙是否跟手、松手后 App 是否进了 Dock 并在重启 Dock 后还在、废纸篓上的删除确认、Esc 与收起后 Dock 没有留下空位）。
+- 拖动 Dock 栏里的图标（2026-11-16）：单元测试覆盖 Dock 的 5 点规则（任一方向不超过 5 点是点击、超过就是拖动、拖回原处仍是拖动）、左键事件的分流（Dock 上按下后整段归 Dock、只有点击收起界面、别处按下结束没看到松手的手势）与窗口穿透的嵌套（嵌套事件不重复换标记、只恢复最外层换过的那扇窗口、没有窗口时不换、多出的结束不打乱计数），另有一条在开发机的窗口服务器上对一扇没上屏的窗口换两次标记、都返回成功（CI 上跳过）。`swift test` 合计 640 个测试通过（自审后），`RunScript.sh` 的完整构建与三个架构切片校验通过。先在 15.5 虚拟机里录屏核对原版：打开启动台，按住 Dock 里的「无边记」往上拖到屏幕中间、停 1.8 秒松手，图标出现「移除」后消失，Dock 存成 16 项，启动台一直开着。再把新 payload 换进 26.6.2 虚拟机上旧开发构建的包里（那个包名还是改名前的，换整个 App 要重新批准 daemon）注入：同样的手势下图标被移除、Dock 从 21 项变成 20 项，日志里窗口在 Dock 处理两次拖动事件时各「让指针穿过」再「重新接收」一次（当时是 info 级，自审后降到 debug 级），界面没有收起；按下后只动 2 点就松手照旧算点击，界面以「clicked the Dock」收起、访达到了前台；在 Dock 栏里把「日历」拖到「备忘录」之后，顺序改了、界面没收起。测完两台虚拟机的 Dock 设置与 26 上原来的 payload 都还原了。27 上没有试（MacBook 不在这次验证里）。
+- 仍需用户亲自判断的部分：观感与手感、停住 1 秒弹开新文件夹、捏合；第 6 批的三指轻扫（Dock 是否收得到）、删除确认在 27 上的样子；拖到 Dock（间隙是否跟手、松手后 App 是否进了 Dock 并在重启 Dock 后还在、废纸篓上的删除确认、Esc 与收起后 Dock 没有留下空位）；拖动 Dock 栏里的图标在 27 上的表现。
 
 - 全局扫描（2026-11-11，只在开发机上，不碰 Dock）：单元测试覆盖找到持有目标类实例的那个槽、类不匹配时不误报、堆块小于实例大小时被筛掉、不是堆块的值（小整数、没映射的地址、未对齐的地址）一个都不解引用、多个槽持有同一对象时都报出来且用那个对象、持有不同对象时一个也不用、先扫的段有命中就不看后面的段、区域起点不按指针对齐时仍能找到里面对齐位置上的对象、堆块够大而第一个字根本不是类时既不认错也不把那个野地址交给 ARC、按类名查来的 Objective-C 类也能匹配（Dock 的两个全局走的就是这条路）。另有一条遍历本进程全部已加载镜像的真实 `__DATA` 段、拿一个没有全局持有的类去扫：那些段装满了别处留下的值，跑完不崩就是「三道筛子没有解引用不该碰的内存」的证据。`swift test` 合计 538 个测试通过，`RunScript.sh` 的完整构建与三个架构切片校验通过。
 - **在真实的 Dock 里验证过了**（2026-11-11，用户亲自在一台 27.2（26B123）上运行）：`DockBar` 与 `DockGlobals` 都在 `__DATA,__common` 里，各只有一个槽持有它们——日志是 `Found DockBar in __DATA,__common, 1 slot(s)` 与 `Found DockCore.DockGlobals in __DATA,__common, 1 slot(s)`。控制面板开着时每三秒现场扫一次，近百次里每次都只找到那一个槽（那时每扫一次都写一行日志，这之后改成只有答案变化时才写）。
@@ -322,6 +336,7 @@ LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadCore/
 - Dock 在左右两侧时，满 5 行的文件夹常常不往下多伸那 30 点：15 的公式只在文件夹底边高于 30 点时才伸，侧放 Dock 时底边多半正好是 30。这时文件夹每页的格子比主页的矮 6 点，而界面层按主页的格子算拖动的落点与让位，会偏几点。这是按代码推断的，没有在真机上复现。
 - 文件夹开着时让 Dock 滑走，只在指针不在 Dock 上、Dock 没有键盘焦点时立刻开始，15 与 27.2 的 Dock 都是这样；Dock 藏起来时指针推到屏幕边会不会把它叫回来，没有验证。
 - 拖到 Dock：没有 15 那种悬停在 Dock 图标上的效果（弹开堆栈、悬停进 App Exposé），那些来自复刻不发的「在内移动」消息。开着放大时，松手后 Dock 可能一直放大到下一次鼠标移动（逆向推断，没有验证）。独立版不支持拖到 Dock：它的窗口盖住了 Dock。从文件夹里拖出的 App 松在废纸篓上不问删除：它回到了关着的文件夹里，没有自己的图标可以指向。
+- 拖动 Dock 栏里的图标：Launchpad 开着时拖 Dock 的分隔条改了 Dock 大小，给 Dock 留的高度要到下次打开才跟上。只跟左键；Dock 拖图标的那段时间里，复刻的窗口对指针是透明的，指针下要是另有 App 的窗口，它会看到拖动经过（Dock 图标的拖动不允许任何操作，它收不下）。
 - 多显示器只做到 15 的程度：只开在 Dock 所在的那块屏，不同时出现在几块屏上。这套做法还没有在接着第二块屏的真机上验证过。
 - 在另一块屏点别的 App 时，Dock 收到的焦点通知是 0x1000 还是 0x4000 没有实机核对；是 0x4000 时照 15 不收起。每个通知的码都写进 info 日志（`Key focus notification …`）。
 - 图标缓存不清旧尺寸：在尺寸不同的几块屏之间来回换 Dock，Dock 进程里就多存几份图标。

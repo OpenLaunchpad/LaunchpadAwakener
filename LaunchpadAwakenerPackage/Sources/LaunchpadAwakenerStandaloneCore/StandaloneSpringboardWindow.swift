@@ -98,6 +98,9 @@ final class StandaloneSpringboardWindow: SpringboardWindow {
         isOrderedIn = false
     }
 
+    /// The window covers the Dock, so no press begins on it and the Dock never drags an icon over the window.
+    func setPassesPointerEventsThrough(_ passesThrough: Bool) {}
+
     /// What the window would show as, for the self-check: frame, level and how it behaves across Spaces.
     var selfCheckDescription: String {
         "frame \(NSStringFromRect(window.frame)), level \(window.level.rawValue), joins all Spaces \(window.collectionBehavior.contains(.canJoinAllSpaces)), over full-screen applications \(window.collectionBehavior.contains(.fullScreenAuxiliary)), scale \(backingScaleFactor)"

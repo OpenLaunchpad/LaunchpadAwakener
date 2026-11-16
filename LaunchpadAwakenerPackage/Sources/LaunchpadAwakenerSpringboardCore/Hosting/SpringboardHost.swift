@@ -144,6 +144,10 @@ package protocol SpringboardWindow: AnyObject {
     /// not hand it to the one that was active before.
     func releaseKeyFocus(returningToPreviousApplication: Bool)
     func orderOut()
+    /// Lets pointer events, and drops, through to whatever lies below the window, or makes it take them again.
+    /// Set while the Dock drags one of its own icons, so the icon lands where it would with no springboard up;
+    /// see ``SpringboardPointerPassThrough``. A host whose window covers the Dock never has that happen.
+    func setPassesPointerEventsThrough(_ passesThrough: Bool)
 }
 
 /// Where the Dock sits and how much room 15's layout leaves it.

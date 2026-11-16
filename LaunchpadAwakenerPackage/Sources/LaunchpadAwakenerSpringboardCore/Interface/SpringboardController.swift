@@ -45,6 +45,9 @@ package final class SpringboardController {
     /// When a click on the Dock last closed the springboard, until the next request to open Apps;
     /// see ``SpringboardEntry``.
     private var lastDockClickDismissal: ContinuousClock.Instant?
+    /// Which left-button events are the Dock's: those of a gesture that began on it, until the button comes up.
+    private var dockGestures = SpringboardDockGestureTracker()
+    private let dockDragPassThrough = SpringboardPointerPassThrough()
 
     /// A pinch in progress: whether it opens, and how visible it has made the springboard.
     private var pinch: (isOpening: Bool, visibility: Double)?
@@ -119,6 +122,8 @@ package final class SpringboardController {
         newInterface.setVisibility(0)
         window = newWindow
         interface = newInterface
+        // A gesture on the Dock from an earlier showing ended while nothing was watching.
+        dockGestures.reset()
         newInterface.folderOpennessDidChange = { [weak self] in
             self?.updateDockVisibility()
         }
@@ -349,26 +354,32 @@ package final class SpringboardController {
             interface.handleModifiersChanged(inputEvent.modifierFlags)
             return true
         case let .mouseDown(.left, clickCount):
-            // Clicks on the Dock stay the Dock's, as they did over macOS 15's Launchpad.
-            guard !isInsideDockBar(inputEvent.location) else { return false }
+            // Presses on the Dock stay the Dock's, as they did over macOS 15's Launchpad, and so does the
+            // rest of the gesture; see ``SpringboardDockGesture``.
+            let isOnDock = isInsideDockBar(inputEvent.location)
+            dockGestures.press(at: inputEvent.location, isOnDock: isOnDock)
+            guard !isOnDock else { return false }
             restartIdleTimer()
             perform(interface.handleMouseDown(at: containerPoint, timestamp: inputEvent.timestamp, modifierFlags: inputEvent.modifierFlags, clickCount: clickCount))
             return true
         case .mouseDragged(.left):
             restartIdleTimer()
+            guard !dockGestures.drag(to: inputEvent.location) else { return false }
             perform(interface.handleMouseDragged(to: containerPoint, timestamp: inputEvent.timestamp))
             return true
         case .mouseUp(.left):
+            switch dockGestures.release() {
+            case .dockClick:
+                closeAfterDockClick()
+                return false
+            case .dockDrag:
+                // A drag of a Dock icon leaves the springboard up, as 15's did: only a click opens something.
+                return false
+            case .springboard:
+                break
+            }
             guard interface.dragSession != nil || !isInsideDockBar(inputEvent.location) else {
-                // Whatever the click on the Dock opens takes key focus, so close afterwards, as
-                // macOS 15's Launchpad closed when something was opened from the Dock. A click on Apps
-                // asks to open Apps a moment later; that request must not open the springboard again.
-                lastDockClickDismissal = .now
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        SpringboardController.shared.hide(reason: "clicked the Dock")
-                    }
-                }
+                closeAfterDockClick()
                 return false
             }
             perform(interface.handleMouseUp(at: containerPoint, timestamp: inputEvent.timestamp))
@@ -395,6 +406,23 @@ package final class SpringboardController {
         case .mouseMoved, .other, .dockSwipe, .systemGestureCancelled:
             return false
         }
+    }
+
+    /// Called by the host's event hook just before the Dock handles an event the springboard left to it. Returns
+    /// whether ``dockDidHandleEvent()`` must follow once the Dock is done with the event.
+    ///
+    /// A drag event of a gesture that began on the Dock may start the Dock dragging one of its icons, which goes
+    /// on until the button comes up before the Dock returns; the springboard's window lets the pointer through
+    /// meanwhile — see ``SpringboardPointerPassThrough``.
+    package func dockWillHandle(_ inputEvent: SpringboardInputEvent) -> Bool {
+        guard dockGestures.isDockGestureInProgress, inputEvent.kind == .mouseDragged(.left) else { return false }
+        dockDragPassThrough.begin(with: window ?? hidingWindow)
+        return true
+    }
+
+    /// Called once the Dock is done with an event ``dockWillHandle(_:)`` answered true for.
+    package func dockDidHandleEvent() {
+        dockDragPassThrough.end()
     }
 
     /// The window server says the keyboard left: another application took it — clicked on another display,
@@ -488,6 +516,18 @@ package final class SpringboardController {
         }
         // The launched application takes the keyboard; handing it back to the one before would race it.
         hide(reason: "launching \(application.title)", returningToPreviousApplication: false)
+    }
+
+    /// Whatever the click on the Dock opens takes key focus, so close afterwards, as macOS 15's Launchpad
+    /// closed when something was opened from the Dock. A click on Apps asks to open Apps a moment later; that
+    /// request must not open the springboard again.
+    private func closeAfterDockClick() {
+        lastDockClickDismissal = .now
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                SpringboardController.shared.hide(reason: "clicked the Dock")
+            }
+        }
     }
 
     private func isInsideDockBar(_ location: CGPoint) -> Bool {

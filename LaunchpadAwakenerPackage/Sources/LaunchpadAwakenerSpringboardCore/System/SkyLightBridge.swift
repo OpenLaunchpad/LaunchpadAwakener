@@ -16,9 +16,22 @@ package enum SkyLightBridge {
     /// `SLSGetDockRectWithOrientation(connection, &rectangle, &reason, &orientation)`: returns nothing, writes all
     /// three without checking for null (27.2 `0x182A217AC`).
     private typealias GetDockRectangleFunction = @convention(c) (UInt32, UnsafeMutablePointer<CGRect>, UnsafeMutablePointer<UInt32>, UnsafeMutablePointer<UInt32>) -> Void
+    /// `CGSSetWindowTags` and `CGSClearWindowTags(connection, window, &tags, 64)`: the tags are a bit set the
+    /// width of the last argument, which is how the Dock itself calls them (27.2
+    /// `-[DOCKWindowTile beginMinMax:minimizing:animate:]`, `0x1000339D0`).
+    private typealias WindowTagsFunction = @convention(c) (UInt32, UInt32, UnsafePointer<UInt64>, Int32) -> Int32
+    private static let windowTagsBitCount: Int32 = 64
 
     /// The flags macOS 15's `-[Springboard prepareForEnterAnimation]` passed when taking key focus.
     private static let launchpadKeyFocusFlags: UInt32 = 1152
+
+    /// The window tag with which the window server routes no pointer events — and no drops — to a window, so they
+    /// reach whatever lies below it. `-[NSWindow setIgnoresMouseEvents:]` switches between this one and
+    /// ``takesPointerEventsWindowTag``, setting one and clearing the other (AppKit 27.2 `_NSSetIgnoresMouseEvents`).
+    package static let ignoresPointerEventsWindowTag: UInt64 = 1 << 9
+    /// The window tag with which a window takes pointer events; the springboard's window in the Dock is created
+    /// with it, as macOS 15's Launchpad window was.
+    package static let takesPointerEventsWindowTag: UInt64 = 1 << 10
 
     /// `RTLD_DEFAULT`, which Swift does not import because the C macro is a pointer cast.
     private static var defaultSymbolSearchHandle: UnsafeMutableRawPointer? {
@@ -54,6 +67,28 @@ package enum SkyLightBridge {
     package static func releaseKeyFocus(onConnection connectionIdentifier: UInt32) -> Int32? {
         resolveFunction(named: "CPSReleaseKeyFocusOnConnection", as: ReleaseKeyFocusFunction.self)
             .map { releaseKeyFocusFunction in releaseKeyFocusFunction(connectionIdentifier) }
+    }
+
+    /// Lets pointer events and drops through a window owned by `connectionIdentifier` to whatever lies below it,
+    /// or makes it take them again, the way `-[NSWindow setIgnoresMouseEvents:]` does. Returns the first nonzero
+    /// window-server error code of setting the one tag and clearing the other, zero when both succeeded, and nil
+    /// when either function is missing.
+    @discardableResult
+    package static func setIgnoresPointerEvents(
+        _ ignoresPointerEvents: Bool,
+        ofWindowWithIdentifier windowIdentifier: UInt32,
+        onConnection connectionIdentifier: UInt32
+    ) -> Int32? {
+        guard
+            let setWindowTags = resolveFunction(named: "CGSSetWindowTags", as: WindowTagsFunction.self),
+            let clearWindowTags = resolveFunction(named: "CGSClearWindowTags", as: WindowTagsFunction.self)
+        else { return nil }
+        // The new tag goes on before the old one comes off, so the window is never left taking neither.
+        var addedTags = ignoresPointerEvents ? ignoresPointerEventsWindowTag : takesPointerEventsWindowTag
+        var removedTags = ignoresPointerEvents ? takesPointerEventsWindowTag : ignoresPointerEventsWindowTag
+        let setResult = setWindowTags(connectionIdentifier, windowIdentifier, &addedTags, windowTagsBitCount)
+        let clearResult = clearWindowTags(connectionIdentifier, windowIdentifier, &removedTags, windowTagsBitCount)
+        return setResult != 0 ? setResult : clearResult
     }
 
     /// The rectangle the window server keeps for the Dock — the one AppKit leaves out of a screen's visible

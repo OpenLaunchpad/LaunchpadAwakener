@@ -16,8 +16,9 @@ final class DockSpringboardWindow: SpringboardWindow {
     static let dockWindowLevel: Int32 = 20
     static let springboardWindowLevel: Int32 = 27
     static let raisedDockWindowLevel: Int32 = 29
-    /// The tags macOS 15's `-[Springboard init]` passed.
-    static let windowTags: UInt64 = 1024
+    /// The tags macOS 15's `-[Springboard init]` passed: taking pointer events, the state
+    /// ``setPassesPointerEventsThrough(_:)`` puts the window back in.
+    static let windowTags: UInt64 = SkyLightBridge.takesPointerEventsWindowTag
 
     let displayIdentifier: CGDirectDisplayID
     /// Global coordinates with a top-left origin.
@@ -84,6 +85,22 @@ final class DockSpringboardWindow: SpringboardWindow {
         guard hasKeyFocus else { return }
         SkyLightBridge.releaseKeyFocus(onConnection: connectionIdentifier)
         hasKeyFocus = false
+    }
+
+    /// Switches the window between the two tags `-[NSWindow setIgnoresMouseEvents:]` uses; it was created
+    /// taking pointer events (``windowTags``).
+    func setPassesPointerEventsThrough(_ passesThrough: Bool) {
+        let result = SkyLightBridge.setIgnoresPointerEvents(
+            passesThrough,
+            ofWindowWithIdentifier: windowIdentifier,
+            onConnection: connectionIdentifier
+        )
+        // Debug level: a press that turns into no drag — on Finder, say — switches the window on every drag event.
+        if result == 0 {
+            #log(.debug, "Window \(self.windowIdentifier, privacy: .public) \(passesThrough ? "lets the pointer through" : "takes the pointer again", privacy: .public)")
+        } else {
+            #log(.error, "Window \(self.windowIdentifier, privacy: .public) could not \(passesThrough ? "let the pointer through" : "take the pointer again", privacy: .public): result \(result ?? -1, privacy: .public)")
+        }
     }
 
     func orderOut() {
