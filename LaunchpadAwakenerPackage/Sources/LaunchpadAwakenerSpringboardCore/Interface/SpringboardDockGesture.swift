@@ -65,10 +65,9 @@ package struct SpringboardDockGestureTracker: Sendable {
         gesture != nil
     }
 
-    /// A left press. Returns whether it is the Dock's.
-    package mutating func press(at location: CGPoint, isOnDock: Bool) -> Bool {
+    /// A left press: one on the Dock starts a gesture that is the Dock's, one anywhere else is the springboard's.
+    package mutating func press(at location: CGPoint, isOnDock: Bool) {
         gesture = isOnDock ? SpringboardDockGesture(startLocation: location) : nil
-        return isOnDock
     }
 
     /// A left drag event. Returns whether it is the Dock's.

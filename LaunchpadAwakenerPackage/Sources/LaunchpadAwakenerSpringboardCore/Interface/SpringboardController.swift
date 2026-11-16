@@ -356,9 +356,9 @@ package final class SpringboardController {
         case let .mouseDown(.left, clickCount):
             // Presses on the Dock stay the Dock's, as they did over macOS 15's Launchpad, and so does the
             // rest of the gesture; see ``SpringboardDockGesture``.
-            guard !dockGestures.press(at: inputEvent.location, isOnDock: isInsideDockBar(inputEvent.location)) else {
-                return false
-            }
+            let isOnDock = isInsideDockBar(inputEvent.location)
+            dockGestures.press(at: inputEvent.location, isOnDock: isOnDock)
+            guard !isOnDock else { return false }
             restartIdleTimer()
             perform(interface.handleMouseDown(at: containerPoint, timestamp: inputEvent.timestamp, modifierFlags: inputEvent.modifierFlags, clickCount: clickCount))
             return true

@@ -55,8 +55,7 @@ struct SpringboardDockGestureTrackerTests {
     @Test("a press on the Dock and every event after it are the Dock's, even off the Dock")
     func dockGestureGoesToDock() {
         var tracker = SpringboardDockGestureTracker()
-        let isPressForDock = tracker.press(at: Self.dockLocation, isOnDock: true)
-        #expect(isPressForDock)
+        tracker.press(at: Self.dockLocation, isOnDock: true)
         #expect(tracker.isDockGestureInProgress)
         let isDragOverDockForDock = tracker.drag(to: CGPoint(x: 700, y: 880))
         let isDragOverSpringboardForDock = tracker.drag(to: Self.springboardLocation)
@@ -70,7 +69,7 @@ struct SpringboardDockGestureTrackerTests {
     @Test("a press on the Dock let go within the threshold is a click, which closes the springboard")
     func dockClick() {
         var tracker = SpringboardDockGestureTracker()
-        _ = tracker.press(at: Self.dockLocation, isOnDock: true)
+        tracker.press(at: Self.dockLocation, isOnDock: true)
         let isDragForDock = tracker.drag(to: CGPoint(x: 702, y: 899))
         #expect(isDragForDock)
         let release = tracker.release()
@@ -80,8 +79,7 @@ struct SpringboardDockGestureTrackerTests {
     @Test("a press off the Dock, its drags and its release are the springboard's, even over the Dock")
     func springboardGesture() {
         var tracker = SpringboardDockGestureTracker()
-        let isPressForDock = tracker.press(at: Self.springboardLocation, isOnDock: false)
-        #expect(!isPressForDock)
+        tracker.press(at: Self.springboardLocation, isOnDock: false)
         #expect(!tracker.isDockGestureInProgress)
         let isDragForDock = tracker.drag(to: Self.dockLocation)
         #expect(!isDragForDock)
@@ -93,10 +91,10 @@ struct SpringboardDockGestureTrackerTests {
     func pressEndsUnseenGesture() {
         // The Dock's drag of an icon follows the pointer itself; its release need not come back to the springboard.
         var tracker = SpringboardDockGestureTracker()
-        _ = tracker.press(at: Self.dockLocation, isOnDock: true)
+        tracker.press(at: Self.dockLocation, isOnDock: true)
         _ = tracker.drag(to: Self.springboardLocation)
-        let isNextPressForDock = tracker.press(at: Self.springboardLocation, isOnDock: false)
-        #expect(!isNextPressForDock)
+        tracker.press(at: Self.springboardLocation, isOnDock: false)
+        #expect(!tracker.isDockGestureInProgress)
         let isNextDragForDock = tracker.drag(to: CGPoint(x: 720, y: 400))
         #expect(!isNextDragForDock)
         let release = tracker.release()
@@ -106,7 +104,7 @@ struct SpringboardDockGestureTrackerTests {
     @Test("after the release, drags without a new press are the springboard's")
     func releaseEndsGesture() {
         var tracker = SpringboardDockGestureTracker()
-        _ = tracker.press(at: Self.dockLocation, isOnDock: true)
+        tracker.press(at: Self.dockLocation, isOnDock: true)
         _ = tracker.release()
         let isLaterDragForDock = tracker.drag(to: Self.springboardLocation)
         #expect(!isLaterDragForDock)
@@ -115,7 +113,7 @@ struct SpringboardDockGestureTrackerTests {
     @Test("a reset forgets the gesture")
     func reset() {
         var tracker = SpringboardDockGestureTracker()
-        _ = tracker.press(at: Self.dockLocation, isOnDock: true)
+        tracker.press(at: Self.dockLocation, isOnDock: true)
         tracker.reset()
         #expect(!tracker.isDockGestureInProgress)
         let release = tracker.release()
