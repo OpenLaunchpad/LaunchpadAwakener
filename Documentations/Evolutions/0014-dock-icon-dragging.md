@@ -1,10 +1,10 @@
-# Draft - Launchpad 开着时拖动 Dock 栏里的图标
+# 0014 - Launchpad 开着时拖动 Dock 栏里的图标
 
-- **状态**: In Progress
+- **状态**: Implemented
 - **创建日期**: 2026-11-16
 - **最后更新**: 2026-11-16
 - **关联提案**: [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md)
-- **实现分支 / PR**: `feature/dock-icon-dragging`（worktree `.worktrees/LaunchpadAwakener-DockIconDragging`）
+- **实现分支 / PR**: `feature/dock-icon-dragging`，已合进 `main`，分支与 worktree 已删除
 - **配套文档**: [Launchpad 复刻：实现说明](../Internal/LaunchpadReplica.md)「Dock 上开始的拖动归 Dock」
 
 ## 摘要
@@ -62,3 +62,4 @@ macOS 15 的 Launchpad 开着时，Dock 栏照常可用：可以按住 Dock 里�
 | 2026-11-16 | 自审（code-review medium）：10 条发现。改 3 条：控制器的 Dock 手势规则抽成 `SpringboardDockGestureTracker` 并补 6 个单元测试（原先只有两个辅助类型有测试）；建窗标记改为引用 `SkyLightBridge.takesPointerEventsWindowTag`，不再两处各写 1024；`SpringboardDockGesture` 只留 `endsInClick` 一个对外的判断。另把每次切换窗口标记的日志降到 debug 级：按着访达这类拖不动的图标来回拖时，每个拖动事件都切换一次。6 条判为误报或不修，记在[已裁决清单](../Internal/ReviewAdjudications.md) | 前三条都不是行为错误（没有能变红的复现），是覆盖缺口与重复定义，所以只补测试与整理，不写「修前失败」的回归测试；「每个事件都切换标记」本身保留，理由见前面「每个交给 Dock 的拖动事件前后都设、恢复标记」那一行 |
 | 2026-11-16 | 第二轮自审（只审第一轮的修改）：6 条发现。改 2 条：决策日志把每个事件的开销写成一次窗口服务器调用，实际是四次，已更正；`SpringboardDockGestureTracker.press` 原样返回传进来的 `isOnDock`，改为不返回值，调用处先算好再判断。4 条不修：只在越过 5 点后才切换标记（第一轮就提过，理由见「每个交给 Dock 的拖动事件前后都设、恢复标记」那一行）；Dock 拖完图标后跟踪器收不到松手（收得到：拖动期间的松手也经事件 hook 进来，Dock 自己拿它判断是否落在菜单栏上；万一收不到，下一次按下就清掉）；界面上按下、Dock 上松手那条分支仍在控制器里、没有测试（`main` 上就有，记为后续项）；拖到 Dock 的窗口与复刻的窗口共用建窗标记（`main` 上就这样共用） | 两轮之后不再审第三轮 |
 | 2026-11-16 | 实现完成，待用户看过后收尾 | 完整验证：`swift test` 640 个测试全部通过，`RunScript.sh` 完整构建与三个架构切片校验通过；15.5 与 26.6.2 虚拟机实拖结果见实现说明「验证」。文档：实现说明、已裁决清单、提案与两个文档索引已同步；项目 `CLAUDE.md` 不需要改（没有新模块、新流程或新的运行规则）；没有新术语，不需要改术语表；没有给外部调用方的契约，不需要使用指南。27 上没有实测 |
+| 2026-11-16 | 收尾：取号 0014，状态改 Implemented，`main` 推送，功能分支与 worktree 删除 | 用户看过后要求收尾。文档：实现说明已登记在头部「配套文档」，没有给外部调用方的契约，不需要使用指南；没有新术语；项目 `CLAUDE.md` 不需要改。后续项照旧留在「后续项」一节，27 上的实拖留给用户 |
