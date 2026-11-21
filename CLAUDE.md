@@ -147,7 +147,9 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 
 - **发布说明**：`Release.zsh` 没设 `release_notes_path`，AppRelease 建的 Release 正文是空的；发布后用 `gh release edit <tag> --notes-file <文件>` 补上，标题设成 `LaunchpadAwakener <版本>`。
 
-1.0 于 2026-11-12 在本机用 `app-release all --publish` 发布（tag `v1.0`），没有走 CI：当时仓库还是私有的，拿不到组织级 secret。从下一个版本起推 tag、由 CI 发布，发版前先把注入版 target 的 `MARKETING_VERSION` 改成新版本号。1.0 这个包还没在测试机上装过。
+**发一个版本的步骤**：把三个 App target（注入版、文本输入辅助进程、独立版）的 `MARKETING_VERSION` 改成新版本号、`CURRENT_PROJECT_VERSION` 加一，推到 main；在 Actions 页面手动跑一次 `Release.yml` 演练，通过后打带注解的 tag（`git tag -a v<版本> -m "Release v<版本>"`）推上去；Release 建好后补发布说明与标题。一次演练或发布约 14 分钟。
+
+1.0 于 2026-11-12 在本机用 `app-release all --publish` 发布，没有走 CI：当时仓库还是私有的，拿不到组织级 secret。1.1 于 2026-11-22 第一次照上面的步骤由 CI 发布，演练与正式发布都一次通过。两个版本的包都还没在测试机上装过。
 
 ## 改完代码之后要做什么
 
