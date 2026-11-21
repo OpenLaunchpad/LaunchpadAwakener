@@ -102,58 +102,6 @@
       }
     },
     {
-      "name": "dots",
-      "blend-mode": "normal",
-      "layers": [
-        {
-          "name": "dot-active",
-          "image-name": "dot-active.svg",
-          "glass": true,
-          "fill-specializations": [
-            {
-              "value": {
-                "solid": "gray:0.45000,1.00000"
-              }
-            },
-            {
-              "appearance": "tinted",
-              "value": {
-                "solid": "gray:0.70000,1.00000"
-              }
-            }
-          ]
-        },
-        {
-          "name": "dots-inactive",
-          "image-name": "dots-inactive.svg",
-          "glass": true,
-          "fill-specializations": [
-            {
-              "value": {
-                "solid": "gray:0.45000,0.35000"
-              }
-            },
-            {
-              "appearance": "tinted",
-              "value": {
-                "solid": "gray:0.70000,1.00000"
-              }
-            }
-          ]
-        }
-      ],
-      "lighting": "combined",
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.5
-      },
-      "specular": true,
-      "translucency": {
-        "enabled": true,
-        "value": 0
-      }
-    },
-    {
       "name": "tiles",
       "blend-mode": "normal",
       "layers": [
