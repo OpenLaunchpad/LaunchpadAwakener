@@ -71,8 +71,8 @@ struct LaunchpadArrangingTests {
 
             try store.moveItems(try Self.identifiers(of: ["E", "C", "B"], in: store), toEndOfPage: try Self.pageIdentifier(at: 0, in: store), itemsPerPage: 35)
 
-            // F is left with D alone, so it dissolves and D takes its place.
-            #expect(try Self.pageTitles(of: store) == [["A", "D", "E", "C", "B"]])
+            // F is left with D alone and stays, as 15 kept a folder until it was empty.
+            #expect(try Self.pageTitles(of: store) == [["A", "F", "E", "C", "B"]])
         }
     }
 

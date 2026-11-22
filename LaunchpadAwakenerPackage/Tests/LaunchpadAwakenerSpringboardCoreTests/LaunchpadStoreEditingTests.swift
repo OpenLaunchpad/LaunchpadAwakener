@@ -167,8 +167,8 @@ struct LaunchpadStoreEditingTests {
 
 @Suite("Dragging out of folders")
 struct LaunchpadStoreFolderExitTests {
-    @Test("dragging the second-to-last application out dissolves the folder into its place")
-    func dissolveOnDragOut() throws {
+    @Test("dragging the second-to-last application out leaves a folder of one, as 15 did")
+    func folderOfOneStaysOnDragOut() throws {
         try withTemporaryDirectory { directoryURL in
             let store = try LaunchpadStore(databaseURL: directoryURL.appendingPathComponent("Launchpad.db"))
             let pageIdentifier = try store.appendPage(to: store.rootIdentifier)
@@ -180,9 +180,61 @@ struct LaunchpadStoreFolderExitTests {
 
             try store.moveItem(try #require(identifiers["B"]), outOfFolderTo: 2, onPage: pageIdentifier, itemsPerPage: 35)
 
+            // 15 removed a folder only once empty (`-[ECSBGroup canBeRemoved]`, 15.5 `0x1000A1DA0`).
             let layout = try store.layout()
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["Tools", "C", "B"]])
+            #expect(layout.folders.map { folder in folder.applications.map(\.title) } == [["A"]])
+        }
+    }
+
+    @Test("dragging the last application out takes the emptied folder away")
+    func emptiedFolderGoes() throws {
+        try withTemporaryDirectory { directoryURL in
+            let (store, identifiers) = try Self.makeStoreWithFolder(in: directoryURL, titles: ["A", "B", "C"])
+            let pageIdentifier = try #require(try store.layout().pages.first?.identifier)
+            try store.moveItem(try #require(identifiers["B"]), outOfFolderTo: 2, onPage: pageIdentifier, itemsPerPage: 35)
+
+            try store.moveItem(try #require(identifiers["A"]), outOfFolderTo: 3, onPage: pageIdentifier, itemsPerPage: 35)
+
+            let layout = try store.layout()
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["C", "B", "A"]])
             #expect(layout.folders.isEmpty)
+        }
+    }
+
+    @Test("an application leaving a folder made moments before dissolves it into the one left")
+    func newFolderDissolves() throws {
+        // 15 let a new folder go with two items, the dragged one still counted (`-[ECSBGroup
+        // canBeRemoved]`, 15.5 `0x1000A1DA0`).
+        try withTemporaryDirectory { directoryURL in
+            let (store, identifiers) = try Self.makeStoreWithFolder(in: directoryURL, titles: ["A", "B", "C"])
+            let pageIdentifier = try #require(try store.layout().pages.first?.identifier)
+            let draggedIdentifier = try #require(identifiers["B"])
+
+            try store.dissolvingFolder(of: draggedIdentifier, itemsPerPage: 35) {
+                try store.moveItem(draggedIdentifier, outOfFolderTo: 2, onPage: pageIdentifier, itemsPerPage: 35)
+            }
+
+            let layout = try store.layout()
             #expect(layout.pages.map { page in page.items.map(\.title) } == [["A", "C", "B"]])
+            #expect(layout.folders.isEmpty)
+        }
+    }
+
+    @Test("an application not in a folder leaves nothing to dissolve")
+    func nothingToDissolve() throws {
+        try withTemporaryDirectory { directoryURL in
+            let (store, identifiers) = try Self.makeStoreWithFolder(in: directoryURL, titles: ["A", "B", "C"])
+            let pageIdentifier = try #require(try store.layout().pages.first?.identifier)
+            let movedIdentifier = try #require(identifiers["C"])
+
+            try store.dissolvingFolder(of: movedIdentifier, itemsPerPage: 35) {
+                try store.moveItem(movedIdentifier, toIndex: 0, onPage: pageIdentifier, itemsPerPage: 35)
+            }
+
+            let layout = try store.layout()
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["C", "Tools"]])
+            #expect(layout.folders.map { folder in folder.applications.map(\.title) } == [["A", "B"]])
         }
     }
 
@@ -223,21 +275,21 @@ struct LaunchpadStoreFolderExitTests {
         return (store, identifiers)
     }
 
-    @Test("a folder left with one application by a drop onto another application dissolves")
-    func dissolveOnMakingFolder() throws {
+    @Test("a folder left with one application by a drop onto another application stays")
+    func folderOfOneStaysOnMakingFolder() throws {
         try withTemporaryDirectory { directoryURL in
             let (store, identifiers) = try Self.makeStoreWithFolder(in: directoryURL, titles: ["A", "B", "C", "D"])
 
             try store.makeFolder(merging: try #require(identifiers["B"]), with: try #require(identifiers["C"]), title: "Pair", itemsPerPage: 35)
 
             let layout = try store.layout()
-            #expect(layout.pages.map { page in page.items.map(\.title) } == [["A", "Pair", "D"]])
-            #expect(layout.folders.map(\.title) == ["Pair"])
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["Tools", "Pair", "D"]])
+            #expect(layout.folders.map { folder in folder.applications.map(\.title) } == [["A"], ["C", "B"]])
         }
     }
 
-    @Test("a folder left with one application by a drop onto another folder dissolves")
-    func dissolveOnMovingIntoFolder() throws {
+    @Test("a folder left with one application by a drop onto another folder stays")
+    func folderOfOneStaysOnMovingIntoFolder() throws {
         try withTemporaryDirectory { directoryURL in
             let (store, identifiers) = try Self.makeStoreWithFolder(in: directoryURL, titles: ["A", "B", "C", "D", "E"])
             let otherFolderIdentifier = try store.makeFolder(merging: try #require(identifiers["D"]), with: try #require(identifiers["C"]), title: "Other", itemsPerPage: 35)
@@ -245,13 +297,13 @@ struct LaunchpadStoreFolderExitTests {
             try store.moveItem(try #require(identifiers["B"]), intoFolder: otherFolderIdentifier, itemsPerPage: 35)
 
             let layout = try store.layout()
-            #expect(layout.pages.map { page in page.items.map(\.title) } == [["A", "Other", "E"]])
-            #expect(layout.folders.first?.applications.map(\.title) == ["C", "D", "B"])
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["Tools", "Other", "E"]])
+            #expect(layout.folders.map { folder in folder.applications.map(\.title) } == [["A"], ["C", "D", "B"]])
         }
     }
 
-    @Test("a folder left with one application by a move onto another folder's page dissolves")
-    func dissolveOnMovingOntoOtherFolderPage() throws {
+    @Test("a folder left with one application by a move onto another folder's page stays")
+    func folderOfOneStaysOnMovingOntoOtherFolderPage() throws {
         try withTemporaryDirectory { directoryURL in
             let (store, identifiers) = try Self.makeStoreWithFolder(in: directoryURL, titles: ["A", "B", "C", "D", "E"])
             let otherFolderIdentifier = try store.makeFolder(merging: try #require(identifiers["D"]), with: try #require(identifiers["C"]), title: "Other", itemsPerPage: 35)
@@ -260,21 +312,33 @@ struct LaunchpadStoreFolderExitTests {
             try store.moveItem(try #require(identifiers["B"]), toIndex: 0, onPage: otherFolderPage, itemsPerPage: 35)
 
             let layout = try store.layout()
-            #expect(layout.pages.map { page in page.items.map(\.title) } == [["A", "Other", "E"]])
-            #expect(layout.folders.map { folder in folder.applications.map(\.title) } == [["B", "C", "D"]])
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["Tools", "Other", "E"]])
+            #expect(layout.folders.map { folder in folder.applications.map(\.title) } == [["A"], ["B", "C", "D"]])
         }
     }
 
-    @Test("a folder left with one application by a drag past the last page dissolves")
-    func dissolveOnMovingToNewLastPage() throws {
+    @Test("a folder left with one application by a drag past the last page stays")
+    func folderOfOneStaysOnMovingToNewLastPage() throws {
         try withTemporaryDirectory { directoryURL in
             let (store, identifiers) = try Self.makeStoreWithFolder(in: directoryURL, titles: ["A", "B", "C"])
 
             try store.moveItemToNewLastPage(try #require(identifiers["B"]), itemsPerPage: 35)
 
             let layout = try store.layout()
-            #expect(layout.pages.map { page in page.items.map(\.title) } == [["A", "C"], ["B"]])
-            #expect(layout.folders.isEmpty)
+            #expect(layout.pages.map { page in page.items.map(\.title) } == [["Tools", "C"], ["B"]])
+            #expect(layout.folders.map { folder in folder.applications.map(\.title) } == [["A"]])
+        }
+    }
+
+    @Test("an application dragged past its folder's last page gets a new page of the folder")
+    func newFolderPage() throws {
+        try withTemporaryDirectory { directoryURL in
+            let (store, identifiers) = try Self.makeStoreWithFolder(in: directoryURL, titles: ["A", "B", "C"])
+
+            try store.moveItemToNewPage(try #require(identifiers["A"]), ofFolder: try #require(identifiers["Tools"]), itemsPerPage: 35)
+
+            let folder = try #require(try store.layout().folders.first)
+            #expect(folder.pages.map { page in page.applications.map(\.title) } == [["B"], ["A"]])
         }
     }
 

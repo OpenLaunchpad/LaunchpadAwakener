@@ -226,6 +226,8 @@ package enum LaunchpadEdit: Sendable, Equatable {
     case moveIntoFolder(LaunchpadItemIdentifier, folder: LaunchpadItemIdentifier)
     case moveOutOfFolder(LaunchpadItemIdentifier, toIndex: Int, onPage: LaunchpadItemIdentifier)
     case moveToNewLastPage(LaunchpadItemIdentifier)
+    /// An application onto a new page after the last one of `folder`.
+    case moveToNewFolderPage(LaunchpadItemIdentifier, folder: LaunchpadItemIdentifier)
     case renameFolder(LaunchpadItemIdentifier, title: String)
     /// The application was deleted from the disk; `folder` is the folder it was in, if any.
     case removeApplication(LaunchpadItemIdentifier, folder: LaunchpadItemIdentifier?)
@@ -241,6 +243,9 @@ package enum LaunchpadEdit: Sendable, Equatable {
     case dissolveFolder(LaunchpadItemIdentifier)
     /// The items of a page of the springboard, or the applications of a folder, in a new order.
     case arrange(LaunchpadItemIdentifier, order: [LaunchpadItemIdentifier])
+    /// `edit`, which takes the application out of a folder made moments before, then that folder dissolved
+    /// into what is left in it; see ``LaunchpadStore/dissolvingFolder(of:itemsPerPage:after:)``.
+    indirect case dissolvingFolder(of: LaunchpadItemIdentifier, after: LaunchpadEdit)
 }
 
 /// What became of a batch of edits.
@@ -323,6 +328,8 @@ extension LaunchpadLibrary {
             try store.moveItem(itemIdentifier, outOfFolderTo: targetIndex, onPage: pageIdentifier, itemsPerPage: itemsPerPage)
         case let .moveToNewLastPage(itemIdentifier):
             try store.moveItemToNewLastPage(itemIdentifier, itemsPerPage: itemsPerPage)
+        case let .moveToNewFolderPage(itemIdentifier, folderIdentifier):
+            try store.moveItemToNewPage(itemIdentifier, ofFolder: folderIdentifier, itemsPerPage: itemsPerPage)
         case let .renameFolder(folderIdentifier, title):
             try store.renameFolder(folderIdentifier, to: title)
         case let .removeApplication(itemIdentifier, folderIdentifier):
@@ -339,6 +346,10 @@ extension LaunchpadLibrary {
             try store.dissolveFolder(folderIdentifier, itemsPerPage: itemsPerPage)
         case let .arrange(containerIdentifier, orderedItems):
             try store.arrangeItems(of: containerIdentifier, inOrder: orderedItems, itemsPerPage: itemsPerPage)
+        case let .dissolvingFolder(applicationIdentifier, innerEdit):
+            try store.dissolvingFolder(of: applicationIdentifier, itemsPerPage: itemsPerPage) {
+                try apply(innerEdit, to: store, itemsPerPage: itemsPerPage)
+            }
         }
     }
 }
