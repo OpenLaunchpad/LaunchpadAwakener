@@ -309,8 +309,11 @@ extension SpringboardInterface {
         }
     }
 
-    /// Decides what the dragged icon's position means, in 15's order: leaving the open folder, an edge,
-    /// another icon to drop onto, then a new place on the page.
+    /// Decides what the dragged icon's position means, in 15's order (`-[ECSBDragCapture
+    /// _dragStateForEvent:itemFrame:]`, 15.5 `0x1000B50B0`): leaving the open folder, an edge, another icon
+    /// to drop onto, then a new place on the page. Reaching another icon's picture holds the dragged one over
+    /// it; from the next move on, a new place is looked for as if it were not, so the icon held over gives
+    /// way once the dragged one is more than a cell from its own place — past the middle of a neighbour.
     private func evaluateDrag() {
         guard
             let dragSession,
@@ -347,36 +350,48 @@ extension SpringboardInterface {
         cancelEdgePageTurn()
 
         let pointFromTopLeft = pageGrid.pointFromTopLeft(containerLayer.convert(cellCenter, to: pageGrid.gridLayer))
-        if dragSession.context == .main, folderPanel == nil, case .application = dragSession.item {
-            let targetIndex = SpringboardDragging.itemIndex(
-                at: pointFromTopLeft,
-                cellSize: pageGrid.cellSize,
-                columnCount: pageGrid.columnCount,
-                // An item pushed past a full page waits to spill over; the grid ends at its capacity.
-                itemCount: min(dragSession.arrangement.count, pageGrid.capacity),
-                currentIndex: nil,
-                usesHysteresis: false
-            )
-            if targetIndex != dragSession.currentIndex,
-               dragSession.arrangedLayers.indices.contains(targetIndex),
-               let targetLayer = dragSession.arrangedLayers[targetIndex],
-               targetLayer.convert(targetLayer.iconFrame, to: containerLayer).contains(cellCenter)
-            {
-                hover(over: targetIndex, targetLayer: targetLayer)
-                return
+        // An item pushed past a full page waits to spill over; the grid ends at its capacity.
+        let itemCount = min(dragSession.arrangement.count, pageGrid.capacity)
+        let targetIndex = SpringboardDragging.itemIndex(
+            at: pointFromTopLeft,
+            cellSize: pageGrid.cellSize,
+            columnCount: pageGrid.columnCount,
+            itemCount: itemCount,
+            currentIndex: nil,
+            usesHysteresis: false
+        )
+        if targetIndex == dragSession.currentIndex {
+            // Back over its own cell, the icon holds over nothing. 15 kept the hold there, and letting go
+            // made a folder with an icon the pointer had left.
+            endHover()
+        } else if let hoverTarget = dragSession.hoverTarget {
+            // 15 kept holding over an icon while the dragged one stayed in that icon's cell, on its picture or
+            // not, and let go of it for any other cell — then looked for a new place below, never for another
+            // icon to hold over in the same move.
+            if hoverTarget.index != targetIndex {
+                endHover()
             }
+        } else if dragSession.context == .main, folderPanel == nil, case .application = dragSession.item,
+                  dragSession.arrangedLayers.indices.contains(targetIndex),
+                  let targetLayer = dragSession.arrangedLayers[targetIndex],
+                  targetLayer.convert(targetLayer.iconFrame, to: containerLayer).contains(cellCenter)
+        {
+            hover(over: targetIndex, targetLayer: targetLayer)
+            return
         }
-        endHover()
 
+        // Held over another icon or not, the others make room once the icon is more than a cell from its
+        // place; making room ends a hold, as 15's `ECSBMoveItemDragState` replaced its `OpenGroup` state.
         let newIndex = SpringboardDragging.itemIndex(
             at: pointFromTopLeft,
             cellSize: pageGrid.cellSize,
             columnCount: pageGrid.columnCount,
-            itemCount: min(dragSession.arrangement.count, pageGrid.capacity),
+            itemCount: itemCount,
             currentIndex: dragSession.currentIndex,
             usesHysteresis: true
         )
         if newIndex != dragSession.currentIndex {
+            endHover()
             moveDraggedItem(to: newIndex)
         }
     }
