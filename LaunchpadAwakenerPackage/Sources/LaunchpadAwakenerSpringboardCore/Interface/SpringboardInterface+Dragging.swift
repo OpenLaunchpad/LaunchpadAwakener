@@ -32,7 +32,8 @@ final class SpringboardDragSession {
     var hasRearranged = false
     /// Whether the dragged icon has been over the open folder's panel; leaving it then closes the folder.
     var wasInsideFolderPanel: Bool
-    /// Whether the current page was added past the last one during this drag.
+    /// Whether the current page — of the springboard or the open folder — was added past the last one
+    /// during this drag.
     var isOnNewLastPage = false
 
     /// Set once the icon is let go: the drop is animating, and input waits until it ends.
@@ -58,6 +59,9 @@ final class SpringboardDragSession {
     /// The application held over until a new folder opened around it, with the folder's name; the folder
     /// is stored only by the drop.
     var unsavedFolderTarget: (application: LaunchpadApplication, title: String)?
+    /// Set once the drag has left the new folder it started in with one application: the drop dissolves
+    /// that folder in the stored layout as well.
+    var dissolvesSourceFolder = false
 
     /// The Dock as a place to drop the icon, asked for once as the drag starts; see
     /// `SpringboardInterface+DockDropping.swift`.
@@ -289,12 +293,15 @@ extension SpringboardInterface {
         if trackDock(at: location) {
             return
         }
-        // While the pointer is fast, nothing responds; it does once the pointer slows down or rests.
+        // Every move is looked at, as 15 asked for the drag's state on each (`-[ECSBDragCapture
+        // leftMouseDragged:in:]`, 15.5 `0x1000B6058`); while the pointer is fast, only what that undoes happens
+        // now, and anything new once the pointer slows down or rests.
         if speed >= SpringboardDragging.settlingSpeedThreshold {
+            evaluateDrag(appliesNewState: false)
             evaluateDragOnceSettled()
         } else {
             dragSession.settleTask?.cancel()
-            evaluateDrag()
+            evaluateDrag(appliesNewState: true)
         }
     }
 
@@ -305,7 +312,7 @@ extension SpringboardInterface {
         dragSession.settleTask = Task { [weak self] in
             try? await Task.sleep(for: SpringboardDragging.settlingDelay)
             guard !Task.isCancelled else { return }
-            self?.evaluateDrag()
+            self?.evaluateDrag(appliesNewState: true)
         }
     }
 
@@ -314,7 +321,12 @@ extension SpringboardInterface {
     /// to drop onto, then a new place on the page. Reaching another icon's picture holds the dragged one over
     /// it; from the next move on, a new place is looked for as if it were not, so the icon held over gives
     /// way once the dragged one is more than a cell from its own place — past the middle of a neighbour.
-    private func evaluateDrag() {
+    ///
+    /// - Parameter appliesNewState: False while the pointer moves fast: what 15 undid as it looked —
+    ///   letting go of an icon held over for another cell, giving up a page turn back over the grid —
+    ///   still happens, but nothing new starts. 15 cancelled those inside the state lookup and put off only
+    ///   applying the state it returned.
+    private func evaluateDrag(appliesNewState: Bool) {
         guard
             let dragSession,
             !dragSession.isEnding,
@@ -331,7 +343,9 @@ extension SpringboardInterface {
             if iconRect.intersects(panelRect) {
                 dragSession.wasInsideFolderPanel = true
             } else if dragSession.wasInsideFolderPanel {
-                leaveFolder()
+                if appliesNewState {
+                    leaveFolder()
+                }
                 return
             }
         }
@@ -339,15 +353,19 @@ extension SpringboardInterface {
         let pages = pages(for: dragSession.context)
         guard let pageGrid = pages.currentPageGrid else { return }
         let gridFrame = pageGrid.gridLayer.convert(pageGrid.gridLayer.bounds, to: containerLayer)
-        if cellCenter.x < gridFrame.minX {
-            scheduleEdgePageTurn(direction: -1)
-            return
+        let edgeDirection: Int? = cellCenter.x < gridFrame.minX ? -1 : (cellCenter.x > gridFrame.maxX ? 1 : nil)
+        if let edgeDirection {
+            // With a turn waiting at this edge, 15 kept looking for a new place below; one found replaced
+            // the turn, and the next move asked for it again.
+            guard dragSession.edgeDirection == edgeDirection else {
+                if appliesNewState {
+                    scheduleEdgePageTurn(direction: edgeDirection)
+                }
+                return
+            }
+        } else {
+            cancelEdgePageTurn()
         }
-        if cellCenter.x > gridFrame.maxX {
-            scheduleEdgePageTurn(direction: 1)
-            return
-        }
-        cancelEdgePageTurn()
 
         let pointFromTopLeft = pageGrid.pointFromTopLeft(containerLayer.convert(cellCenter, to: pageGrid.gridLayer))
         // An item pushed past a full page waits to spill over; the grid ends at its capacity.
@@ -376,12 +394,15 @@ extension SpringboardInterface {
                   let targetLayer = dragSession.arrangedLayers[targetIndex],
                   targetLayer.convert(targetLayer.iconFrame, to: containerLayer).contains(cellCenter)
         {
-            hover(over: targetIndex, targetLayer: targetLayer)
+            if appliesNewState {
+                hover(over: targetIndex, targetLayer: targetLayer)
+            }
             return
         }
 
         // Held over another icon or not, the others make room once the icon is more than a cell from its
-        // place; making room ends a hold, as 15's `ECSBMoveItemDragState` replaced its `OpenGroup` state.
+        // place; making room ends a hold, and a turn waiting at an edge, as 15's `ECSBMoveItemDragState`
+        // replaced its `OpenGroup` or `ChangePage` state.
         let newIndex = SpringboardDragging.itemIndex(
             at: pointFromTopLeft,
             cellSize: pageGrid.cellSize,
@@ -390,8 +411,9 @@ extension SpringboardInterface {
             currentIndex: dragSession.currentIndex,
             usesHysteresis: true
         )
-        if newIndex != dragSession.currentIndex {
+        if appliesNewState, newIndex != dragSession.currentIndex {
             endHover()
+            cancelEdgePageTurn()
             moveDraggedItem(to: newIndex)
         }
     }
@@ -499,6 +521,7 @@ extension SpringboardInterface {
         )
         dragSession.context = .folder
         dragSession.pageIndex = folderPanel.pages.currentPageIndex
+        dragSession.isOnNewLastPage = false
         dragSession.arrangement = joined.items
         dragSession.arrangedLayers = joined.layers
         dragSession.currentIndex = joined.index
@@ -528,13 +551,26 @@ extension SpringboardInterface {
     /// The dragged icon left the open folder: close it and carry the icon to the end of the main page —
     /// onto its last cell when the page is full (`-[ECSBCloseGroupDragState beginTransition]`,
     /// 15.5 `0x10011FE08`). 250 ms after the folder has closed, the main page closes the gap the icon may
-    /// have left there, and a folder left with one application or none dissolves into it.
+    /// have left there, and a folder left empty — or a new one left one application — dissolves into it.
+    /// A folder jiggling hands its jiggling on to the main pages, as 15's did.
     private func leaveFolder() {
         guard let dragSession, let folderPanel else { return }
         cancelEdgePageTurn()
         let folderItemLayer = self.folderItemLayer(of: folderPanel.folder)
         let remainingApplications = folderPanel.folder.applications.filter { $0.identifier != dragSession.item.identifier }
-        let dissolves = folderPanel.folder.isUnsaved || remainingApplications.count <= 1
+        // 15 took a folder away only once empty, and a new one once a drag left it one application
+        // (`-[ECSBGroup canBeRemoved]`, 15.5 `0x1000A1DA0`, counting the dragged one still in it).
+        let dissolves = remainingApplications.isEmpty || (folderPanel.isNew && remainingApplications.count <= 1)
+        // A new folder the drag started in is stored already: the drop dissolves it there too. One made
+        // during this drag never was, and leaves nothing to undo.
+        if dissolves, !remainingApplications.isEmpty, dragSession.sourceContext == .folder,
+           dragSession.sourceFolderIdentifier == folderPanel.folder.identifier
+        {
+            dragSession.dissolvesSourceFolder = true
+        }
+        // The main pages carry on as the folder was (`beginTransition` reads the folder's `deleting`
+        // before closing it and gives it to the main pager).
+        let wasJiggling = folderPanel.pages.isJiggling
         if let folderItemLayer, remainingApplications.count != folderPanel.folder.applications.count {
             // The folder's icon shows the folder without the dragged application as it closes, as 15
             // refreshed it (`-[ECSBGroupLayer prepareForAnimatedHide]`, 15.5 `0x10004E404`).
@@ -555,6 +591,7 @@ extension SpringboardInterface {
         dragSession.unsavedFolderTarget = nil
         dragSession.mainPageArrangement = nil
         closeFolder()
+        mainPages.isJiggling = wasJiggling
 
         if let mainPage = mainPages.currentPageGrid {
             var arrangement: [LaunchpadItem]
@@ -584,6 +621,7 @@ extension SpringboardInterface {
             arrangedLayers.insert(nil, at: insertionIndex)
             dragSession.context = .main
             dragSession.pageIndex = mainPages.currentPageIndex
+            dragSession.isOnNewLastPage = mainPages.currentPageIndex >= layout.pages.count
             dragSession.arrangement = arrangement
             dragSession.arrangedLayers = arrangedLayers
             dragSession.currentIndex = insertionIndex
@@ -623,8 +661,10 @@ extension SpringboardInterface {
         dragSession.edgeDirection = direction
         dragSession.edgeTask = Task { [weak self] in
             try? await Task.sleep(for: SpringboardDragging.edgePageTurnDelay)
+            var isFirstTurn = true
             while !Task.isCancelled {
-                self?.turnPageWhileDragging(direction: direction)
+                self?.turnPageWhileDragging(direction: direction, isFirstTurn: isFirstTurn)
+                isFirstTurn = false
                 try? await Task.sleep(for: SpringboardDragging.edgePageTurnRepeatInterval)
             }
         }
@@ -635,19 +675,36 @@ extension SpringboardInterface {
         dragSession?.edgeDirection = nil
     }
 
-    /// Carries the dragged icon to the end of the neighbouring page; past the last main page, to a new
-    /// one if this page has anything else on it.
-    private func turnPageWhileDragging(direction: Int) {
+    /// Carries the dragged icon to the end of the neighbouring page, of the springboard or the open folder.
+    ///
+    /// Past the last page, 15's first turn of a hold asked its pager for a page that was not there, which
+    /// it ignored, so the icon only went to the end of its own page; the turns repeated after it add a
+    /// page if this one holds anything else (`ChangePageDragState_timerTick_700ms_750ms`, 15.5
+    /// `0x10004FDAC`; a folder's by `-[ECSBGroup addPageForPager:]`, `0x1000A31CC`). A folder not stored
+    /// yet turns no page.
+    ///
+    /// - Parameter isFirstTurn: Whether this is the first turn since the icon reached the edge.
+    func turnPageWhileDragging(direction: Int, isFirstTurn: Bool) {
         guard let dragSession, !isAnimatingFolder else { return }
+        if dragSession.context == .folder, folderPanel?.folder.isUnsaved ?? true {
+            return
+        }
         let pages = pages(for: dragSession.context)
         let targetPageIndex = dragSession.pageIndex + direction
         guard targetPageIndex >= 0 else { return }
         if targetPageIndex >= pages.pageGrids.count {
-            guard dragSession.context == .main, dragSession.arrangement.count > 1 else { return }
-            pages.appendEmptyPage(rowCount: metrics.input.rowCount) { [weak self] itemLayer in
+            if isFirstTurn {
+                let lastIndex = min(dragSession.arrangement.count, pages.currentPageGrid?.capacity ?? dragSession.arrangement.count) - 1
+                if lastIndex >= 0, lastIndex != dragSession.currentIndex {
+                    moveDraggedItem(to: lastIndex)
+                }
+                return
+            }
+            guard dragSession.arrangement.count > 1 else { return }
+            let rowCount = dragSession.context == .folder ? folderPanel?.folderMetrics.rowCount ?? metrics.input.rowCount : metrics.input.rowCount
+            pages.appendEmptyPage(rowCount: rowCount) { [weak self] itemLayer in
                 self?.putIcons(in: itemLayer)
             }
-            dragSession.isOnNewLastPage = true
         }
         removeDraggedItemFromArrangement()
         pages.turn(toPageAt: targetPageIndex)
@@ -661,7 +718,8 @@ extension SpringboardInterface {
         dragSession.arrangedLayers = joined.layers
         dragSession.currentIndex = joined.index
         dragSession.pageIndex = pages.currentPageIndex
-        dragSession.isOnNewLastPage = dragSession.context == .main && targetPageIndex >= layout.pages.count
+        let storedPageCount = dragSession.context == .main ? layout.pages.count : folderPanel?.folder.pages.count ?? 0
+        dragSession.isOnNewLastPage = targetPageIndex >= storedPageCount
         dragSession.hasRearranged = true
         animateArrangement()
     }
@@ -692,10 +750,10 @@ extension SpringboardInterface {
             switch targetItem {
             case .application(let targetApplication):
                 let title = defaultFolderName(for: targetApplication)
-                applyEdit(.makeFolder(merging: dragSession.item.identifier, with: targetApplication.identifier, title: title))
+                applyEdit(storedEdit(forDrop: .makeFolder(merging: dragSession.item.identifier, with: targetApplication.identifier, title: title)))
                 dropIntoNewFolder(around: targetApplication, targetLayer: hoverTarget.itemLayer, title: title)
             case .folder(let folder):
-                applyEdit(.moveIntoFolder(dragSession.item.identifier, folder: folder.identifier))
+                applyEdit(storedEdit(forDrop: .moveIntoFolder(dragSession.item.identifier, folder: folder.identifier)))
                 dropIntoFolder(folder, folderItemLayer: hoverTarget.itemLayer)
             }
             return
@@ -710,7 +768,7 @@ extension SpringboardInterface {
             return
         }
         dragSession.isEnding = true
-        applyEdit(edit)
+        applyEdit(storedEdit(forDrop: edit))
         let targetIndex = min(dragSession.currentIndex, max(pageGrid.capacity - 1, 0))
         let cellFrameInGrid = pageGrid.cellFrame(at: targetIndex)
         let gridLayer = pageGrid.gridLayer
@@ -735,6 +793,13 @@ extension SpringboardInterface {
         let targetFrame = gridLayer.convert(cellFrameInGrid, to: containerLayer)
         dragSession.itemLayer.position = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
         CATransaction.commit()
+    }
+
+    /// `edit` as the drop stores it: when the drag left the new folder it started in with one application,
+    /// that folder is dissolved in the same go, as the springboard showed it dissolving.
+    private func storedEdit(forDrop edit: LaunchpadEdit) -> LaunchpadEdit {
+        guard let dragSession, dragSession.dissolvesSourceFolder else { return edit }
+        return .dissolvingFolder(of: dragSession.item.identifier, after: edit)
     }
 
     /// What the drop writes, from where the dragged item ended up.
@@ -763,7 +828,11 @@ extension SpringboardInterface {
                     draggedItemIndex: dragSession.currentIndex == 0 ? 0 : 1
                 )
             }
-            guard let folderPanel, folderPanel.folder.pages.indices.contains(dragSession.pageIndex) else { return nil }
+            guard let folderPanel else { return nil }
+            if dragSession.isOnNewLastPage {
+                return .moveToNewFolderPage(itemIdentifier, folder: folderPanel.folder.identifier)
+            }
+            guard folderPanel.folder.pages.indices.contains(dragSession.pageIndex) else { return nil }
             return .move(itemIdentifier, toIndex: dragSession.currentIndex, onPage: folderPanel.folder.pages[dragSession.pageIndex].identifier)
         }
     }
@@ -809,7 +878,8 @@ extension SpringboardInterface {
         var closingFolder: LaunchpadFolder?
         let (route, closesOpenFolder) = SpringboardDragging.cancelRoute(
             sourceFolder: dragSession.sourceFolderIdentifier,
-            openFolder: folderPanel?.folder.identifier
+            openFolder: folderPanel?.folder.identifier,
+            hasRearranged: dragSession.hasRearranged
         )
         if let folderPanel, closesOpenFolder {
             closingFolder = folderPanel.folder

@@ -153,6 +153,19 @@ struct SpringboardDraggingTests {
         #expect(farEnough == 1)
     }
 
+    @Test("left of the grid is the first column, as 15's unsigned conversion made it")
+    func leftOfGrid() {
+        let index = SpringboardDragging.itemIndex(at: CGPoint(x: -30, y: 150), cellSize: Self.cellSize, columnCount: 7, itemCount: 35, currentIndex: nil, usesHysteresis: false)
+        #expect(index == 7)
+    }
+
+    @Test("right of the grid runs on into the next row, as 15's hit test left it unclamped")
+    func rightOfGrid() {
+        // `-[ECSBGridLayer itemIndexWithFrame:relativeToItemIndex:usingHysteresis:]`, 15.5 `0x10011E8AC`.
+        let index = SpringboardDragging.itemIndex(at: CGPoint(x: 730, y: 50), cellSize: Self.cellSize, columnCount: 7, itemCount: 35, currentIndex: nil, usesHysteresis: false)
+        #expect(index == 7)
+    }
+
     @Test("past the last item the last cell is the answer")
     func pastTheLastItem() {
         let index = SpringboardDragging.itemIndex(at: CGPoint(x: 650, y: 450), cellSize: Self.cellSize, columnCount: 7, itemCount: 10, currentIndex: nil, usesHysteresis: false)

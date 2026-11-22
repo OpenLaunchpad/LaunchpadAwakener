@@ -92,22 +92,30 @@ struct SpringboardCancelRouteTests {
 
     @Test("an icon from a main page goes back to its cell, closing any folder it opened")
     func fromMainPage() {
-        #expect(SpringboardDragging.cancelRoute(sourceFolder: nil, openFolder: nil) == (.mainPageCell, false))
-        #expect(SpringboardDragging.cancelRoute(sourceFolder: nil, openFolder: Self.otherFolder) == (.mainPageCell, true))
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: nil, openFolder: nil, hasRearranged: true) == (.mainPageCell, false))
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: nil, openFolder: Self.otherFolder, hasRearranged: true) == (.mainPageCell, true))
     }
 
-    @Test("an icon from the folder that is open goes back to its cell there")
+    @Test("an icon from the folder that is open, not yet moved, goes back to its cell there")
     func fromOpenFolder() {
-        #expect(SpringboardDragging.cancelRoute(sourceFolder: Self.sourceFolder, openFolder: Self.sourceFolder) == (.openFolderCell, false))
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: Self.sourceFolder, openFolder: Self.sourceFolder, hasRearranged: false) == (.openFolderCell, false))
+    }
+
+    @Test("an icon moved about in the folder that is open closes it and goes into the folder's icon, as 15's did")
+    func movedInOpenFolder() {
+        // Only the beginning state slid the icon back into the open panel (15.5 `0x10010D9CC`); any other
+        // aimed at the folder's icon on the main page and closed the folder (`-[ECSBMoveItemDragState
+        // cancelDrag:]`, `0x1000DCAD4`).
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: Self.sourceFolder, openFolder: Self.sourceFolder, hasRearranged: true) == (.folderIcon, true))
     }
 
     @Test("an icon from a closed folder goes into that folder's icon")
     func fromClosedFolder() {
-        #expect(SpringboardDragging.cancelRoute(sourceFolder: Self.sourceFolder, openFolder: nil) == (.folderIcon, false))
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: Self.sourceFolder, openFolder: nil, hasRearranged: true) == (.folderIcon, false))
     }
 
     @Test("with another folder open, that folder closes and the icon goes into its own folder's icon")
     func fromFolderWithAnotherOpen() {
-        #expect(SpringboardDragging.cancelRoute(sourceFolder: Self.sourceFolder, openFolder: Self.otherFolder) == (.folderIcon, true))
+        #expect(SpringboardDragging.cancelRoute(sourceFolder: Self.sourceFolder, openFolder: Self.otherFolder, hasRearranged: true) == (.folderIcon, true))
     }
 }

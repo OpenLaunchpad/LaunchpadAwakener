@@ -114,6 +114,8 @@ final class SpringboardInterface {
         /// A press in the search field, which drags out a selection as in the rename field.
         case searchField(doubleClickedWord: Range<Int>?)
         case folderTitle
+        /// A press outside the folder that shows or opens; the release closes it, wherever it comes.
+        case outsideFolder
         /// A press in the rename field, which drags out a selection: by character, or by word from
         /// `doubleClickedWord` after a double-click.
         case titleEditor(doubleClickedWord: Range<Int>?)
@@ -135,6 +137,10 @@ final class SpringboardInterface {
     /// The Dock as a place to drop a dragged icon: the host's, replaced in tests. Asked once per drag.
     var resolveDockDropTarget: () -> (any SpringboardDockDropTarget)? = {
         SpringboardHostSystem.host.dockDropTarget
+    }
+    /// What deletes applications: the host's, replaced in tests.
+    var resolveApplicationUninstaller: () -> (any SpringboardApplicationUninstaller)? = {
+        SpringboardHostSystem.host.applicationUninstaller
     }
 
     /// Fires once a press on an icon has been held long enough to switch jiggle mode.
@@ -519,13 +525,16 @@ final class SpringboardInterface {
         folderOpennessDidChange?()
     }
 
-    func openFolder(_ folder: LaunchpadFolder, from folderItemLayer: SpringboardItemLayer, completion: (@MainActor () -> Void)? = nil) {
+    /// - Parameter isNew: Whether the folder was made moments before, as one a quick drop opens by itself;
+    ///   see ``SpringboardFolderPanel/isNew``.
+    func openFolder(_ folder: LaunchpadFolder, from folderItemLayer: SpringboardItemLayer, isNew: Bool = false, completion: (@MainActor () -> Void)? = nil) {
         guard folderPanel == nil, !isAnimatingFolder else { return }
         select(itemAt: nil)
         let newFolderPanel = SpringboardFolderPanel(
             folder: folder,
             metrics: metrics,
-            scale: scale
+            scale: scale,
+            isNew: isNew
         ) { [weak self] itemLayer in
             self?.putIcons(in: itemLayer)
         }
@@ -1247,13 +1256,13 @@ final class SpringboardInterface {
         // A press while a drop is still settling waits, as one during a folder's animation does.
         guard dragSession == nil else { return .none }
         if isOpeningFolder, let folderPanel {
-            // 15 closed a folder still opening as soon as a press landed outside it, turning it back from
-            // where it was (`-[Springboard leftMouseDown:]`, 15.5 `0x10009216C`); a press on the panel or its
-            // title waits until it has opened.
-            if !folderPanel.isInsidePanel(containerPoint), !folderPanel.isOnTitle(containerPoint) {
-                closeFolder()
-                pointerTracking = .none
-            }
+            // A folder still opening closes as an open one does, on the release of a press outside it,
+            // turning back from where it is: 15's main pages took that press while a folder showed, opening or
+            // not (`-[ECSBLayer leftMouseDown:]`, 15.5 `0x100081FB4`). A press on a covered main-page icon's
+            // picture did nothing meanwhile (`-[ECSBEventHandler leftMouseDown:inLayer:ofPage:]`,
+            // `0x10006E7EC`), and one on the panel or its title waits until it has opened.
+            let isOutside = !folderPanel.isInsidePanel(containerPoint) && !folderPanel.isOnTitle(containerPoint)
+            pointerTracking = isOutside && !isOnMainPageIcon(containerPoint) ? .outsideFolder : .none
             return .none
         }
         guard !isAnimatingFolder else { return .none }
@@ -1281,10 +1290,11 @@ final class SpringboardInterface {
                 return .none
             }
             guard folderPanel.isInsidePanel(containerPoint) else {
-                // 15 closed an open folder as soon as the press landed outside it; a press beside the
-                // title's text closed it too.
-                closeFolder()
-                pointerTracking = .none
+                // 15 closed an open folder on the release of a press outside it, wherever the pointer went
+                // meanwhile: its main pages took the press while a folder showed (`-[ECSBLayer
+                // leftMouseDown:]`, 15.5 `0x100081FB4`) and closed the folder on the release (`leftMouseUp:`,
+                // `0x10008217C`). A press beside the title's text closed it too.
+                pointerTracking = .outsideFolder
                 return .none
             }
             return beginPress(at: containerPoint, timestamp: timestamp, context: .folder, modifierFlags: modifierFlags)
@@ -1302,6 +1312,15 @@ final class SpringboardInterface {
             return .none
         }
         return beginPress(at: containerPoint, timestamp: timestamp, context: .main, modifierFlags: modifierFlags)
+    }
+
+    /// Whether `containerPoint` lands on the picture of an icon on the main page shown.
+    private func isOnMainPageIcon(_ containerPoint: CGPoint) -> Bool {
+        let pointInPagesSuperlayer = containerLayer.convert(containerPoint, to: mainPages.scrollLayer.superlayer)
+        guard let (pageGrid, gridPoint) = mainPages.pointInCurrentGrid(pointInPagesSuperlayer), let hit = pageGrid.item(at: gridPoint) else {
+            return false
+        }
+        return hit.isOnIcon
     }
 
     private func beginPress(at containerPoint: CGPoint, timestamp: UInt64, context: GridContext, modifierFlags: CGEventFlags) -> Action {
@@ -1408,7 +1427,7 @@ final class SpringboardInterface {
             )
             searchFieldLayer.show(searchEditor.editing)
             return .none
-        case .none, .pagerIndicator, .folderTitle:
+        case .none, .pagerIndicator, .folderTitle, .outsideFolder:
             return .none
         }
     }
@@ -1488,6 +1507,10 @@ final class SpringboardInterface {
             if SpringboardPreferences.allowsRenamingFolders {
                 startRenaming()
             }
+            return .none
+        case .outsideFolder:
+            // Open or still opening, the folder closes now.
+            closeFolder()
             return .none
         case let .closeBox(itemLayer, context):
             // Let go on the close box: 15 asked before deleting (`-[ECSBItemLayer leftMouseUp:in:]`,

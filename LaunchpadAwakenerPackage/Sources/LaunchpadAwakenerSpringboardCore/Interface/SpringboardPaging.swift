@@ -164,6 +164,10 @@ package enum SpringboardDragging {
     ///
     /// With hysteresis the current cell keeps the item until the point leaves a zone reaching half a cell
     /// beyond it on every side. Past the last item the answer is the last cell, so no gap is left.
+    ///
+    /// 15 converted the column and row to unsigned integers and clamped neither: a point left of the grid
+    /// is in the first column, and one right of it runs on into the next row. Only a page turn waiting at
+    /// an edge asks about such points.
     package static func itemIndex(
         at point: CGPoint,
         cellSize: CGSize,
@@ -173,7 +177,7 @@ package enum SpringboardDragging {
         usesHysteresis: Bool
     ) -> Int {
         guard itemCount > 0, cellSize.width > 0, cellSize.height > 0 else { return 0 }
-        let column = min(max(Int(floor(point.x / cellSize.width)), 0), columnCount - 1)
+        let column = max(Int(floor(point.x / cellSize.width)), 0)
         let row = max(Int(floor(point.y / cellSize.height)), 0)
         var index = column + columnCount * row
         if usesHysteresis, let currentIndex, index != currentIndex {
@@ -205,15 +209,19 @@ package enum SpringboardDragging {
     }
 
     /// The route for an icon from `sourceFolder` (nil for a main page) while `openFolder` is open (nil for
-    /// none), and whether that folder closes first: any open folder but the icon's own does.
+    /// none), and whether that folder closes first: any open folder but the icon's own does, and the icon's
+    /// own too once the drag has moved it about. Only 15's beginning state slid the icon back into the open
+    /// panel (15.5 `0x10010D9CC`); any later one aimed at the folder's icon on the main page and closed the
+    /// folder (`-[ECSBMoveItemDragState cancelDrag:]`, `0x1000DCAD4`).
     package static func cancelRoute(
         sourceFolder: LaunchpadItemIdentifier?,
-        openFolder: LaunchpadItemIdentifier?
+        openFolder: LaunchpadItemIdentifier?,
+        hasRearranged: Bool
     ) -> (route: CancelRoute, closesOpenFolder: Bool) {
         guard let sourceFolder else {
             return (.mainPageCell, openFolder != nil)
         }
-        if openFolder == sourceFolder {
+        if openFolder == sourceFolder, !hasRearranged {
             return (.openFolderCell, false)
         }
         return (.folderIcon, openFolder != nil)

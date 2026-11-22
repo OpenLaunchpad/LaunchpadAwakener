@@ -34,17 +34,24 @@ final class SpringboardFolderPanel {
     private let scale: CGFloat
     /// Set once the panel starts to close, which may be while it is still opening.
     private(set) var isClosing = false
+    /// Whether the folder was made moments before — opened by holding over an application, or by itself
+    /// after a quick drop — as 15's `-[ECSBGroup isNewGroup]` was. A drag leaving such a folder one
+    /// application dissolves it; any other folder stays until empty.
+    let isNew: Bool
 
     /// - Parameter pageIndex: The folder's page to show first; a springboard reopening with this folder
     ///   open shows the page it was left on.
+    /// - Parameter isNew: Whether the folder was made moments before; one not stored yet always is.
     init(
         folder: LaunchpadFolder,
         metrics: SpringboardMetrics,
         scale: CGFloat,
         pageIndex: Int = 0,
+        isNew: Bool = false,
         itemLayerWasFilled: @escaping (SpringboardItemLayer) -> Void
     ) {
         self.folder = folder
+        self.isNew = isNew || folder.isUnsaved
         self.scale = scale
         let folderMetrics = SpringboardFolderMetrics(metrics: metrics, applicationCount: folder.applications.count, isDragging: false)
         self.folderMetrics = folderMetrics

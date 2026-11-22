@@ -93,7 +93,8 @@ extension SpringboardInterface {
                 self.mainPagePlaceholder = (dragSession.pageIndex, dragSession.arrangedLayers)
                 self.finishDrag()
                 let storedFolder = self.pendingLayout.flatMap { self.storedFolder(for: unsavedFolder, in: $0) }
-                self.openFolder(storedFolder ?? unsavedFolder, from: targetLayer)
+                // New until it closes, as 15 marked the folder it opened here (`sub_100086FE0`).
+                self.openFolder(storedFolder ?? unsavedFolder, from: targetLayer, isNew: true)
                 if self.folderPanel == nil {
                     // It could not open; there is nothing to wait for, so the gap closes now.
                     self.closeMainPagePlaceholderNow()

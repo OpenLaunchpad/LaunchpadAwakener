@@ -94,6 +94,55 @@ struct SpringboardFolderInterruptionTests {
         #expect(interface.isAnimatingFolder)
     }
 
+    @Test("a press outside an opening folder closes it only once let go, as 15's did")
+    func pressOutsideClosesOnRelease() throws {
+        // The main pages' layer took the press while a folder showed (`-[ECSBLayer leftMouseDown:]`, 15.5
+        // `0x100081FB4`) and closed the folder on the release (`leftMouseUp:`, `0x10008217C`).
+        let (interface, _) = try Self.makeInterfaceOpeningFolder()
+        defer { interface.tearDown() }
+
+        _ = interface.handleMouseDown(at: Self.pointOutsideFolder, timestamp: 0)
+
+        #expect(interface.isFolderOpen)
+        _ = interface.handleMouseUp(at: Self.pointOutsideFolder, timestamp: 1)
+        #expect(!interface.isFolderOpen)
+    }
+
+    @Test("a press on a main-page icon the opening folder covers is swallowed, as 15's was")
+    func pressOnCoveredIconWhileOpening() throws {
+        // `-[ECSBEventHandler leftMouseDown:inLayer:ofPage:]` (15.5 `0x10006E7EC`) took a press on an icon's
+        // picture while a folder opened and did nothing with it.
+        let (interface, folderPanel) = try Self.makeInterfaceOpeningFolder()
+        defer { interface.tearDown() }
+        let itemLayer = try #require(interface.mainPages.currentPageGrid?.itemLayers.first)
+        itemLayer.layoutIfNeeded()
+        let iconFrame = itemLayer.convert(itemLayer.iconFrame, to: interface.containerLayer)
+        let pointOnIcon = CGPoint(x: iconFrame.midX, y: iconFrame.midY)
+        try #require(!folderPanel.isInsidePanel(pointOnIcon) && !folderPanel.isOnTitle(pointOnIcon))
+
+        _ = interface.handleMouseDown(at: pointOnIcon, timestamp: 0)
+        _ = interface.handleMouseUp(at: pointOnIcon, timestamp: 1)
+
+        #expect(interface.isFolderOpen)
+    }
+
+    @Test("a press outside an open folder closes it only once let go, as 15's did")
+    func pressOutsideOpenFolderClosesOnRelease() async throws {
+        let (interface, _) = try Self.makeInterfaceOpeningFolder()
+        defer { interface.tearDown() }
+        for _ in 0..<200 where interface.isAnimatingFolder {
+            CATransaction.flush()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(interface.isFolderOpen && !interface.isAnimatingFolder)
+
+        _ = interface.handleMouseDown(at: Self.pointOutsideFolder, timestamp: 0)
+
+        #expect(interface.isFolderOpen)
+        _ = interface.handleMouseUp(at: Self.pointOutsideFolder, timestamp: 1)
+        #expect(!interface.isFolderOpen)
+    }
+
     @Test("Escape while a folder opens closes it, as 15's did")
     func escapeClosesOpeningFolder() throws {
         let (interface, _) = try Self.makeInterfaceOpeningFolder()
