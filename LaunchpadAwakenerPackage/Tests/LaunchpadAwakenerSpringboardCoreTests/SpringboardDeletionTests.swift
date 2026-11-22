@@ -51,7 +51,7 @@ struct SpringboardDeletionTests {
         #expect(SpringboardDeletionChoice(keyCode: keyCode, characters: characters, hasCommand: hasCommand) == expectedChoice)
     }
 
-    @Test("a deleted application leaves its page, and a folder left with one application dissolves")
+    @Test("a deleted application leaves its page; a folder stays until it is empty, as 15's did")
     func removingFromStore() throws {
         try withTemporaryDirectory { directoryURL in
             let store = try LaunchpadStore(databaseURL: directoryURL.appendingPathComponent("Launchpad.db"))
@@ -59,14 +59,20 @@ struct SpringboardDeletionTests {
             let alpha = try store.appendApplication(LaunchpadApplicationRecord(title: "Alpha", bundleIdentifier: "com.example.alpha"), to: pageIdentifier)
             let folder = try store.appendFolder(titled: "Tools", to: pageIdentifier)
             let beta = try store.appendApplication(LaunchpadApplicationRecord(title: "Beta", bundleIdentifier: "com.example.beta"), to: folder.firstPage)
-            try store.appendApplication(LaunchpadApplicationRecord(title: "Gamma", bundleIdentifier: "com.example.gamma"), to: folder.firstPage)
+            let gamma = try store.appendApplication(LaunchpadApplicationRecord(title: "Gamma", bundleIdentifier: "com.example.gamma"), to: folder.firstPage)
             try store.appendApplication(LaunchpadApplicationRecord(title: "Delta", bundleIdentifier: "com.example.delta"), to: pageIdentifier)
 
             try store.removeApplication(alpha, fromFolder: nil, itemsPerPage: 35)
             #expect(try store.layout().pages.map { $0.items.map(\.title) } == [["Tools", "Delta"]])
 
+            // 15 took a folder away only once empty (`-[Springboard _removeAllRemovedItems]`, 15.5
+            // `0x100094CFC`, checked `isEmpty`).
             try store.removeApplication(beta, fromFolder: folder.folder, itemsPerPage: 35)
-            #expect(try store.layout().pages.map { $0.items.map(\.title) } == [["Gamma", "Delta"]])
+            #expect(try store.layout().pages.map { $0.items.map(\.title) } == [["Tools", "Delta"]])
+            #expect(try store.layout().folders.map { $0.applications.map(\.title) } == [["Gamma"]])
+
+            try store.removeApplication(gamma, fromFolder: folder.folder, itemsPerPage: 35)
+            #expect(try store.layout().pages.map { $0.items.map(\.title) } == [["Delta"]])
         }
     }
 }

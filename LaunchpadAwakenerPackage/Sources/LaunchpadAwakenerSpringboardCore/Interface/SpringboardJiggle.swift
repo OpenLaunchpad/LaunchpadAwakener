@@ -11,7 +11,7 @@ import QuartzCore
 /// does a click on the background, instead of closing Launchpad (`-[Springboard
 /// cancelActionWithEvent:sender:]` `0x100094618`). Holding Option starts it too, and letting go ends it
 /// (`-[ECSBSpringboard flagsChanged:]` `0x1000F37AC`). 15 also put a close box on applications from the
-/// App Store in this mode, to delete them; the replica leaves deleting out.
+/// App Store in this mode, to delete them, and so does the replica; see `SpringboardInterface+Deleting.swift`.
 enum SpringboardJiggle {
     /// How long a press must be held to start or end the mode.
     static func longPressDuration(isShiftDown: Bool) -> Duration {

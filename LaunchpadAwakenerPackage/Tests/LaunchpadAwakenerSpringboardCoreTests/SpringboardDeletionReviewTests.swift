@@ -48,7 +48,7 @@ struct SpringboardDeletionReviewTests {
         #expect(itemLayer.isBeingDeleted)
     }
 
-    @Test("an application already taken out by reconciliation is no error, and its folder still dissolves")
+    @Test("an application already taken out by reconciliation is no error, and its folder is tidied as usual")
     func removingAnApplicationAlreadyGone() throws {
         try withTemporaryDirectory { directoryURL in
             let store = try LaunchpadStore(databaseURL: directoryURL.appendingPathComponent("Launchpad.db"))
@@ -61,7 +61,9 @@ struct SpringboardDeletionReviewTests {
 
             try store.removeApplication(beta, fromFolder: folder.folder, itemsPerPage: 35)
 
-            #expect(try store.layout().pages.map { $0.items.map(\.title) } == [["Gamma"]])
+            // Left with one application, the folder stays, as 15's did.
+            #expect(try store.layout().pages.map { $0.items.map(\.title) } == [["Tools"]])
+            #expect(try store.layout().folders.map { $0.applications.map(\.title) } == [["Gamma"]])
         }
     }
 

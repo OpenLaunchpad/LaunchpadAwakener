@@ -44,7 +44,7 @@ extension SpringboardInterface {
         if let isDeletable = deletabilityByBundlePath[bundleURL.path] {
             return isDeletable
         }
-        let isDeletable = SpringboardHostSystem.host.applicationUninstaller?.canUninstall(applicationAt: bundleURL) ?? false
+        let isDeletable = resolveApplicationUninstaller()?.canUninstall(applicationAt: bundleURL) ?? false
         deletabilityByBundlePath[bundleURL.path] = isDeletable
         return isDeletable
     }
@@ -155,51 +155,111 @@ extension SpringboardInterface {
         return (contents as! CGImage)
     }
 
-    /// 15 played the icon out over half a second, fading to nothing at a tenth of its size, then deleted
-    /// the application (`-[Springboard _uninstallRunnable:]`, the animation at 15.5 `0x1000F5A8C`).
+    /// 15 played the icon out over half a second, fading to nothing at a tenth of its size, and asked for the
+    /// uninstall as it started (`-[Springboard _uninstallRunnable:]`, 15.5 `0x1000976A8`, put the item on a
+    /// hidden page and sent the request together; the animation at `0x1000F5A8C`). Once the icon had played
+    /// out, the page closed the gap (`sub_1000F5C68`), whatever the uninstall had answered by then.
     private func delete(_ application: LaunchpadApplication, itemLayer: SpringboardItemLayer, context: GridContext) {
         guard let bundleURL = application.bundleURL else { return }
         itemLayer.isBeingDeleted = true
-        let folderIdentifier = context == .folder ? folderPanel?.folder.identifier : nil
+        let deletion = SpringboardDeletion(
+            application: application,
+            folderIdentifier: context == .folder ? folderPanel?.folder.identifier : nil,
+            itemLayer: itemLayer,
+            context: context
+        )
         CATransaction.begin()
         CATransaction.setAnimationDuration(0.5)
         CATransaction.setCompletionBlock { [weak self] in
             MainActor.assumeIsolated {
-                guard let uninstaller = SpringboardHostSystem.host.applicationUninstaller else {
-                    self?.finishDeleting(application, folderIdentifier: folderIdentifier, itemLayer: itemLayer, context: context, hasSucceeded: false)
-                    return
-                }
-                uninstaller.uninstall(applicationAt: bundleURL) { [weak self] hasSucceeded in
-                    self?.finishDeleting(application, folderIdentifier: folderIdentifier, itemLayer: itemLayer, context: context, hasSucceeded: hasSucceeded)
-                }
+                deletion.hasPlayedOut = true
+                self?.carryOn(deletion)
             }
         }
         itemLayer.opacity = 0
         itemLayer.transform = CATransform3DMakeScale(0.1, 0.1, 1)
         CATransaction.commit()
-    }
-
-    /// Once deleted, the page closes the gap in a quarter of a second without pulling icons over from the
-    /// next page, and the layout drops the application. A failed delete brings the icon back where it was;
-    /// 15 put it in the next free place instead.
-    private func finishDeleting(_ application: LaunchpadApplication, folderIdentifier: LaunchpadItemIdentifier?, itemLayer: SpringboardItemLayer, context: GridContext, hasSucceeded: Bool) {
-        guard hasSucceeded else {
-            itemLayer.isBeingDeleted = false
-            CATransaction.begin()
-            CATransaction.setAnimationDuration(0.25)
-            itemLayer.opacity = 1
-            itemLayer.transform = CATransform3DIdentity
-            CATransaction.commit()
+        guard let uninstaller = resolveApplicationUninstaller() else {
+            deletion.hasSucceeded = false
+            carryOn(deletion)
             return
         }
-        if let pageGrid = pages(for: context).currentPageGrid, let deletedIndex = pageGrid.itemLayers.firstIndex(where: { $0 === itemLayer }) {
-            CATransaction.begin()
-            CATransaction.setAnimationDuration(0.25)
-            for (index, layer) in pageGrid.itemLayers.enumerated() where index > deletedIndex {
-                layer.setUntransformedFrame(pageGrid.cellFrame(at: index - 1))
-            }
-            CATransaction.commit()
+        uninstaller.uninstall(applicationAt: bundleURL) { [weak self] hasSucceeded in
+            deletion.hasSucceeded = hasSucceeded
+            self?.carryOn(deletion)
         }
-        applyEdit(.removeApplication(application.identifier, folder: folderIdentifier))
+    }
+
+    /// Takes a deletion as far as what has happened allows: nothing until the icon has played out; then the
+    /// page closes the gap in a quarter of a second, without pulling icons over from the next page, unless
+    /// the uninstall has failed already; an uninstall that succeeded drops the application from the layout.
+    /// One that fails brings the icon back where it was, the gap opening again — 15 put it in the next free
+    /// place instead (`layoutItemsToNextAvailableSpace:`).
+    private func carryOn(_ deletion: SpringboardDeletion) {
+        guard deletion.hasPlayedOut else { return }
+        let pageGrid = pages(for: deletion.context).pageGrids.first { pageGrid in
+            pageGrid.itemLayers.contains { $0 === deletion.itemLayer }
+        }
+        switch deletion.hasSucceeded {
+        case false?:
+            guard !deletion.isFinished else { return }
+            deletion.isFinished = true
+            bringBack(deletion, in: pageGrid)
+        case true?:
+            closeGap(of: deletion, in: pageGrid)
+            guard !deletion.isFinished else { return }
+            deletion.isFinished = true
+            applyEdit(.removeApplication(deletion.application.identifier, folder: deletion.folderIdentifier))
+        case nil:
+            closeGap(of: deletion, in: pageGrid)
+        }
+    }
+
+    private func closeGap(of deletion: SpringboardDeletion, in pageGrid: SpringboardPageGrid?) {
+        guard !deletion.hasClosedGap, let pageGrid, let deletedIndex = pageGrid.itemLayers.firstIndex(where: { $0 === deletion.itemLayer }) else { return }
+        deletion.hasClosedGap = true
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.25)
+        for (index, layer) in pageGrid.itemLayers.enumerated() where index > deletedIndex {
+            layer.setUntransformedFrame(pageGrid.cellFrame(at: index - 1))
+        }
+        CATransaction.commit()
+    }
+
+    private func bringBack(_ deletion: SpringboardDeletion, in pageGrid: SpringboardPageGrid?) {
+        deletion.itemLayer.isBeingDeleted = false
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.25)
+        if deletion.hasClosedGap, let pageGrid, let deletedIndex = pageGrid.itemLayers.firstIndex(where: { $0 === deletion.itemLayer }) {
+            for (index, layer) in pageGrid.itemLayers.enumerated() where index > deletedIndex {
+                layer.setUntransformedFrame(pageGrid.cellFrame(at: index))
+            }
+        }
+        deletion.itemLayer.opacity = 1
+        deletion.itemLayer.transform = CATransform3DIdentity
+        CATransaction.commit()
+    }
+}
+
+/// One application on its way out: what has happened to it so far.
+@MainActor
+final class SpringboardDeletion {
+    let application: LaunchpadApplication
+    let folderIdentifier: LaunchpadItemIdentifier?
+    let itemLayer: SpringboardItemLayer
+    let context: SpringboardInterface.GridContext
+    /// Whether the icon has finished playing out.
+    var hasPlayedOut = false
+    /// What the uninstall answered; nil until it has.
+    var hasSucceeded: Bool?
+    var hasClosedGap = false
+    /// Set once the layout has been told, or the icon brought back.
+    var isFinished = false
+
+    init(application: LaunchpadApplication, folderIdentifier: LaunchpadItemIdentifier?, itemLayer: SpringboardItemLayer, context: SpringboardInterface.GridContext) {
+        self.application = application
+        self.folderIdentifier = folderIdentifier
+        self.itemLayer = itemLayer
+        self.context = context
     }
 }
