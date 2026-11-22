@@ -76,6 +76,9 @@ final class SpringboardInterface {
     }
     /// True while a folder opens or closes; input and layout changes wait.
     private(set) var isAnimatingFolder = false
+    /// True while a folder's panel opens, until it has opened or starts to close. A press outside it or
+    /// Escape closes it meanwhile, as 15's did.
+    private var isOpeningFolder = false
     /// True from the moment a folder starts to close until its panel is gone.
     private var isClosingFolder = false {
         didSet { reportFolderOpenness() }
@@ -534,15 +537,23 @@ final class SpringboardInterface {
             self?.prepareCloseBox(for: itemLayer)
         }
         isAnimatingFolder = true
-        newFolderPanel.animateOpen(from: folderItemLayer, springboardLayer: springboardLayer, containerLayer: containerLayer) { [weak self] in
-            self?.isAnimatingFolder = false
+        isOpeningFolder = true
+        newFolderPanel.animateOpen(from: folderItemLayer, springboardLayer: springboardLayer, containerLayer: containerLayer) { [weak self] didFinishOpening in
+            // Closed or taken away before it had opened: what waited for it to open no longer applies,
+            // and whatever ended it looks after the rest.
+            guard let self, didFinishOpening, self.folderPanel === newFolderPanel else { return }
+            self.isOpeningFolder = false
+            self.isAnimatingFolder = false
             completion?()
-            self?.applyPendingLayoutIfIdle()
+            self.applyPendingLayoutIfIdle()
         }
     }
 
+    /// Closes the open folder; one still opening turns back from where it is, as 15's did
+    /// (`-[ECSBPager hideGroup]`, 15.5 `0x100058350`, kept out only a second close).
     func closeFolder(animated: Bool = true, completion: (@MainActor () -> Void)? = nil) {
-        guard let folderPanel, !isAnimatingFolder else { return }
+        guard let folderPanel, !isAnimatingFolder || isOpeningFolder else { return }
+        isOpeningFolder = false
         commitRenaming()
         // 15 ended the folder's jiggling at once, before its panel closed (`-[ECSBPager hideGroup]`,
         // 15.5 `0x100058350`).
@@ -638,6 +649,7 @@ final class SpringboardInterface {
         CATransaction.commit()
         folderPanel.pages.tearDown()
         self.folderPanel = nil
+        isOpeningFolder = false
         isAnimatingFolder = false
     }
 
@@ -1064,7 +1076,10 @@ final class SpringboardInterface {
             }
             return .none
         }
-        guard !isAnimatingFolder else { return .none }
+        // Escape reaches a folder still opening and closes it, as 15's did (`-[Springboard performCancel]`,
+        // 15.5 `0x1000985E8`, had no check for an opening); every other key waits until it has opened.
+        let isEscapeWhileOpening = isOpeningFolder && dragSession == nil && keyCode == SpringboardKeyCode.escape
+        guard !isAnimatingFolder || isEscapeWhileOpening else { return .none }
         if let renaming {
             // 15 forwarded every key to the rename field (`-[Springboard keyDown:]`, 15.5 `0x100092250`).
             let renamingCommand = SpringboardTextEditingCommand(keyCode: keyCode, characters: characters, modifierFlags: modifierFlags)
@@ -1230,7 +1245,18 @@ final class SpringboardInterface {
             return .none
         }
         // A press while a drop is still settling waits, as one during a folder's animation does.
-        guard !isAnimatingFolder, dragSession == nil else { return .none }
+        guard dragSession == nil else { return .none }
+        if isOpeningFolder, let folderPanel {
+            // 15 closed a folder still opening as soon as a press landed outside it, turning it back from
+            // where it was (`-[Springboard leftMouseDown:]`, 15.5 `0x10009216C`); a press on the panel or its
+            // title waits until it has opened.
+            if !folderPanel.isInsidePanel(containerPoint), !folderPanel.isOnTitle(containerPoint) {
+                closeFolder()
+                pointerTracking = .none
+            }
+            return .none
+        }
+        guard !isAnimatingFolder else { return .none }
         // A press anywhere takes what is being composed as typed, as a click does in a text field.
         commitInputMethodComposition()
         cancelLongPress()

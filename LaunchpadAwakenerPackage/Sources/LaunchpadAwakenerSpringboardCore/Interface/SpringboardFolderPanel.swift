@@ -32,6 +32,8 @@ final class SpringboardFolderPanel {
     let titleLayer = SpringboardLabelLayer(font: SpringboardTypography.folderTitleFont)
     let titleEditorLayer = SpringboardTitleEditorLayer()
     private let scale: CGFloat
+    /// Set once the panel starts to close, which may be while it is still opening.
+    private(set) var isClosing = false
 
     /// - Parameter pageIndex: The folder's page to show first; a springboard reopening with this folder
     ///   open shows the page it was left on.
@@ -189,7 +191,16 @@ final class SpringboardFolderPanel {
     /// animations in one transaction, so the pictures keep pace with the panel. `containerLayer` is the
     /// folder layer's superlayer; `springboardLayer` fades to 0 and shrinks to 0.95 meanwhile, as 15's
     /// main grid did. With Reduce Motion the panel appears at once and the pages only fade, as in 15.
-    func animateOpen(from folderItemLayer: SpringboardItemLayer, springboardLayer: CALayer, containerLayer: CALayer, completion: @escaping @MainActor () -> Void) {
+    ///
+    /// The panel may start to close before it has opened, as 15's did; closing then turns every animation
+    /// back from wherever it has got to, and the opening never finishes: the page dots stay out and the
+    /// pictures stay with the closing. `completion` gets whether the panel finished opening.
+    func animateOpen(
+        from folderItemLayer: SpringboardItemLayer,
+        springboardLayer: CALayer,
+        containerLayer: CALayer,
+        completion: @escaping @MainActor (_ didFinishOpening: Bool) -> Void
+    ) {
         let isAnimated = !SpringboardPreferences.reducesMotion
         let backdropRect = rectInFolder(folderItemLayer.folderBackdropFrame, of: folderItemLayer, springboardLayer: springboardLayer)
         let folderCellRect = rectInFolder(folderItemLayer.bounds, of: folderItemLayer, springboardLayer: springboardLayer)
@@ -226,6 +237,11 @@ final class SpringboardFolderPanel {
         CATransaction.setAnimationDuration(Self.animationDuration)
         CATransaction.setCompletionBlock {
             MainActor.assumeIsolated {
+                // A close started meanwhile, replacing these animations: the panel is the close's now.
+                guard !self.isClosing else {
+                    completion(false)
+                    return
+                }
                 CATransaction.begin()
                 CATransaction.setAnimationDuration(0.1)
                 self.pages.pagerControlLayer.opacity = 1
@@ -238,7 +254,7 @@ final class SpringboardFolderPanel {
                     itemLayer.isPictureAndTitleLayoutSuspended = false
                 }
                 CATransaction.commit()
-                completion()
+                completion(true)
             }
         }
         springboardLayer.opacity = 0
@@ -266,8 +282,10 @@ final class SpringboardFolderPanel {
     /// fly into the thumbnails with their titles fading under them, and the title and the page dots fade
     /// back over and under the icon. 15 did this to the first page even when another one showed; that one
     /// only slides away under the shrinking panel. `completion` runs once the panel is gone and the folder
-    /// icon is back.
+    /// icon is back. A panel still opening turns back from where it is: every implicit animation here starts
+    /// from what is on screen.
     func animateClose(to folderItemLayer: SpringboardItemLayer?, springboardLayer: CALayer, completion: @escaping @MainActor () -> Void) {
+        isClosing = true
         let isAnimated = !SpringboardPreferences.reducesMotion
         let firstPageItemLayers = Self.itemLayersInPanel(pages.pageGrids.first?.itemLayers ?? [], folderLayer: folderLayer)
 
