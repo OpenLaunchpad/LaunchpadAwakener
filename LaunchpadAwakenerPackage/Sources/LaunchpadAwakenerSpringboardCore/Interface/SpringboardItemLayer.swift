@@ -178,7 +178,7 @@ final class SpringboardItemLayer: CALayer {
     let labelLayer = SpringboardLabelLayer()
     private var selectionLayer: CALayer?
     /// A folder's frosted square, or an application's while something is dragged onto it.
-    private var backdropLayer: CALayer?
+    private(set) var backdropLayer: CALayer?
     private var dropTargetTintLayer: CALayer?
     private var thumbnailGridLayer: CALayer?
     private let thumbnailSource = SpringboardThumbnailSource()
@@ -465,8 +465,9 @@ final class SpringboardItemLayer: CALayer {
         }
 
         if isFolder {
-            let backdropFrame = folderBackdropFrame
-            backdropLayer?.frame = backdropFrame
+            // Bounds and position rather than the frame, which is undefined under the 1.1 scale the square has
+            // while something is held over the folder.
+            backdropLayer?.setUntransformedFrame(folderBackdropFrame)
             backdropLayer?.cornerRadius = folderCornerRadius
             if let thumbnailGridLayer {
                 thumbnailGridLayer.frame = thumbnailGridFrame
@@ -618,8 +619,12 @@ final class SpringboardItemLayer: CALayer {
     }
 
     /// Something is held over this item: an application shows a folder square behind it, 10 % larger,
-    /// and dims; both blink twice after 0.65 s (`-[ECSBItemLayer setHighlighted:]`, `0x1000608F8`, and
-    /// `-[ECSBGroupItemLayer setHighlighted:]`, `0x1000771C4`). Ending it takes the look away at once.
+    /// and dims; a folder's own square grows to 1.1, keeping its shape; both blink twice after 0.65 s
+    /// (`-[ECSBItemLayer setHighlighted:]`, `0x1000608F8`, and `-[ECSBGroupItemLayer setHighlighted:]`,
+    /// `0x1000771C4`). The title fades out, and back in when it ends.
+    ///
+    /// A folder's square grows and shrinks back with the default animation, as 15's did; an application's
+    /// is made new each time, which Core Animation does not animate, so it shows and goes at once there too.
     var isDropTarget = false {
         didSet {
             guard isDropTarget != oldValue else { return }
@@ -628,7 +633,7 @@ final class SpringboardItemLayer: CALayer {
     }
 
     /// Ends a folder's drop-target look once an icon was dropped into it: the square shrinks back from
-    /// the whole icon at 1.1 times and the title fades in, with the default animation, and the thumbnails
+    /// 1.1 times and the title fades in, with the default animation, and the thumbnails
     /// stay scrolled to the new one (`-[ECSBOpenGroupDragState endDrag:withEvent:]`, 15.5 `0x100085E04`).
     func endDropTargetAfterDrop() {
         guard isDropTarget, isFolder, let backdropLayer else {
@@ -648,7 +653,7 @@ final class SpringboardItemLayer: CALayer {
         backdropLayer.transform = CATransform3DIdentity
         labelLayer.opacity = 1
         CATransaction.commit()
-        // Record the end without the instant change `isDropTarget` makes.
+        // Record the end without what ending it otherwise does, which scrolls the thumbnails back to the top.
         isSuppressingDropTargetUpdate = true
         isDropTarget = false
         isSuppressingDropTargetUpdate = false
@@ -658,22 +663,19 @@ final class SpringboardItemLayer: CALayer {
 
     private func updateDropTarget() {
         guard !isSuppressingDropTargetUpdate else { return }
+        // 15's drag state set the title's opacity with actions on (`-[ECSBOpenGroupDragState
+        // beginTransition]`, 15.5 `0x1000858D0`, and `cancelTransition`, `0x100085C5C`).
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(Self.dropTargetAnimationDuration)
+        labelLayer.opacity = isDropTarget ? 0 : 1
+        CATransaction.commit()
+        if isFolder {
+            updateFolderDropTarget()
+            return
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        labelLayer.opacity = isDropTarget ? 0 : 1
-        if isFolder {
-            backdropLayer?.removeAnimation(forKey: "blink")
-            backdropLayer?.frame = isDropTarget ? iconFrame : folderBackdropFrame
-            backdropLayer?.transform = isDropTarget ? CATransform3DMakeScale(1.1, 1.1, 1) : CATransform3DIdentity
-            if isDropTarget, let backdropLayer {
-                Self.addBlinkAnimation(to: backdropLayer)
-            }
-            // The thumbnails scroll to the free slot, with the default animation.
-            CATransaction.begin()
-            CATransaction.setDisableActions(false)
-            scrollThumbnails(toAvailableSpace: isDropTarget)
-            CATransaction.commit()
-        } else if isDropTarget {
+        if isDropTarget {
             imageLayer.filters = Self.darkeningFilters()
             let newBackdropLayer = CALayer()
             newBackdropLayer.backgroundColor = Self.folderBackdropColor
@@ -698,6 +700,37 @@ final class SpringboardItemLayer: CALayer {
             dropTargetTintLayer?.removeFromSuperlayer()
             dropTargetTintLayer = nil
         }
+        CATransaction.commit()
+    }
+
+    /// 15's default animation, which its drag states ran the target's changes in.
+    private static let dropTargetAnimationDuration: CFTimeInterval = 0.25
+
+    /// A folder's own square grows to 1.1 of the whole icon with the default animation, and shrinks back the
+    /// same way when nothing is held over it any more (`-[ECSBGroupItemLayer setHighlighted:]`, 15.5
+    /// `0x1000771C4`). Its corners grow with it, so that it keeps the shape of the folder's square. That is how
+    /// 15.5 looked next to the replica. Read alone, `setHighlighted:` gives the square the whole icon's frame
+    /// at once and then scales it to 1.1, keeping the corner radius worked out for the folder's square; done
+    /// that way the square jumped and looked squarer than 15's. Only the scale changes here: the square keeps
+    /// the folder's size and corners, and scales to as large as 1.1 of the icon, in one smooth animation.
+    private func updateFolderDropTarget() {
+        guard let backdropLayer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        backdropLayer.removeAnimation(forKey: "blink")
+        CATransaction.commit()
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(Self.dropTargetAnimationDuration)
+        if isDropTarget {
+            let backdropSide = folderBackdropFrame.width
+            let hoverScale = backdropSide > 0 ? 1.1 * iconFrame.width / backdropSide : 1.1
+            backdropLayer.transform = CATransform3DMakeScale(hoverScale, hoverScale, 1)
+            Self.addBlinkAnimation(to: backdropLayer)
+        } else {
+            backdropLayer.transform = CATransform3DIdentity
+        }
+        // The thumbnails scroll to the free slot, and back to the top.
+        scrollThumbnails(toAvailableSpace: isDropTarget)
         CATransaction.commit()
     }
 
