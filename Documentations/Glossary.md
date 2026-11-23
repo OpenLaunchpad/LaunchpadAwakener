@@ -18,6 +18,12 @@
 
 按英文名 / 标识符字母序排列。
 
+### Appcast（更新源）
+
+Sparkle 读的一份 XML，列出可装的版本、各自的下载地址、EdDSA 签名与发布说明。本项目两个 App 各有一份（`LaunchpadAwakenerAppcast.xml`、`LaunchpadAppcast.xml`），每次发布只列这一版，作为附件挂在那次的 GitHub Release 上；App 读 `releases/latest/download/<文件名>`，所以只认最新的正式版。
+
+- **主要出现在**：`Release.zsh`、两个 App 的 `Info.plist`（`SUFeedURL`）、[实现说明](Internal/AutomaticUpdates.md)
+
 ### Apps tile（Apps 格子）
 
 Dock 里打开 Apps 的那一格。Dock 没有「Apps 格子」这个概念——Apps（`/System/Applications/Apps.app`，标识符 `com.apple.apps.launcher`）在它眼里就是一个普通的 App 格子，所以复刻按格子代表的包来认它，读 `-[Tile fileURL]` 再比路径与标识符。注入成功后它显示的是 Launchpad 的图标，因为点它打开的已经是复刻的 Launchpad；配置 App 自己的图标另带一个齿轮，好把两者区分开。
@@ -43,6 +49,12 @@ Dock 里打开 Apps 的那一格。Dock 没有「Apps 格子」这个概念—�
 系统手势在 Dock 那里的原始形态：CGEvent 类型 30、HID 事件类型 23 的事件，字段 123 是动作（3 为捏合或张开），124 是进度，132 是阶段。捏合手势就是读它实现的；它不是 macOS 27 的 Gestures.framework 识别出的手势。
 
 - **主要出现在**：`LaunchpadAwakenerSpringboardCore/Interface/SpringboardInputEvent.swift`、`SpringboardInputEvent+CoreGraphics.swift`
+
+### Gentle reminders（温和提醒）
+
+Sparkle 给后台 App 的一组代理方法：定时检查找到的更新先交给 App 决定怎么提醒，而不是由 Sparkle 直接开窗口（它对后台 App 会把窗口开在别的 App 后面）。注入版让 Sparkle 照常显示，开在后面时在菜单栏菜单顶上加「Install Update <版本>…」；独立版总是自己提醒，用 Dock 图标的角标和 Dock 菜单。用户主动检查不经过它。
+
+- **主要出现在**：`LaunchpadAwakenerUpdating/UpdateReminder.swift`、`ApplicationUpdater.swift`、[实现说明](Internal/AutomaticUpdates.md)
 
 ### Host（宿主）
 

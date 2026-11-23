@@ -1,13 +1,13 @@
 # Draft - 两个 App 用 Sparkle 自动更新
 
-- **状态**: Accepted
+- **状态**: In Progress
 - **作者**: JH
 - **创建日期**: 2026-11-23
 - **最后更新**: 2026-11-23
 - **所属愿景**: 无
 - **关联提案**: [0002 不注入 Dock 的独立版 Launchpad](0002-standalone-launchpad.md)、[0003 照 DockIconOverride 重做注入版 App 的控制面板](0003-app-control-panel.md)、[0010 SIP 没关时引导用户改用独立版，并一键安装](0010-system-integrity-protection-guide.md)
 - **实现分支 / PR**: `feature/automatic-updates`
-- **配套文档**: 待定 —— 落地时登记实现说明 `Documentations/Internal/AutomaticUpdates.md`
+- **配套文档**: 实现说明 [自动更新](../Internal/AutomaticUpdates.md)
 - **网页版**: 同目录同名的 `.html`
 
 ## 摘要
@@ -116,10 +116,13 @@
 | `LaunchpadAwakenerStandalone/Info.plist` | 新增 | 同上三个键 | 独立版原来没有 Info.plist 文件，生成的 Info.plist 放不了自定义键 | 1 |
 | `LaunchpadAwakener.xcodeproj/project.pbxproj` | 修改 | 两个 App target：`UPDATE_FEED_URL`（只在 Release 有值）、`UPDATE_PUBLIC_ED_KEY`（Release 正式公钥，Debug 测试公钥）；独立版设 `INFOPLIST_FILE`；「Embed Standalone Launchpad」先签 Sparkle 的嵌套代码 | 正式与开发构建分开；zip 里的独立版过公证 | 1、5 |
 | `Release.zsh` | 修改 | `release_engine_version=1.3.0`；`release_publishers=(github-release sparkle-appcast)`；`release_appcast_path`；`release_notes_path`；新钩子 `release_after_product`、`release_deploy_appcast`；`release_verify_export` 加 Sparkle 嵌套代码的检查 | 发布时生成、签名、上传两个 feed 与独立版 zip | 5 |
-| `.github/workflows/Release.yml` | 修改 | `APP_RELEASE_SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}` | CI 签 feed | 5 |
-| `ReleaseNotes/<版本>.md` | 新增（目录） | 每个版本的英文发布说明，打 tag 前写好 | 同时进 GitHub Release 与 Sparkle 窗口 | 5 |
+| `.github/workflows/Release.yml` | 修改 | `APP_RELEASE_SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}`；第一步检查 secret 在不在 | CI 签 feed；缺了在构建前就停 | 5 |
+| `ReleaseNotes/<版本>.md` | 新增（目录） | 每个版本的英文发布说明，打 tag 前写好；已发布的 1.0、1.1、1.1.1 从各自的 Release 补进来 | 同时进 GitHub Release 与 Sparkle 窗口 | 5 |
+| `Appcasts/.gitignore` | 新增 | 忽略发布时写进来的 `*.xml` | `release_appcast_path` 的目录在 `target` 段就要存在，CI 上 `build/` 不存在 | 5 |
+| `RunScript.sh` | 修改 | 构建后核对两个 App 都带 Sparkle、Info.plist 有更新源与公钥两个键且公钥不空，Release 构建的更新源不空 | 少一个键时构建「通过」、App 却永远不更新 | 1、5 |
+| `Tests/LaunchpadAwakenerSharedUITests/ApplicationMainMenuTests.swift` | 修改 | 更新项在「About」下面 | 第 2 步行为 | 2 |
 | GitHub secret `SPARKLE_PRIVATE_KEY`（仓库级） | 新增 | 正式 EdDSA 私钥 | CI 签名；设之前问用户 | 5 |
-| AppRelease `Sources/Publishers/SparkleAppcast.zsh`、`README.md`、`Documentations/Evolutions/draft-generic-mac-release-engine.md` | 修改 | 发布说明嵌进 appcast；公开 `app_release_generate_appcast`；打 1.3.0 | 另一个仓库，引擎能力 | 5 |
+| AppRelease `Sources/Publishers/SparkleAppcast.zsh`、`Sources/Support/Configuration.zsh`、`Sources/Version`、`README.md`、`Documentations/Evolutions/draft-generic-mac-release-engine.md`、`Tests/Target/TestAppcast.zsh`、`Tests/Support/Fakes/generate_appcast` | 修改 / 新增 | 可选变量 `release_appcast_embeds_release_notes`；公开 `app_release_generate_appcast`，发布器也改用它；7 个测试与一个记录参数的假 `generate_appcast`；打 1.3.0 | 另一个仓库，引擎能力 | 5 |
 | `Documentations/Internal/AutomaticUpdates.md` | 新增 | 实现说明：更新源放哪、签名与密钥、两个 App 的提醒方式、更新后的 Dock 重启、测试机上怎么验 | 下一任维护者看代码看不出的决定 | 6 |
 | `CLAUDE.md` | 修改 | 结构表加 `LaunchpadAwakenerUpdating`；发版步骤加「先写 `ReleaseNotes/<版本>.md`」，删掉事后 `gh release edit` 补说明那一步；记下私钥在哪 | 发版流程变了 | 6 |
 | `Documentations/Internal/ControlPanel.md`、`StandaloneLaunchpad.md` | 修改 | 新的设置行、菜单项、提醒 | 同步实现说明 | 6 |
@@ -195,16 +198,18 @@ public final class ApplicationUpdater {
         case remindedByApplication
     }
 
-    /// An update waiting for the user, while the app reminds of it.
-    public struct PendingUpdate: Equatable, Sendable {
-        public var displayVersion: String
-    }
-
-    /// False in a development build with no feed: nothing checks, and no update item shows.
+    public let scheduledUpdatePresentation: ScheduledUpdatePresentation
+    /// False in a build with no feed or no key: nothing checks, and no update item shows.
     public private(set) var isStarted: Bool
     public private(set) var canCheckForUpdates: Bool
-    public private(set) var pendingUpdate: PendingUpdate?
-    public var automaticallyChecksForUpdates: Bool { get set }
+    public var automaticallyChecksForUpdates: Bool { get set }   // Sparkle's own setting
+    /// "Version 1.2 (4)", for the settings.
+    public let currentVersionDescription: String
+    /// The update the app reminds of.
+    public var pendingUpdate: PendingUpdate? { get }
+    /// Runs just before Sparkle's window shows at the user's request; the standalone app hides its
+    /// springboard and unhides itself here.
+    public var prepareToShowWindow: (@MainActor () -> Void)?
 
     public init(
         scheduledUpdatePresentation: ScheduledUpdatePresentation,
@@ -212,11 +217,20 @@ public final class ApplicationUpdater {
         defaults: UserDefaults = .standard
     )
 
+    /// Starts checking, when the build has a feed and a key. Once, at launch, before building the menus.
+    public func start()
+
     /// Shows Sparkle's window, checking now or showing the update already found.
     public func checkForUpdates()
 
     /// The item the menus share: "Check for Updates…", or "Install Update <version>…" while one waits.
     public func makeMenuItem() -> NSMenuItem
+}
+
+/// An update waiting for the user, while the app reminds of it. Top level rather than nested in the
+/// main-actor class, so that the plain value UpdateReminder can use it.
+public struct PendingUpdate: Equatable, Sendable {
+    public let displayVersion: String
 }
 ```
 
@@ -232,27 +246,32 @@ let updater = ApplicationUpdater(scheduledUpdatePresentation: .remindedByApplica
 observe { NSApp.dockTile.badgeLabel = updater.pendingUpdate == nil ? nil : "1" }
 ```
 
-- `ApplicationUpdater` 内部持有一个 `SPUStandardUpdaterController`，`startingUpdater` 取 `UpdateFeedResolution` 的结果是否非空；`canCheckForUpdates` 与 `automaticallyChecksForUpdates` 用 KVO 跟着 `SPUUpdater`。
-- 代理对象是 `ApplicationUpdater` 里的一个私有 `NSObject` 子类（`@MainActor`），把 Sparkle 的回调翻成 `UpdateReminder` 的事件；Sparkle 的回调都在主线程。
-- `supportsGentleScheduledUpdateReminders` 恒为 `true`。`standardUserDriverShouldHandleShowingScheduledUpdate(_:andInImmediateFocus:)` 返回 `UpdateReminder.letsSparkleShow(presentation:immediateFocus:)`：`.shownBySparkle` 恒真，`.remindedByApplication` 恒假。
-- `standardUserDriverWillHandleShowingUpdate(_:forUpdate:state:)`：非用户发起、且（Sparkle 不显示，或显示但不在立即聚焦）时设 `pendingUpdate`。
+- `ApplicationUpdater` 内部持有一个 `SPUStandardUpdaterController`，构造时不启动；`start()` 在算得出更新源、且 Info.plist 的 `SUPublicEDKey` 不空时才 `startUpdater()`，否则只记一条日志。`canCheckForUpdates` 用 KVO 跟着 `SPUUpdater`；`automaticallyChecksForUpdates` 直接读写 Sparkle 的设置。
+- 代理对象是一个私有的 `NSObject` 子类（`@MainActor`），把 Sparkle 的回调翻成 `UpdateReminder` 的事件，也是菜单项的目标：它实现 `NSMenuItemValidation`，会校验菜单项的菜单（主菜单、Dock 菜单）每次打开时标题跟着提醒变。Sparkle 的 `SPUUpdaterDelegate` 已是主线程隔离，`SPUStandardUserDriverDelegate` 不是，遵循后者要写 `@preconcurrency`。
+- `supportsGentleScheduledUpdateReminders` 恒为 `true`。`standardUserDriverShouldHandleShowingScheduledUpdate(_:andInImmediateFocus:)` 记下 `immediateFocus`，返回 `UpdateReminder.letsSparkleShow(_:immediateFocus:)`：`.shownBySparkle` 恒真，`.remindedByApplication` 恒假。
+- `standardUserDriverWillHandleShowingUpdate(_:forUpdate:state:)` 调 `UpdateReminder.updateWillShow(...)`：非用户发起、且（Sparkle 不显示，或显示但不在立即聚焦）时设 `pendingUpdate`。
 - `standardUserDriverDidReceiveUserAttention(forUpdate:)` 与 `standardUserDriverWillFinishUpdateSession()` 清掉 `pendingUpdate`。
-- `checkForUpdates()` 先 `NSApp.activate()`（注入版是 `LSUIElement`，不激活窗口会在别的 App 后面）再调 `SPUUpdater.checkForUpdates()`；有待装的更新时 Sparkle 直接显示它。
-- `feedURLString(for:)`：只在开发构建里返回 `defaults.string(forKey: "UpdateFeedURL")`，否则 `nil`（用 Info.plist 的）。
+- `checkForUpdates()` 先调 `prepareToShowWindow`，再 `NSApp.activate()`（注入版是 `LSUIElement`，不激活窗口会在别的 App 后面），最后 `SPUUpdater.checkForUpdates()`；有待装的更新时 Sparkle 直接显示它。
+- `feedURLString(for:)` 返回启动时算出的更新源：Info.plist 的，或开发构建里启动参数给的（Sparkle 自己不读后者）。
 - `updaterWillRelaunchApplication(_:)`：`UpdateRelaunchRecord(defaults:).noteRelaunch()`。
 
 ```swift
-public struct UpdateFeedResolution: Sendable {
+public enum UpdateFeedResolution {
+    public static let overrideDefaultsKey = "UpdateFeedURL"
+    public static let allowsOverride: Bool   // true only in a development build
     /// The feed to check, or nil when there is none: a development build launched without an override.
     public static func feedURL(infoDictionaryValue: String?, overrideValue: String?, allowsOverride: Bool) -> URL?
+    public static func feedURL(of bundle: Bundle, defaults: UserDefaults) -> URL?
 }
 
 public struct UpdateReminder: Equatable, Sendable {
     public static func letsSparkleShow(_ presentation: ApplicationUpdater.ScheduledUpdatePresentation, immediateFocus: Bool) -> Bool
-    public private(set) var pendingUpdate: ApplicationUpdater.PendingUpdate?
-    public mutating func sparkleWillShow(_ displayVersion: String, isUserInitiated: Bool, isShownBySparkle: Bool, immediateFocus: Bool)
+    public private(set) var pendingUpdate: PendingUpdate?
+    public mutating func updateWillShow(displayVersion: String, isUserInitiated: Bool, isShownBySparkle: Bool, isInImmediateFocus: Bool)
     public mutating func userSawUpdate()
     public mutating func sessionEnded()
+    /// "Install Update 1.2…" or "Check for Updates…".
+    public static func menuItemTitle(for pendingUpdate: PendingUpdate?) -> String
 }
 
 public struct UpdateRelaunchRecord {
@@ -278,21 +297,29 @@ public enum DockRestartAfterUpdate {
 }
 ```
 
-`ApplicationDelegate` 在 `applicationDidFinishLaunching` 一开头读 `UpdateRelaunchRecord().takeRelaunchNote()` 与 `LaunchedBuildRecord().recordLaunch(ofBuild:)`（构建号取 `Bundle.main` 的 `CFBundleVersion`），`runLaunchSequence()` 在 `reconnectToResidentPayloads()` 之后：
+`ApplicationDelegate` 在 `applicationDidFinishLaunching` 一开头读 `UpdateRelaunchRecord().takeRelaunchNote()`（为真就不弹控制面板），并把 `LaunchedBuildRecord().recordLaunch(ofBuild:)`（构建号取 `Bundle.main` 的 `CFBundleVersion`）存进属性 `isFirstLaunchOfNewBuild`。`runLaunchSequence()` 在 `reconnectToResidentPayloads()` 之后判断一次、随即清掉这个属性，所以序列中途停下（daemon 等批准）时，等它再跑到这里照样判断：
 
 ```swift
-if DockRestartAfterUpdate.isNeeded(isNewBuild: isNewBuild, isInjectionAllowed: !isInjectionBlockedBySystemIntegrityProtection, hasStalePayload: injectionCoordinator.hasStalePayload) {
-    #log(.info, "First launch of build \(build, privacy: .public) with an older payload in the Dock: restarting the Dock once")
-    injectionCoordinator.restartTargets()
-    return   // restartTargets() injects into the new Dock itself
+let restartsDockForNewBuild = DockRestartAfterUpdate.isNeeded(
+    isNewBuild: isFirstLaunchOfNewBuild,
+    isInjectionAllowed: !isInjectionBlockedBySystemIntegrityProtection,
+    hasStalePayload: injectionCoordinator.hasStalePayload
+)
+isFirstLaunchOfNewBuild = false
+if restartsDockForNewBuild {
+    #log(.info, "First launch of this build with an older payload in the Dock: restarting the Dock once")
+    injectionCoordinator.restartTargets()   // injects into the new Dock by itself
+    launchProgress.enter(.ready)
+    return
 }
 ```
 
 ### 独立版
 
-- `applicationDidFinishLaunching`：`wasRelaunchedForUpdate = UpdateRelaunchRecord().takeRelaunchNote()`；显示与否交给一个纯函数 `StandaloneLaunchShowing.showsOnLaunch(wasLaunchedAtLogin:wasRelaunchedForUpdate:)`，两者任一为真就不显示。
-- 「Install Update <版本>…」的动作：界面开着就先 `hide(reason: "installing an update", returningToPreviousApplication: false)`，再 `NSApp.unhide(nil)`、`updater.checkForUpdates()`。
-- Dock 角标用 `NSApp.dockTile.badgeLabel`，跟着 `pendingUpdate`（swift-navigation 的 `observe`）。
+- `StandaloneLaunchpad` 持有 `updater`（`.remindedByApplication`）；`startUpdating()` 设好 `prepareToShowWindow`（界面开着就 `hide(reason: "showing an update", returningToPreviousApplication: false)`，再 `NSApp.unhide(nil)`）后启动它。自检启动（`--self-check`）不启动 updater。
+- `applicationDidFinishLaunching`：`wasRelaunchedForUpdate = UpdateRelaunchRecord().takeRelaunchNote()`；显示与否交给纯函数 `StandaloneLaunchShowing.showsOnLaunch(wasLaunchedAtLogin:wasRelaunchedForUpdate:)`，两者任一为真就不显示，并记一条日志说明原因。
+- 主菜单的「Check for Updates…」在「About」下面；Dock 菜单有待装更新时它排第一、后跟分隔线，否则排在「Settings…」下面。
+- Dock 角标用 `NSApp.dockTile.badgeLabel = "1"`，经 swift-navigation 的 `observe` 跟着 `pendingUpdate`。
 
 ### 设置行
 
@@ -310,50 +337,60 @@ Check for Updates Automatically:  [switch]
 Updates:                          Version 1.2 (4)  [Check Now]
 ```
 
-开关在 `viewWillAppear` 时读 `automaticallyChecksForUpdates`，切换时写回（与「Open at Login」同一做法）。`isStarted` 为假（开发构建）时两行都不出现。
+开关的状态从 Sparkle 读（控制面板每次刷新时、设置窗口每次出现时），切换时写回：Sparkle 窗口里的勾选框也会改这个设置。有待装更新时「Updates」一行的副标题变成「Version <版本> is available.」、按钮变成「Install…」（`observe` 跟着 `pendingUpdate`）。注入版的两行放在「Launch at login」两行之后，独立版的放在「Open at Login」下面。`isStarted` 为假（开发构建）时两行都不出现。
 
 ### 签名
 
-「Embed Standalone Launchpad」在签每个框架之前，先签框架里 `Versions/Current` 下的嵌套代码，次序照 Sparkle 文档：`XPCServices/Installer.xpc`、`XPCServices/Downloader.xpc`（`--preserve-metadata=entitlements`）、`Autoupdate`、`Updater.app`，都带 `--options runtime`；写成通用的循环（`XPCServices/*.xpc`、`Versions/Current` 下的可执行文件与 `*.app`），不只认 Sparkle。
+「Embed Standalone Launchpad」在签每个框架之前，先签框架里 `Versions/Current` 下的嵌套代码：`XPCServices/*.xpc` 与 `*.app`（`--preserve-metadata=entitlements`），再签与框架二进制同层的可执行文件（Sparkle 的 `Autoupdate`），都带 `--options runtime`；写成通用的循环，不只认 Sparkle。
 
-`release_verify_export` 对两个 App（导出的注入版、zip 里的独立版）都加：`Sparkle.framework/Versions/B/Autoupdate`、`Updater.app`、两个 XPC 服务是这个团队的 Developer ID、带时间戳与硬化运行时。
+`release_verify_export` 新增 `launchpad_awakener_verify_updates`，对两个 App（导出的注入版、zip 里的独立版）都核对：`Sparkle.framework/Versions/B/Autoupdate`、`Updater.app`、两个 XPC 服务是这个团队的 Developer ID、带时间戳与硬化运行时；Info.plist 的 `SUFeedURL` 与 `SUPublicEDKey` 不空。`RunScript.sh` 构建后核对两个 App 都带 Sparkle、Info.plist 有这两个键且公钥不空，Release 构建的更新源不空。
 
 ### 发布钩子
 
 ```zsh
+release_engine_version=1.3.0
+release_publishers=(github-release sparkle-appcast)
+# The directory must exist when target checks it; Appcasts/.gitignore keeps it in git and its feeds out.
+release_appcast_path=Appcasts/LaunchpadAwakenerAppcast.xml
 release_notes_path='ReleaseNotes/{tag_version}.md'
-release_appcast_path=build/AppRelease/Appcasts/LaunchpadAwakenerAppcast.xml
+release_appcast_embeds_release_notes=true
 
 release_preflight() {
-    # Each feed lists only this release: start from empty ones.
-    rm -rf "$app_release_project_directory/build/AppRelease/Appcasts"
-    mkdir -p "$app_release_project_directory/build/AppRelease/Appcasts"
+    [[ $app_release_publishes == true ]] || return 0
+    rm -f "$app_release_project_directory"/Appcasts/*.xml(N)    # each feed lists this release only
 }
 
 release_after_product() {
-    local products_directory=$1
-    # unzip <exported app>/Contents/Resources/Launchpad.zip, xcrun stapler staple Launchpad.app,
-    # ditto -c -k --keepParent → Launchpad-<version>-<build>.zip, app_release_add_product
+    # Launchpad.zip out of the exported app ($app_release_application_path), stapled, zipped again as
+    # Launchpad-<version>-<build>.zip, and added as a notarized product: the engine checks its ticket.
 }
 
 release_deploy_appcast() {
-    local main_feed_path=$1
-    app_release_generate_appcast "$standalone_archive_path" "${main_feed_path:h}/LaunchpadAppcast.xml" \
-        "$app_release_project_directory/ReleaseNotes/${app_release_tag#v}.md"
-    gh release upload "$app_release_tag" "$main_feed_path" "${main_feed_path:h}/LaunchpadAppcast.xml" --clobber
+    local application_feed_path=$1
+    local standalone_feed_path=${application_feed_path:h}/LaunchpadAppcast.xml
+    app_release_generate_appcast "$app_release_run_directory/Products/Launchpad-<version>-<build>.zip" \
+        "$standalone_feed_path" "$app_release_project_directory/ReleaseNotes/${app_release_tag#v}.md"
+    gh release upload "$app_release_tag" --repo "$app_release_github_repository" --clobber \
+        "$application_feed_path" "$standalone_feed_path"
 }
 ```
 
-导出的 App 在运行目录里的确切路径以 AppRelease 的实现为准（`app_release_application_path` 之类），实现时核对。
+`release_appcast_path` 的目录在 `target` 段就要存在（引擎检查），CI 的输出目录在 runner 的临时目录里、`build/` 不存在，所以放在提交进仓库的 `Appcasts/` 下，它的 `.gitignore` 忽略里面的 `*.xml`。
+
+AppRelease 1.3.0 新增两样，都是可选的（按它的演进策略算 minor）：
+
+- `release_appcast_embeds_release_notes`（默认 `false`，要配 `release_notes_path`）：发布器把 GitHub Release 的说明文件以「压缩包同名 + 原扩展名」放在暂存目录里，加 `--embed-release-notes`。默认关，因为打开它会改变已有项目的 appcast 输出。
+- `app_release_generate_appcast <压缩包> <appcast> [<发布说明>]`：发布器自己也用它，钩子可以拿来给第二个 App 写 feed；用同一把私钥、这次 Release 的下载地址、预发布版的 beta 频道与 `release_appcast_arguments`，每个压缩包一个暂存目录。
 
 ### 密钥
 
-- 正式密钥：在开发机上用 Sparkle 包里的 `generate_keys` 生成（私钥存进登录钥匙串），`generate_keys -x <临时文件>` 导出，经 `gh secret set SPARKLE_PRIVATE_KEY --repo OpenLaunchpad/LaunchpadAwakener` 存成仓库 secret，删掉临时文件。公钥写进 Release 配置。私钥丢了，已装的用户就只能手动更新，所以要提醒用户另外备份一份。
-- 测试密钥：`generate_keys --account LaunchpadAwakenerUpdateTesting` 另存一把，公钥写进 Debug 配置，只用来签测试机上验证用的 zip。
+- 两把密钥都用 Homebrew 的 OpenSSL 生成 Ed25519 密钥（系统自带的 LibreSSL 不支持），取 32 字节种子的 base64 作私钥文件，与 `generate_keys -x` 导出的格式相同；不经 Sparkle 的 `generate_keys`，因为它把私钥存进登录钥匙串、可能弹授权框。生成后用 `sign_update --ed-key-file` 签一次、`--verify` 验一次。
+- 正式密钥：私钥经 `gh secret set SPARKLE_PRIVATE_KEY --repo OpenLaunchpad/LaunchpadAwakener` 存成仓库 secret，另留一份 `~/LaunchpadAwakener-SparklePrivateKey.txt`（权限 600）交用户转存进密码管理器后删除；公钥 `P0qf9O0kQEJksneoqaPYx5lTaJmz9rTzwAE9fkitCxY=` 写进两个 App 的 Release 配置。私钥丢了，已装的用户就只能手动更新。
+- 测试密钥：私钥放在 agent 自己的目录 `/Volumes/DerivedData/Agents.noindex/claude/UpdateTesting/LaunchpadAwakener/`，公钥写进 Debug 配置，只签测试机上验证用的 zip。
 
 ### 测试机上的验证
 
-非交互地走「下载后退出时安装」这条路：在开发机编两版开发构建（构建号不同），较新的一版压成 zip、用测试密钥签名，与一个 feed 一起拷到 MacBook，用 `python3 -m http.server` 在本机端口上提供；`defaults write com.MxIris.LaunchpadAwakener.debug SUAutomaticallyUpdate -bool YES`，带 `-UpdateFeedURL http://127.0.0.1:<端口>/LaunchpadAwakenerAppcast.xml` 打开较旧的一版，等日志里出现下载完成，退出 App 让 Sparkle 安装，再打开：核对版本号变了、日志里有「restarting the Dock once」、Dock 重启后注入正常、daemon 没有要求重新批准。独立版同样做一遍，核对它被重新打开（或手动打开）后的表现。点 Sparkle 窗口里的按钮属于交互操作，只在用户同意时做。
+非交互地走「下载后退出时安装」这条路，命令见实现说明「开发构建与测试机」。独立版打开会盖住屏幕，先预置重新打开的记录，它就不显示界面。点 Sparkle 窗口里的按钮属于交互操作，只在用户同意时做。
 
 ## 替代方案考量
 
@@ -404,14 +441,14 @@ release_deploy_appcast() {
 
 0. **提案入库** —— 改动地图最后一行
    - 行为：无代码变化。
-1. **Sparkle 骨架与更新源** —— `Package.swift`、`ApplicationUpdater`（只建 updater、不接 UI）、`UpdateFeedResolution`、两个 `Info.plist`、`project.pbxproj` 的构建设置、测试密钥
+1. **Sparkle 骨架与更新源**（已完成）—— `Package.swift`、`ApplicationUpdater`（只建 updater、不接 UI）、`UpdateFeedResolution`、两个 `Info.plist`、`project.pbxproj` 的构建设置、测试密钥
    - 行为：`releaseBuildUsesTheBundledFeed`
    - 行为：`developmentBuildWithoutOverrideHasNoFeed`
    - 行为：`developmentBuildUsesTheOverrideFeed`
    - 行为：`releaseBuildIgnoresTheOverride`
    - 行为：`emptyFeedValueCountsAsNone`
    - 行为：两个 App 的 Release 构建 Info.plist 里有 `SUFeedURL`、`SUPublicEDKey`、`SUEnableAutomaticChecks`（构建后用 `plutil` 核对，写进 RunScript 的检查）
-2. **菜单入口与温和提醒** —— `UpdateReminder`、`ApplicationUpdater.makeMenuItem()`、`ApplicationMainMenu`、`StatusItemController`、独立版的 App 菜单与 Dock 菜单、Dock 角标
+2. **菜单入口与温和提醒**（已完成）—— `UpdateReminder`、`ApplicationUpdater.makeMenuItem()`、`ApplicationMainMenu`、`StatusItemController`、独立版的 App 菜单与 Dock 菜单、Dock 角标
    - 行为：`shownBySparkleLetsSparkleShowScheduledUpdates`
    - 行为：`remindedByApplicationNeverLetsSparkleShowScheduledUpdates`
    - 行为：`updateShownOutOfFocusLeavesAReminder`
@@ -421,10 +458,10 @@ release_deploy_appcast() {
    - 行为：`reminderClearsWhenTheSessionEnds`
    - 行为：`menuItemOffersTheWaitingUpdate`
    - 行为：`mainMenuPutsTheUpdateItemUnderAbout`
-3. **设置行** —— `ControlPanelViewController`、`StandaloneSettings`
+3. **设置行**（已完成）—— `ControlPanelViewController`、`StandaloneSettings`
    - 行为：两版控制面板表单（SIP 开着、关着）都有两行更新设置；开发构建没有更新源时没有
    - 行为：切换开关写回 `automaticallyChecksForUpdates`
-4. **更新之后** —— `LaunchedBuildRecord`、`DockRestartAfterUpdate`、`UpdateRelaunchRecord`、`ApplicationDelegate`、独立版启动
+4. **更新之后**（已完成）—— `LaunchedBuildRecord`、`DockRestartAfterUpdate`、`UpdateRelaunchRecord`、`ApplicationDelegate`、独立版启动
    - 行为：`firstRecordedLaunchCountsAsNewBuild`
    - 行为：`sameBuildIsNotNew`
    - 行为：`differentBuildIsNew`
@@ -436,12 +473,12 @@ release_deploy_appcast() {
    - 行为：`standaloneStaysHiddenWhenRelaunchedForAnUpdate`
    - 行为：`standaloneStaysHiddenWhenLaunchedAtLogin`
    - 行为：`standaloneShowsWhenOpenedByTheUser`
-5. **发布** —— AppRelease 1.3.0、`Release.zsh`、`Release.yml`、「Embed Standalone Launchpad」、`ReleaseNotes/`、正式密钥与 secret（设之前问用户）
+5. **发布**（已完成）—— AppRelease 1.3.0、`Release.zsh`、`Release.yml`、「Embed Standalone Launchpad」、`ReleaseNotes/`、正式密钥与 secret（设之前问用户）
    - 行为：AppRelease 的测试覆盖发布说明进 appcast、`app_release_generate_appcast` 生成第二个 feed
    - 行为：手动跑一次 `Release.yml` 演练：通过，产物里有 `Launchpad-<版本>-<构建号>.zip`，其中的独立版已装订公证票据（`stapler validate`）、`spctl -a -vv` 判为 Notarized
    - 行为：`release_verify_export` 对两个 App 的 Sparkle 嵌套代码都通过
    - 行为：CI 的单元测试与 Release 构建通过
-6. **测试机验证与文档** —— 实现说明、`CLAUDE.md`、两份实现说明的更新、README、索引
+6. **测试机验证与文档**（已完成）—— 实现说明、`CLAUDE.md`、两份实现说明的更新、README、索引
    - 行为：MacBook 上照「测试机上的验证」走通两个 App 的下载、退出时安装、重新打开；注入版重启 Dock 一次且注入正常，daemon 没要求重新批准
    - 行为：文档登记完毕
 
@@ -456,3 +493,14 @@ release_deploy_appcast() {
 |------|------|------|
 | 2026-11-23 | Created as Draft | 用户要给 App 加自动更新。定下两个 App 各自用 Sparkle 更新、各有一个更新源，注入版更新后自动重启一次 Dock。自行决定：每天自动检查、弹窗确认后安装，更新源挂在 GitHub Release 附件上，开发构建不检查更新，先给 AppRelease 加上发布说明进 appcast 与第二个 feed 的能力。 |
 | 2026-11-23 | Accepted | 用户批准，开始实现。功能分支 `feature/automatic-updates`，从 main 切出。 |
+| 2026-11-23 | 第 1 步完成 | `UpdateFeedResolution` 写成无实例的 `enum`（只有静态成员），多一个按 `Bundle` 与 `UserDefaults` 取值的便捷方法。`ApplicationUpdater` 在 Info.plist 没有 `SUPublicEDKey` 时也不启动：正式公钥到第 5 步才写进 Release 配置，在那之前的 Release 构建不该启动一个装不了任何更新、还会在启动时报错的 updater。updater 由 `start()` 启动而不是在构造时启动，好让 App 在建菜单之前决定。测试密钥不经钥匙串：系统的 LibreSSL 不支持 Ed25519，改用 Homebrew 的 OpenSSL 生成，私钥放在 agent 自己的目录 `/Volumes/DerivedData/Agents.noindex/claude/UpdateTesting/LaunchpadAwakener/`，`sign_update --ed-key-file` 实测能用它签名并通过 `--verify`。RunScript 构建后核对两个 App 都带 Sparkle、Info.plist 有更新源与公钥两个键，Release 构建的更新源不能为空。 |
+| 2026-11-23 | 第 2 步完成 | `PendingUpdate` 放在模块顶层，不嵌在 `ApplicationUpdater` 里（嵌进主线程隔离的类里，纯值的 `UpdateReminder` 用它就要跨隔离）；`UpdateReminder` 的事件方法叫 `updateWillShow(displayVersion:isUserInitiated:isShownBySparkle:isInImmediateFocus:)`，另有 `menuItemTitle(for:)` 给出两种菜单项标题。菜单项的目标是代理对象，它实现 `NSMenuItemValidation`：会校验菜单项的菜单（主菜单、Dock 菜单）每次打开时标题跟着提醒变，菜单栏菜单本来就每次重建。独立版「先收起界面、再显示 Sparkle 窗口」做成 `ApplicationUpdater.prepareToShowWindow` 闭包，由 `checkForUpdates()` 在激活 App 之前调用，所有入口（主菜单、Dock 菜单、设置）都经过它。独立版 Dock 菜单：有待装更新时它排第一、后跟分隔线；否则「Check for Updates…」排在「Settings…」下面。自检启动（`--self-check`）不启动 updater。Sparkle 的 `SPUUpdaterDelegate` 已是主线程隔离，`SPUStandardUserDriverDelegate` 不是，后者的遵循要写 `@preconcurrency`。 |
+| 2026-11-23 | 第 3 步完成 | 注入版控制面板「General」节在「Launch at login」两行之后加「Check for updates automatically」开关行与「Updates」行，SIP 开着、关着两版表单都有；独立版设置窗口在「Open at Login」下面加「Check for Updates Automatically:」与「Updates:」。「Updates」行的副标题平时是版本号与构建号，有待装更新时变成「Version <版本> is available.」，按钮从「Check Now」变成「Install…」（`observe` 跟着 `pendingUpdate`）。开关的状态在控制面板每次刷新、设置窗口每次出现时从 Sparkle 读：它的窗口里的勾选框也会改这个设置。两边都没有界面测试：项目里本来就没有控制面板与设置窗口的测试，构造整个控制面板要连带 daemon、注入这些控制器；这一步只靠编译与测试机上核对。 |
+| 2026-11-23 | 第 4 步完成 | `DockRestartAfterUpdate` 照改动地图单独成文件。「第一次启动新构建」的标记在启动序列走到重连驻留 payload 之后才清掉：daemon 还在等批准、序列中途停下时，等用户批准回来、序列再跑到这里时照样重启一次 Dock。重启 Dock 之后序列直接进入 `.ready`，不再另外注入：`restartTargets()` 自己会注入新拉起的 Dock。独立版的启动判断写成 `StandaloneLaunchShowing.showsOnLaunch(wasLaunchedAtLogin:wasRelaunchedForUpdate:)`，不显示时记一条日志说明原因。两个 App 的启动日志都写明这次是登录时启动、为完成更新重新打开，还是用户打开，以及是否第一次启动这个构建。 |
+| 2026-11-23 | 第 5 步：嵌入独立版时签好 Sparkle | 「Embed Standalone Launchpad」在签框架之前先签框架里 `Versions/Current` 下的 XPC 服务与 `.app`（保留 entitlements），再签与框架同层的可执行文件（`Autoupdate`），都带硬化运行时。Debug 构建实测：zip 里独立版的 `Installer.xpc`、`Downloader.xpc`、`Autoupdate`、`Updater.app` 都是这次构建的身份、带 `runtime` 标志，`codesign --verify --deep --strict` 通过；Sparkle 原件里的 Downloader 本来就没有 entitlements。`release_verify_export` 新增 `launchpad_awakener_verify_updates`：两个 App 的这四样都要是本团队 Developer ID、带时间戳与硬化运行时，Info.plist 的 `SUFeedURL` 与 `SUPublicEDKey` 都不能空。 |
+| 2026-11-23 | 第 6 步：测试机上走通更新 | MacBook（27.2.1，26B131）上用这条分支的两版开发构建实测「下载后退出时安装」：A 版构建 3，B 版构建 4、版本 1.1.2，另把 `DYLIB_CURRENT_VERSION` 改成 2 让 payload 的 UUID 不同（payload 的版本号写死为 1，只改构建号时 payload 可能不变，那时本来也不需要重启 Dock）。B 版用测试密钥签名，`generate_appcast --embed-release-notes` 生成两个更新源，Markdown 发布说明以 `sparkle:format="markdown"` 嵌进条目；在 MacBook 本机端口用 `python3 -m http.server` 提供。注入版：带 `-UpdateFeedURL` 打开 A 版，Sparkle 立即检查（预置了很早的 `SULastCheckTime`）、下载 B 版，「EdDSA signature is correct」；退出后装成 1.1.2（4）；再打开时日志为「Launched by the user, build 4 for the first time」与「First launch of this build with an older payload in the Dock: restarting the Dock once」，Dock 进程换新、新 payload 注入、23 个方法签名零不符、hook 全部装上，daemon 没有要求重新批准；再退出重开只记「build 4」，Dock 不再重启。独立版：预置重新打开的记录后打开 A 版，日志为「Launched to finish an update: waiting for a click on the Dock icon」，没有盖住屏幕；下载、校验、退出后装成 1.1.2（4），`codesign --verify --deep --strict` 通过。开发构建里主 App 的 Sparkle 辅助程序保留厂商签名，Sparkle 因此记「Skipping atomic rename/swap」改用非原子替换，照样装好；导出的正式版会被整体重签，不受影响。「Install and Relaunch」（会写重新打开记录的那条路）要点 Sparkle 窗口里的按钮，属于交互操作，没有做。验证后测试机换回 A 版，删掉测试用的偏好与更新源。 |
+| 2026-11-23 | 第 5 步：密钥与 AppRelease 1.3.0 | 用户同意由 agent 生成正式密钥、设仓库 secret，并改 AppRelease、推 main、打 1.3.0。两把密钥都用 Homebrew 的 OpenSSL 生成，不经 `generate_keys`（它把私钥存进登录钥匙串，可能弹授权框）；正式私钥存成仓库 secret `SPARKLE_PRIVATE_KEY`，备份文件 `~/LaunchpadAwakener-SparklePrivateKey.txt` 交用户转存。`Release.yml` 第一步也检查这个 secret。AppRelease 的嵌入发布说明做成可选变量 `release_appcast_embeds_release_notes`，而不是有说明就嵌：后者会改变已有项目（LyricsX）的 appcast 输出，按它的演进策略算破坏性变更；发布器改用新的公开函数 `app_release_generate_appcast`，每个压缩包一个暂存目录。`release_appcast_path` 改放在提交进仓库的 `Appcasts/`（`.gitignore` 忽略 `*.xml`）：引擎在 `target` 段就检查它的目录存在，CI 的输出目录在 runner 临时目录里，`build/` 不存在。发布说明从这一版起写在 `ReleaseNotes/<版本>.md`，已发布的三版从 Release 补进来。Release 标题仍要手动改：引擎没有设标题的选项，不为这个再改引擎。 |
+| 2026-11-23 | 第 6 步：文档 | 新写实现说明 `Documentations/Internal/AutomaticUpdates.md`；项目 `CLAUDE.md` 的结构表加 `LaunchpadAwakenerUpdating`，「发布」一节改成打 tag 前写发布说明、核对 Release 上有两个 zip 与两个更新源，记下签名私钥的 secret 与丢失的后果；控制面板与独立版的实现说明补上更新入口、提醒与更新后重启 Dock；术语表登记「Appcast（更新源）」「Gentle reminders（温和提醒）」；README 加「Updates」一节与 Sparkle 的致谢。 |
+| 2026-11-23 | 第 5 步：发布演练通过 | 功能分支不升版本号，另开临时分支把版本改成 1.2（构建 4）、放一份演练用的 `ReleaseNotes/1.2.md`，手动跑 `Release.yml`（只跑到打 zip，不发布）：一次通过。日志里两个 App 都是「Sparkle signed」（四样嵌套代码为本团队 Developer ID、带时间戳与硬化运行时）且更新源不空；`release_after_product` 从导出的 App 里取出独立版、`stapler staple` 成功，引擎核对 `Launchpad-1.2-4.zip`「stapled, and Gatekeeper takes it for notarized」——公证服务确实登记了压在注入版资源里的独立版，不必单独提交公证。本机对同一分支 `app-release all --dry-run --publish` 的输出显示发布说明会以 `LaunchpadAwakener-1.2-4.md` 嵌进注入版的更新源、`generate_appcast` 取自 Xcode 构建目录里的 Sparkle 包；预演不调用钩子，所以独立版的更新源与上传只在真正发布时第一次运行（`app_release_generate_appcast` 本身由 AppRelease 的测试覆盖）。第一个带 Sparkle 的版本没有已装的用户会读它的更新源，它出错也不影响任何人。演练完删掉临时分支。 |
+| 2026-11-23 | 验证 | 最终状态下 `swift test` 709 个测试通过（这次新增 27 个），`RunScript.sh` 的完整构建、三个架构切片与两个 App 更新设置的核对通过。 |
+| 2026-11-23 | 实现完成，待用户看过后收尾 | 配了实现说明 `Documentations/Internal/AutomaticUpdates.md`（登记在头部「配套文档」）；新术语「Appcast（更新源）」「Gentle reminders（温和提醒）」已登记进术语表。控制面板与独立版设置里的两行、Dock 角标与菜单项没有在屏幕上看过，「Install and Relaunch」那条路没有实测，都要交互操作。 |

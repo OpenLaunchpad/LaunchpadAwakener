@@ -1,6 +1,6 @@
 # How AppRelease (https://github.com/Mx-Iris/AppRelease) ships LaunchpadAwakener: run `app-release all`.
 # Every setting is described in AppRelease's README.
-release_engine_version=1.0.0
+release_engine_version=1.3.0
 
 release_workspace=LaunchpadAwakener.xcworkspace
 release_scheme=LaunchpadAwakener
@@ -18,7 +18,55 @@ release_archive_arguments=(
     OTHER_CODE_SIGN_FLAGS=--timestamp
 )
 release_notary_keychain_profile=notarytool-password
-release_publishers=(github-release)
+
+# Both apps update themselves through Sparkle, each from a feed of its own hanging on the newest release
+# (releases/latest/download/<feed>, the apps' SUFeedURL): the app's written by the sparkle-appcast
+# publisher, the standalone app's by release_deploy_appcast. Each feed lists this release only, which is
+# all Sparkle reads, so nothing is committed; Appcasts/ ignores the files written into it.
+release_publishers=(github-release sparkle-appcast)
+release_appcast_path=Appcasts/LaunchpadAwakenerAppcast.xml
+# Written before the tag is pushed (CLAUDE.md, "Releasing"): the GitHub Release shows them, and so does the
+# update window of both apps.
+release_notes_path='ReleaseNotes/{tag_version}.md'
+release_appcast_embeds_release_notes=true
+
+# A feed written by an earlier run of the same release would keep its item; start from empty ones.
+release_preflight() {
+    [[ $app_release_publishes == true ]] || return 0
+    rm -f "$app_release_project_directory"/Appcasts/*.xml(N)
+}
+
+# The standalone app's own archive, beside the app's on the release, for its updates.
+launchpad_awakener_standalone_archive_name() {
+    print -r -- "Launchpad-$app_release_marketing_version-$app_release_build_number.zip"
+}
+
+# The standalone app ships inside the app's resources, which export cannot reach: taken out of the
+# exported app, stapled — the notary service registered it with the app, looking inside the zip — and
+# zipped again as a notarized product, so the engine checks the ticket and Gatekeeper's verdict on it.
+release_after_product() {
+    local extraction_directory=$app_release_run_directory/StandaloneLaunchpad
+    rm -rf "$extraction_directory"
+    mkdir -p "$extraction_directory"
+    ditto -x -k "$app_release_application_path/Contents/Resources/Launchpad.zip" "$extraction_directory"
+    xcrun stapler staple "$extraction_directory/Launchpad.app"
+    local archive_path=$extraction_directory/$(launchpad_awakener_standalone_archive_name)
+    ditto -c -k --sequesterRsrc --keepParent "$extraction_directory/Launchpad.app" "$archive_path"
+    app_release_add_product "$archive_path"
+    app_release_detail "standalone app: $(launchpad_awakener_standalone_archive_name)"
+}
+
+# After the app's feed: the standalone app's from its archive, with the same notes, and then both onto the
+# release, where the apps look for them.
+release_deploy_appcast() {
+    local application_feed_path=$1
+    local standalone_feed_path=${application_feed_path:h}/LaunchpadAppcast.xml
+    app_release_generate_appcast "$app_release_run_directory/Products/$(launchpad_awakener_standalone_archive_name)" \
+        "$standalone_feed_path" "$app_release_project_directory/ReleaseNotes/${app_release_tag#v}.md"
+    gh release upload "$app_release_tag" --repo "$app_release_github_repository" --clobber \
+        "$application_feed_path" "$standalone_feed_path"
+    app_release_detail "feeds on the release: ${application_feed_path:t}, ${standalone_feed_path:t}"
+}
 
 # What the engine's checks do not cover: injection needs an arm64e slice in the daemon and the payload,
 # both launchd property lists must start executables the app carries, and the standalone app must be in
@@ -93,18 +141,40 @@ launchpad_awakener_verify_every_signature() {
     app_release_detail "${bundle_path:t}: all $code_count Mach-O files signed with Developer ID and a timestamp"
 }
 
+# Both apps update themselves through Sparkle: its helpers must carry this team's signature and the
+# hardened runtime like the app around them, or the notary service rejects the app, and the Info.plist must
+# name a feed and the key the updates are signed with, or the shipped app never updates.
+launchpad_awakener_verify_updates() {
+    local application_path=$1
+    local sparkle_path=$application_path/Contents/Frameworks/Sparkle.framework/Versions/B
+    [[ -d $sparkle_path ]] || app_release_fail "${application_path:t} does not carry Sparkle.framework"
+    local code_path
+    for code_path in "$sparkle_path"/XPCServices/Installer.xpc "$sparkle_path"/XPCServices/Downloader.xpc \
+        "$sparkle_path"/Autoupdate "$sparkle_path"/Updater.app; do
+        launchpad_awakener_verify_signature "$code_path" hardened-runtime
+    done
+    local key value
+    for key in SUFeedURL SUPublicEDKey; do
+        value=$(plutil -extract "$key" raw -o - "$application_path/Contents/Info.plist" 2> /dev/null) || value=
+        [[ -n $value ]] || app_release_fail "${application_path:t} has no $key, so it would never update"
+    done
+    app_release_detail "${application_path:t}: Sparkle signed, feed $(plutil -extract SUFeedURL raw -o - "$application_path/Contents/Info.plist")"
+}
+
 release_verify_export() {
     local application_path=$1
     launchpad_awakener_verify_contents "$application_path"
     launchpad_awakener_verify_signature "$application_path/Contents/Library/LaunchServices/LaunchpadAwakenerDaemon" hardened-runtime
     launchpad_awakener_verify_signature "$application_path/Contents/Library/LoginItems/LaunchpadAwakenerTextInput.app" hardened-runtime
     launchpad_awakener_verify_signature "$application_path/Contents/Resources/LaunchpadAwakenerPayload.framework"
+    launchpad_awakener_verify_updates "$application_path"
     launchpad_awakener_verify_every_signature "$application_path"
 
     local extraction_directory
     extraction_directory=$(mktemp -d "${TMPDIR:-/tmp}/LaunchpadAwakenerRelease.XXXXXX")
     ditto -x -k "$application_path/Contents/Resources/Launchpad.zip" "$extraction_directory"
     launchpad_awakener_verify_signature "$extraction_directory/Launchpad.app" hardened-runtime
+    launchpad_awakener_verify_updates "$extraction_directory/Launchpad.app"
     launchpad_awakener_verify_every_signature "$extraction_directory/Launchpad.app"
     rm -rf "$extraction_directory"
 }

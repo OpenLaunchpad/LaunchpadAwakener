@@ -55,6 +55,7 @@ ssh JH@192.168.50.13 'open -n /Applications/Launchpad.app --args --self-check'
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppCore` | daemon 生命周期与自愈、进程监视、注入编排、payload 通道的 App 一侧、控制面板要显示的状态与文案、整理 Launchpad 窗口的逻辑与视图模型 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerAppUI` | 注入版 App 的 AppKit 界面：delegate、控制面板、菜单栏、整理窗口。App target 只链接这一个产物 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSharedUI` | 两个 App 共用的 AppKit 部件：分组表单、按内容定高的窗口、主菜单、登录时启动的判断 |
+| `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerUpdating` | 两个 App 的自动更新：包住 Sparkle 的 `ApplicationUpdater`、后台 App 的更新提醒、为完成更新重新打开的记录。只有两个 App 链接它，也就只有它们带 Sparkle（见[自动更新实现说明](Documentations/Internal/AutomaticUpdates.md)） |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerPayloadInterface` | payload 通道的请求与回报类型。App 与 payload 都链接它，只放请求类型 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerDaemonCore` | 组装特权 XPC 服务端 |
 | `LaunchpadAwakenerPackage/Sources/LaunchpadAwakenerSpringboardCore` | Launchpad 本身：布局库与界面层。经宿主接口 `SpringboardHost` 拿窗口、图层类、壁纸这些，不认识 Dock，不链接 AppKit |
@@ -143,11 +144,12 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 - **两个钩子补上引擎不查的东西**：daemon 与 payload 带 arm64e、两个 launchd plist 指向的程序在包里、zip 里有独立版；导出后，导出包和 zip 里的独立版中每一个 Mach-O 文件都要是这个团队的 Developer ID 签名、带时间戳，daemon、输入法辅助进程与独立版还要开着硬化运行时。
 - agent 试跑时把产物和构建目录都放进自己的目录，只跑到导出：`APP_RELEASE_OUTPUT_ROOT=/Volumes/DerivedData/Agents.noindex/<agent>/AppRelease/LaunchpadAwakener app-release all --skip-notarization --derived-data-path /Volumes/DerivedData/Agents.noindex/<agent>/DerivedData/LaunchpadAwakener`。公证会把 App 传给 Apple，`--publish` 会推 tag、建 GitHub Release，用户没要求就不做。
 - **CI**：`.github/workflows/CI.yml` 在推到 main 和开 PR 时跑单元测试，并用临时签名编一次 Release（CI 上没有开发证书），借 RunScript 的检查盯住切片、plist 与嵌入的独立版。`Release.yml` 在推送 `v<MARKETING_VERSION>` 形式的 tag（如 `v1.0`）时完整发布并建 GitHub Release；在 Actions 页面手动运行则跑到打 zip 为止，产物留作 artifact，不发布；这是给下一个版本的演练，只在 `MARKETING_VERSION` 已经改了、对应的 tag 还没打时可用——AppRelease 拒绝 tag 已经落在别的提交上的版本。两者都用 GitHub 的 `xcode-27` 预览镜像，`DEVELOPER_DIR` 指定 Xcode 27.2。
-- **签名与公证的 secret 放在 OpenLaunchpad 组织级**（`DEVELOPER_ID_CERTIFICATE_*`、`NOTARY_*`），由 workflow 转成 AppRelease 认的 `APP_RELEASE_*` 环境变量。组织是免费套餐，组织级 secret 只给公开仓库用：仓库公开之前，`Release.yml` 会在第一步就报出拿不到证书。
+- **签名与公证的 secret 放在 OpenLaunchpad 组织级**（`DEVELOPER_ID_CERTIFICATE_*`、`NOTARY_*`），由 workflow 转成 AppRelease 认的 `APP_RELEASE_*` 环境变量。组织是免费套餐，组织级 secret 只给公开仓库用：仓库公开之前，`Release.yml` 会在第一步就报出拿不到证书。签自动更新的私钥是本仓库自己的 secret `SPARKLE_PRIVATE_KEY`，缺了 `Release.yml` 同样第一步就停；**它丢了，已装的 App 就再也收不到自动更新**，备份由用户保管。
+- **自动更新**：两个 App 各有一个更新源，每次发布由 AppRelease 写好、传到那次的 Release 上（`LaunchpadAwakenerAppcast.xml`、`LaunchpadAppcast.xml`），独立版另有自己的 zip。App 读 `releases/latest/download/<更新源>`，只认最新的正式版。细节、密钥与在测试机上怎么验见[自动更新实现说明](Documentations/Internal/AutomaticUpdates.md)。
 
-- **发布说明**：`Release.zsh` 没设 `release_notes_path`，AppRelease 建的 Release 正文是空的；发布后用 `gh release edit <tag> --notes-file <文件>` 补上，标题设成 `LaunchpadAwakener <版本>`。
+- **发布说明**：写在 `ReleaseNotes/<版本>.md`（英文，照 `write-release-notes` skill），打 tag 之前提交；缺了发布在 `target` 段就停下。它同时是 GitHub Release 的正文和两个 App 更新窗口里的说明。Release 的标题仍是引擎给的 `v<版本>`，发布后用 `gh release edit <tag> --title "LaunchpadAwakener <版本>"` 改。
 
-**发一个版本的步骤**：把三个 App target（注入版、文本输入辅助进程、独立版）的 `MARKETING_VERSION` 改成新版本号、`CURRENT_PROJECT_VERSION` 加一，推到 main；在 Actions 页面手动跑一次 `Release.yml` 演练，通过后打带注解的 tag（`git tag -a v<版本> -m "Release v<版本>"`）推上去；Release 建好后补发布说明与标题。一次演练或发布约 14 分钟。
+**发一个版本的步骤**：把三个 App target（注入版、文本输入辅助进程、独立版）的 `MARKETING_VERSION` 改成新版本号、`CURRENT_PROJECT_VERSION` 加一（Sparkle 按它比新旧，绝不能回退），写好 `ReleaseNotes/<版本>.md`，推到 main；在 Actions 页面手动跑一次 `Release.yml` 演练，通过后打带注解的 tag（`git tag -a v<版本> -m "Release v<版本>"`）推上去；Release 建好后改标题，并核对 Release 上有两个 zip 与两个更新源。一次演练或发布约 14 分钟。
 
 1.0 于 2026-11-12 在本机用 `app-release all --publish` 发布，没有走 CI：当时仓库还是私有的，拿不到组织级 secret。1.1 于 2026-11-22 第一次照上面的步骤由 CI 发布，演练与正式发布都一次通过。两个版本的包都还没在测试机上装过。
 

@@ -1,6 +1,7 @@
 import AppKit
 import AppKitPlus
 import LaunchpadAwakenerAppCore
+import LaunchpadAwakenerUpdating
 
 /// The menu bar icon and its menu.
 ///
@@ -17,6 +18,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let killSwitchController: KillSwitchController
     private let dockAppsIconController: DockAppsIconController
     private let standaloneLaunchpadController: StandaloneLaunchpadController
+    private let applicationUpdater: ApplicationUpdater
     private let launchProgress: ApplicationLaunchProgress
     private let isInjectionBlockedBySystemIntegrityProtection: Bool
     private let showControlPanel: () -> Void
@@ -28,6 +30,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         killSwitchController: KillSwitchController,
         dockAppsIconController: DockAppsIconController,
         standaloneLaunchpadController: StandaloneLaunchpadController,
+        applicationUpdater: ApplicationUpdater,
         launchProgress: ApplicationLaunchProgress,
         isInjectionBlockedBySystemIntegrityProtection: Bool,
         showControlPanel: @escaping () -> Void,
@@ -38,6 +41,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         self.killSwitchController = killSwitchController
         self.dockAppsIconController = dockAppsIconController
         self.standaloneLaunchpadController = standaloneLaunchpadController
+        self.applicationUpdater = applicationUpdater
         self.launchProgress = launchProgress
         self.isInjectionBlockedBySystemIntegrityProtection = isInjectionBlockedBySystemIntegrityProtection
         self.showControlPanel = showControlPanel
@@ -82,12 +86,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
             standaloneItem.isEnabled = standaloneLaunchpadController.isInstalled
                 || (standaloneLaunchpadController.canInstall && !standaloneLaunchpadController.isInstalling)
-            menu.items = [
+            menu.items = updateReminderItems + [
                 statusTitleItem,
                 .separator(),
                 item("Open LaunchpadAwakener", keyEquivalent: ",", perform: showControlPanel),
                 standaloneItem,
                 .separator(),
+            ] + checkForUpdatesItems + [
                 item("Quit", keyEquivalent: "q") {
                     NSApplication.shared.terminate(nil)
                 },
@@ -115,7 +120,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         restartDockItem.isEnabled = !injectionCoordinator.isBusy
 
-        menu.items = [
+        menu.items = updateReminderItems + [
             statusTitleItem,
             .separator(),
             item("Open LaunchpadAwakener", keyEquivalent: ",", perform: showControlPanel),
@@ -126,10 +131,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             killSwitchItem,
             dockAppsIconItem,
             .separator(),
+        ] + checkForUpdatesItems + [
             item("Quit", keyEquivalent: "q") {
                 NSApplication.shared.terminate(nil)
             },
         ]
+    }
+
+    /// An update a scheduled check found and Sparkle showed behind the other apps: first in the menu, where
+    /// it is seen. Choosing it brings Sparkle's window forward.
+    private var updateReminderItems: [NSMenuItem] {
+        guard applicationUpdater.isStarted, applicationUpdater.pendingUpdate != nil else { return [] }
+        return [applicationUpdater.makeMenuItem(), .separator()]
+    }
+
+    /// Check for Updates…, above Quit, while no update waits.
+    private var checkForUpdatesItems: [NSMenuItem] {
+        guard applicationUpdater.isStarted, applicationUpdater.pendingUpdate == nil else { return [] }
+        return [applicationUpdater.makeMenuItem()]
     }
 
     private func item(_ title: String, keyEquivalent: String = "", perform: @escaping () -> Void) -> NSMenuItem {

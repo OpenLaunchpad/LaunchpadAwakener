@@ -2,6 +2,7 @@ import AppKit
 import AppKitPlus
 import LaunchpadAwakenerAppCore
 import LaunchpadAwakenerSharedUI
+import LaunchpadAwakenerUpdating
 import OSToolbox
 
 /// The injected app: owns its controllers, its windows and menu bar item, and its launch sequence.
@@ -19,6 +20,11 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     private let launchProgress = ApplicationLaunchProgress()
     private let organizerViewModel: LaunchpadOrganizerViewModel
     private var statusItemController: StatusItemController?
+    /// Sparkle shows the updates it finds; one it shows behind other apps also gets an item at the top of
+    /// the menu bar menu, since this app has no Dock icon to bring the window forward.
+    private let applicationUpdater = ApplicationUpdater(scheduledUpdatePresentation: .shownBySparkle)
+    /// Whether this launch is the first of this build, until the launch sequence has looked at the Dock.
+    private var isFirstLaunchOfNewBuild = false
 
     /// Whether System Integrity Protection keeps this app from injecting into the Dock. Read once: changing
     /// SIP takes a restart.
@@ -36,6 +42,7 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             killSwitchController: killSwitchController,
             dockAppsIconController: dockAppsIconController,
             standaloneLaunchpadController: standaloneLaunchpadController,
+            applicationUpdater: applicationUpdater,
             launchProgress: launchProgress,
             isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
             showOrganizer: { [weak self] in self?.showOrganizer() }
@@ -69,20 +76,35 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
         // Read first: the open event that tells a launch at login apart is only current until launching
         // finishes.
         let wasLaunchedAtLogin = ApplicationLaunch.wasLaunchedAtLogin
+        // Sparkle reopening the app to finish an update keeps the window closed, as a launch at login does:
+        // the user was busy elsewhere when they let it install.
+        let wasRelaunchedForUpdate = UpdateRelaunchRecord().takeRelaunchNote()
+        let opensControlPanel = !wasLaunchedAtLogin && !wasRelaunchedForUpdate
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        isFirstLaunchOfNewBuild = LaunchedBuildRecord().recordLaunch(ofBuild: build)
+
+        // Before the menus, which offer updates only when the updater runs. While SIP is on too: this app
+        // updates itself whether or not it can inject.
+        applicationUpdater.start()
 
         // The organizer edits Launchpad through the payload in the Dock, which there is none of while SIP is on.
         let organizerItems = isInjectionBlockedBySystemIntegrityProtection ? [] : [
             menuItem("Organize Launchpad") { [weak self] in self?.showOrganizer() },
         ]
-        NSApp.mainMenu = ApplicationMainMenu.make(applicationName: "LaunchpadAwakener", windowItems: [
-            menuItem("LaunchpadAwakener") { [weak self] in self?.showControlPanel() },
-        ] + organizerItems)
+        NSApp.mainMenu = ApplicationMainMenu.make(
+            applicationName: "LaunchpadAwakener",
+            updateItem: applicationUpdater.isStarted ? applicationUpdater.makeMenuItem() : nil,
+            windowItems: [
+                menuItem("LaunchpadAwakener") { [weak self] in self?.showControlPanel() },
+            ] + organizerItems
+        )
         statusItemController = StatusItemController(
             daemonController: daemonController,
             injectionCoordinator: injectionCoordinator,
             killSwitchController: killSwitchController,
             dockAppsIconController: dockAppsIconController,
             standaloneLaunchpadController: standaloneLaunchpadController,
+            applicationUpdater: applicationUpdater,
             launchProgress: launchProgress,
             isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
             showControlPanel: { [weak self] in self?.showControlPanel() },
@@ -94,7 +116,7 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
         // offers the standalone app instead, which needs none of them.
         guard !isInjectionBlockedBySystemIntegrityProtection else {
             #log(.info, "System Integrity Protection is on: offering the standalone Launchpad instead of injecting into the Dock")
-            if !wasLaunchedAtLogin {
+            if opensControlPanel {
                 showControlPanel()
             }
             return
@@ -123,11 +145,12 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             await textInputAgentController.repairIfHelperDoesNotStart()
         }
 
-        // Only the launch at login keeps the window closed; the app then waits in the menu bar. Opened by
-        // the user — from the Finder, the Dock, `open` — it shows the control panel whether or not
-        // launching at login is on.
-        #log(.info, "Launched \(wasLaunchedAtLogin ? "at login; the control panel stays closed" : "by the user; showing the control panel", privacy: .public)")
-        if !wasLaunchedAtLogin {
+        // Only the launch at login and the relaunch that finishes an update keep the window closed; the app
+        // then waits in the menu bar. Opened by the user — from the Finder, the Dock, `open` — it shows the
+        // control panel whether or not launching at login is on.
+        let launchDescription = wasLaunchedAtLogin ? "at login" : wasRelaunchedForUpdate ? "to finish an update" : "by the user"
+        #log(.info, "Launched \(launchDescription, privacy: .public), build \(build, privacy: .public)\(self.isFirstLaunchOfNewBuild ? " for the first time" : "", privacy: .public); \(opensControlPanel ? "showing the control panel" : "the control panel stays closed", privacy: .public)")
+        if opensControlPanel {
             showControlPanel()
         }
 
@@ -204,6 +227,23 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
 
         launchProgress.enter(.reconnectingToPayloads)
         await injectionCoordinator.reconnectToResidentPayloads()
+
+        // An update replaced this app, but the Dock still runs the payload of the build before, which only
+        // a restart replaces. The user let the update install, so the restart that finishes it does not ask
+        // again — once, on the first launch of the new build that gets this far.
+        let restartsDockForNewBuild = DockRestartAfterUpdate.isNeeded(
+            isNewBuild: isFirstLaunchOfNewBuild,
+            isInjectionAllowed: !isInjectionBlockedBySystemIntegrityProtection,
+            hasStalePayload: injectionCoordinator.hasStalePayload
+        )
+        isFirstLaunchOfNewBuild = false
+        if restartsDockForNewBuild {
+            #log(.info, "First launch of this build with an older payload in the Dock: restarting the Dock once")
+            // Injects into the new Dock by itself.
+            injectionCoordinator.restartTargets()
+            launchProgress.enter(.ready)
+            return
+        }
 
         if injectionCoordinator.isAutomaticInjectionEnabled {
             launchProgress.enter(.injecting)

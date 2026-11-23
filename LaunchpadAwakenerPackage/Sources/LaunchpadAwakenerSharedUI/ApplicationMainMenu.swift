@@ -12,8 +12,14 @@ import UIFoundation
 public enum ApplicationMainMenu {
     /// - Parameters:
     ///   - settingsItem: The application menu's Settings… item, for an app that has settings.
+    ///   - updateItem: Check for Updates…, for an app that updates itself; it goes right under About.
     ///   - windowItems: Commands that open the app's windows, listed in the Window menu.
-    public static func make(applicationName: String, settingsItem: NSMenuItem? = nil, windowItems: [NSMenuItem] = []) -> NSMenu {
+    public static func make(
+        applicationName: String,
+        settingsItem: NSMenuItem? = nil,
+        updateItem: NSMenuItem? = nil,
+        windowItems: [NSMenuItem] = []
+    ) -> NSMenu {
         // SwiftUI's windows did not tab; without this AppKit adds Show Tab Bar and the tab commands to the
         // View and Window menus.
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -30,6 +36,9 @@ public enum ApplicationMainMenu {
         return MainMenu.menu {
             MainMenu.application(applicationName: applicationName) {
                 MainMenu.Application.about(applicationName: applicationName)
+                if let updateItem {
+                    updateItem
+                }
                 NSMenuItem.separator()
                 if let settingsItem {
                     settingsItem

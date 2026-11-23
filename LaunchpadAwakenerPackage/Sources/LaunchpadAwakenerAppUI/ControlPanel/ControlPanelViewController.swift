@@ -3,6 +3,7 @@ import AppKitNavigation
 import AppKitPlus
 import LaunchpadAwakenerAppCore
 import LaunchpadAwakenerSharedUI
+import LaunchpadAwakenerUpdating
 import SnapKit
 import UIFoundation
 import UIFoundationToolbox
@@ -34,8 +35,10 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
     private let killSwitchController: KillSwitchController
     private let dockAppsIconController: DockAppsIconController
     private let standaloneLaunchpadController: StandaloneLaunchpadController
+    private let applicationUpdater: ApplicationUpdater
     private let launchProgress: ApplicationLaunchProgress
-    /// While SIP is on, the panel is the banner pointing at the standalone app, and the launch at login row.
+    /// While SIP is on, the panel is the banner pointing at the standalone app, the launch at login row and
+    /// the update rows.
     private let isInjectionBlockedBySystemIntegrityProtection: Bool
     private let showOrganizer: () -> Void
 
@@ -51,6 +54,14 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
     private lazy var launchAtLoginWarningRow = FormRowView(contentView: SystemSettingsWarningView(text: "Turned off under System Settings › Login Items.") { [weak self] in
         self?.launchAtLoginController.openLoginItemsSettings()
     })
+    private let automaticUpdatesSwitch = NSSwitch()
+    private lazy var automaticUpdatesRow = FormRowView(title: "Check for updates automatically", subtitle: "Once a day. An update installs only once you confirm it.", accessoryView: automaticUpdatesSwitch)
+    private let checkForUpdatesButton = ControlPanelViewController.makeButton(title: "Check Now", controlSize: .small)
+    private lazy var updatesRow = FormRowView(title: "Updates", subtitle: applicationUpdater.currentVersionDescription, accessoryView: checkForUpdatesButton)
+    /// None in a development build launched without a feed, where nothing checks.
+    private var updateRows: [FormRowView] {
+        applicationUpdater.isStarted ? [automaticUpdatesRow, updatesRow] : []
+    }
     private let daemonStatusView = StatusIndicatorView()
     private let daemonProgressIndicator = ControlPanelViewController.makeSpinner()
     private let uninstallDaemonButton = ControlPanelViewController.makeButton(title: "Uninstall", controlSize: .small)
@@ -98,6 +109,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         killSwitchController: KillSwitchController,
         dockAppsIconController: DockAppsIconController,
         standaloneLaunchpadController: StandaloneLaunchpadController,
+        applicationUpdater: ApplicationUpdater,
         launchProgress: ApplicationLaunchProgress,
         isInjectionBlockedBySystemIntegrityProtection: Bool,
         showOrganizer: @escaping () -> Void
@@ -109,6 +121,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         self.killSwitchController = killSwitchController
         self.dockAppsIconController = dockAppsIconController
         self.standaloneLaunchpadController = standaloneLaunchpadController
+        self.applicationUpdater = applicationUpdater
         self.launchProgress = launchProgress
         self.isInjectionBlockedBySystemIntegrityProtection = isInjectionBlockedBySystemIntegrityProtection
         self.showOrganizer = showOrganizer
@@ -190,6 +203,8 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         if isInjectionBlockedBySystemIntegrityProtection {
             standaloneLaunchpadController.refreshStatus()
         }
+        // Sparkle's own setting, which its window's checkbox changes too.
+        automaticUpdatesSwitch.state = applicationUpdater.automaticallyChecksForUpdates ? .on : .off
     }
 
     // MARK: - Building
@@ -213,7 +228,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
                 FormSectionView(title: "General", symbolName: "gearshape.fill", rows: [
                     launchAtLoginRow,
                     launchAtLoginWarningRow,
-                ]),
+                ] + updateRows),
                 errorSection,
             ]
             return
@@ -223,6 +238,7 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
             FormSectionView(title: "General", symbolName: "gearshape.fill", rows: [
                 launchAtLoginRow,
                 launchAtLoginWarningRow,
+            ] + updateRows + [
                 daemonRow,
                 textInputRow,
                 textInputWarningRow,
@@ -262,6 +278,12 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
         }
         launchAtLoginSwitch.box.setAction { [weak self] toggle in
             self?.launchAtLoginController.setEnabled(toggle?.state == .on)
+        }
+        automaticUpdatesSwitch.box.setAction { [weak self] toggle in
+            self?.applicationUpdater.automaticallyChecksForUpdates = toggle?.state == .on
+        }
+        checkForUpdatesButton.box.setAction { [weak self] _ in
+            self?.applicationUpdater.checkForUpdates()
         }
         uninstallDaemonButton.hasDestructiveAction = true
         uninstallDaemonButton.box.setAction { [weak self] _ in
@@ -342,6 +364,17 @@ final class ControlPanelViewController: XiblessViewController<XiblessView> {
             guard let self else { return }
             launchAtLoginSwitch.state = launchAtLoginController.isEnabled ? .on : .off
             launchAtLoginWarningRow.isHidden = !launchAtLoginController.isDisabledInSystemSettings
+        }
+
+        observe { [weak self] in
+            guard let self else { return }
+            if let pendingUpdate = applicationUpdater.pendingUpdate {
+                updatesRow.subtitle = "Version \(pendingUpdate.displayVersion) is available."
+                checkForUpdatesButton.title = "Install…"
+            } else {
+                updatesRow.subtitle = applicationUpdater.currentVersionDescription
+                checkForUpdatesButton.title = "Check Now"
+            }
         }
 
         observe { [weak self] in
