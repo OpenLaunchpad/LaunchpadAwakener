@@ -61,6 +61,10 @@ On a Mac with SIP on, open LaunchpadAwakener and click **Install Launchpad**: it
 - Its settings (**Settings…** in the Dock icon's menu) set a global shortcut and **Launch at login**.
 - It never asks for screen recording permission; without it the blurred background is drawn from the desktop picture file.
 
+### Updates
+
+Both apps check for updates once a day and install one only after you confirm it, through [Sparkle](https://sparkle-project.org). **Check for Updates…** is in the app menu, the injected version's menu bar menu and the standalone version's Dock menu; the automatic check can be turned off in the settings. After an update the injected version restarts the Dock once, so the Dock runs the new version too. Versions up to 1.1.1 do not update themselves: install a newer one by hand once.
+
 ## Preferences
 
 Launchpad reads macOS 15's `springboard-*` defaults from `com.apple.dock`, such as `springboard-rows` and `springboard-columns`. One is new: on macOS 27 the injected version can put the Dock's Liquid Glass behind the pages instead of the blurred wallpaper.
@@ -160,6 +164,7 @@ The tests never put a window on screen and never touch the Dock.
 - [FrameworkToolbox](https://github.com/Mx-Iris/FrameworkToolbox) — logging, and the checked Objective-C runtime calls and hooks
 - [UIFoundation](https://github.com/Mx-Iris/UIFoundation), [AppKitPlus](https://github.com/AppKitSupportProgram/AppKitPlus-Release), [swift-navigation](https://github.com/pointfreeco/swift-navigation) and [SnapKit](https://github.com/SnapKit/SnapKit) — the AppKit interface
 - [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) — the standalone app's global shortcut
+- [Sparkle](https://sparkle-project.org) — both apps' updates
 
 ## License
 

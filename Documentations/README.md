@@ -23,5 +23,6 @@
 - [Internal/ControlPanel.md](Internal/ControlPanel.md) —— 注入版 App 控制面板的实现说明：payload 通道、旧 payload 的识别、闪退保护、状态横幅的顺序
 - [Internal/LaunchpadOrganizer.md](Internal/LaunchpadOrganizer.md) —— 整理 Launchpad 窗口的实现说明：App 不碰数据库、编辑带版本号、一批编辑一个事务、拖动与分类
 - [Internal/DockAppsIcon.md](Internal/DockAppsIcon.md) —— Dock 的 Apps 图标的实现说明：两份图标的来源、只 hook 第一条通路、两个拼写的顺序、用 render 施加与撤销、升级后核对什么
+- [Internal/AutomaticUpdates.md](Internal/AutomaticUpdates.md) —— 自动更新的实现说明：更新源挂在 Release 上、两把密钥、两个 App 的提醒方式、更新后重启 Dock、签名、发布与测试机上怎么验
 - [Internal/ReviewAdjudications.md](Internal/ReviewAdjudications.md) —— 代码审查的已裁决清单：判为误报或不修的发现与理由
 - [Glossary.md](Glossary.md) —— 术语表：间隙、全局扫描、DockSwipe、宿主、注入版、独立版、退回开关、payload 通道、闪退保护、常驻 payload、等价图层、离屏自检、Springboard、文本输入辅助进程

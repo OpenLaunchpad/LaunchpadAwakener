@@ -12,7 +12,7 @@
 | 位置 | 是什么 |
 |---|---|
 | `AppUI/Application/ApplicationDelegate.swift` | `ApplicationDelegate`：持有全部控制器，跑启动流程（检查 daemon → 找已在的 payload → 注入），处理「App 已在运行时再打开」；外壳 `LaunchpadAwakener/main.swift` 只建它并运行 |
-| `AppUI/ControlPanel/`、`AppUI/MenuBar/` | 窗口：状态横幅，以及常规（开机启动、daemon、输入法辅助进程）、Launchpad（退回开关、Dock 构建、打开整理窗口）、注入、错误四节；菜单栏菜单。界面层怎么搭见 [AppKit 界面层的实现说明](AppKitInterface.md) |
+| `AppUI/ControlPanel/`、`AppUI/MenuBar/` | 窗口：状态横幅，以及常规（开机启动、自动更新、daemon、输入法辅助进程）、Launchpad（退回开关、Dock 构建、打开整理窗口）、注入、错误四节；菜单栏菜单。界面层怎么搭见 [AppKit 界面层的实现说明](AppKitInterface.md) |
 | `AppUI/Organizer/` 等 | 整理 Launchpad 的窗口，见[它的实现说明](LaunchpadOrganizer.md) |
 | `AppCore/ReadinessPresentation.swift`、`StatusLine.swift` | 横幅与两行状态的文字、图标与颜色角色 |
 | `AppCore/PayloadInjectionCoordinator.swift` | 暂存、注入、自动再注入、重启 Dock、payload 通道、状态刷新、闪退保护 |
@@ -45,6 +45,8 @@
 **等 payload 一律限时，而且限时不靠任务组。** 握手最多等 5 秒，每次问状态最多 2 秒（`withTimeLimit`）。任务组要等所有子任务结束才返回：DockIconOverride 那种「组里等两个非结构化任务」的写法，取消组并不取消它等的任务，所以每次注入都要等满 5 秒才出结果；而一个永不回复的 XPC 请求不响应取消，放在组里，限时就失效了，一个卡住的 Dock 会让窗口的刷新循环永远停住。`withTimeLimit` 用续体加锁，先到的结果胜出，另一个只取消、不等它。
 
 **用户点「重启 Dock」，退出的那个 Dock 不算闪退。** 闪退保护（`QuickExitGuard`）把注入后 15 秒内退出的 Dock 算作 payload 弄崩的，连续三次就关掉自动注入。重启按钮先 `prepareForTargetRestart()` 忘掉旧 Dock（连同它的注入时间），再发 `SIGTERM`，所以连按几次不会误关。退出不论是监视器的退出源先看到，还是窗口的状态刷新先发现进程没了，都走同一个 `hostDidExit(_:)` 计数。被忘掉的旧 Dock 在退出之前另记在 `processIdentifiersBeingRestarted` 里，任何注入都跳过它：否则一轮刚好在发信号前跑过的发现会把它当成「漏注入的」，注入一个正在退出的进程，它的退出又被算成一次闪退。别的用户的 Dock（快速切换用户时）发不了信号，就留着不动，也不报错；它仍算在「旧的」那一组里，不会被当成重启后的新 Dock。
+
+**更新后第一次启动，Dock 里是旧 payload 就自动重启一次。** 自动更新（或手动换上新版本）之后，Dock 里跑的还是上一版的 payload，以前要等用户看到横幅的「older build」再点「Restart Dock」。现在 App 记着上次启动的构建号（`LaunchedBuildRecord`），第一次启动新构建、启动流程重连驻留 payload 之后，`hasStalePayload` 为真就调一次 `restartTargets()`，与按钮走同一条路；SIP 开着时不注入，也就不重启。之后的启动不再自动重启，旧 payload 照旧由横幅提示。Sparkle 为完成更新重新打开 App 时，控制面板不弹出，与登录时启动一样。菜单栏菜单与「General」节里的更新入口、提醒方式见[自动更新实现说明](AutomaticUpdates.md)。
 
 **SIP 没关时不注入，引导用户改用独立版。**（提案 [SIP 没关时引导用户改用独立版，并一键安装](../Evolutions/0010-system-integrity-protection-guide.md)）
 - **判断**：App 启动时经 `csr_get_active_config` 读一次内核正在执行的配置，改 SIP 要重启，所以不再重读。只有 `csrutil disable` 写入的那组标志都在才算关了；`csrutil enable --without …` 只放开一部分，照样算没关。读不出来时按「关了」处理，照旧去注入，失败由横幅报告。
