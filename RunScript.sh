@@ -270,11 +270,12 @@ log "Embedded standalone app: $(du -h "$STANDALONE_ARCHIVE_PATH" | cut -f1) zipp
 verify_update_settings() {
     local label="$1" information_property_list_path="$2" has_sparkle="$3"
     [[ "$has_sparkle" == yes ]] || fail "$label does not carry Sparkle.framework"
-    local feed_url
+    local feed_url public_key
     feed_url="$(plutil -extract SUFeedURL raw -o - "$information_property_list_path")" \
         || fail "$label's Info.plist has no SUFeedURL"
-    plutil -extract SUPublicEDKey raw -o - "$information_property_list_path" >/dev/null \
+    public_key="$(plutil -extract SUPublicEDKey raw -o - "$information_property_list_path")" \
         || fail "$label's Info.plist has no SUPublicEDKey"
+    [[ -n "$public_key" ]] || fail "$label's Info.plist has an empty SUPublicEDKey, so it would install no update"
     if [[ "$CONFIGURATION" == Release ]]; then
         [[ -n "$feed_url" ]] || fail "$label's release build has an empty SUFeedURL, so it would never update"
     fi

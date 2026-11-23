@@ -663,7 +663,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				UPDATE_FEED_URL = "https://github.com/OpenLaunchpad/LaunchpadAwakener/releases/latest/download/LaunchpadAwakenerAppcast.xml";
-				UPDATE_PUBLIC_ED_KEY = "";
+				UPDATE_PUBLIC_ED_KEY = "P0qf9O0kQEJksneoqaPYx5lTaJmz9rTzwAE9fkitCxY=";
 			};
 			name = Release;
 		};
@@ -845,7 +845,7 @@
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				UPDATE_FEED_URL = "https://github.com/OpenLaunchpad/LaunchpadAwakener/releases/latest/download/LaunchpadAppcast.xml";
-				UPDATE_PUBLIC_ED_KEY = "";
+				UPDATE_PUBLIC_ED_KEY = "P0qf9O0kQEJksneoqaPYx5lTaJmz9rTzwAE9fkitCxY=";
 			};
 			name = Release;
 		};

@@ -30,13 +30,20 @@ jobs:
           fetch-depth: 0
       - name: Check the signing and notarization secrets
         # They are organization secrets. On GitHub's Free plan those reach public repositories only, and
-        # without them AppRelease would look for a login keychain that a runner does not have.
+        # without them AppRelease would look for a login keychain that a runner does not have. The key that
+        # signs the update feeds is this repository's own secret; without it a published release would
+        # offer an update that no installed copy accepts.
         env:
           DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
           NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           if [[ -z "$DEVELOPER_ID_CERTIFICATE_BASE64" || -z "$NOTARY_KEY_BASE64" ]]; then
             echo "::error::The Developer ID certificate or the notary key is not available to this repository."
+            exit 1
+          fi
+          if [[ -z "$SPARKLE_PRIVATE_KEY" ]]; then
+            echo "::error::The key that signs the update feeds (SPARKLE_PRIVATE_KEY) is not available to this repository."
             exit 1
           fi
       - name: Release
@@ -47,6 +54,7 @@ jobs:
           APP_RELEASE_NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
           APP_RELEASE_NOTARY_KEY_IDENTIFIER: ${{ secrets.NOTARY_KEY_IDENTIFIER }}
           APP_RELEASE_NOTARY_ISSUER_IDENTIFIER: ${{ secrets.NOTARY_ISSUER_IDENTIFIER }}
+          APP_RELEASE_SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
           APP_RELEASE_OUTPUT_ROOT: ${{ runner.temp }}/AppRelease
         run: |
           engine_version=$(sed -nE 's/^release_engine_version=([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' Release.zsh)
