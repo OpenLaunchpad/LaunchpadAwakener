@@ -427,7 +427,7 @@ release_deploy_appcast() {
 3. **设置行**（已完成）—— `ControlPanelViewController`、`StandaloneSettings`
    - 行为：两版控制面板表单（SIP 开着、关着）都有两行更新设置；开发构建没有更新源时没有
    - 行为：切换开关写回 `automaticallyChecksForUpdates`
-4. **更新之后** —— `LaunchedBuildRecord`、`DockRestartAfterUpdate`、`UpdateRelaunchRecord`、`ApplicationDelegate`、独立版启动
+4. **更新之后**（已完成）—— `LaunchedBuildRecord`、`DockRestartAfterUpdate`、`UpdateRelaunchRecord`、`ApplicationDelegate`、独立版启动
    - 行为：`firstRecordedLaunchCountsAsNewBuild`
    - 行为：`sameBuildIsNotNew`
    - 行为：`differentBuildIsNew`
@@ -462,3 +462,4 @@ release_deploy_appcast() {
 | 2026-11-23 | 第 1 步完成 | `UpdateFeedResolution` 写成无实例的 `enum`（只有静态成员），多一个按 `Bundle` 与 `UserDefaults` 取值的便捷方法。`ApplicationUpdater` 在 Info.plist 没有 `SUPublicEDKey` 时也不启动：正式公钥到第 5 步才写进 Release 配置，在那之前的 Release 构建不该启动一个装不了任何更新、还会在启动时报错的 updater。updater 由 `start()` 启动而不是在构造时启动，好让 App 在建菜单之前决定。测试密钥不经钥匙串：系统的 LibreSSL 不支持 Ed25519，改用 Homebrew 的 OpenSSL 生成，私钥放在 agent 自己的目录 `/Volumes/DerivedData/Agents.noindex/claude/UpdateTesting/LaunchpadAwakener/`，`sign_update --ed-key-file` 实测能用它签名并通过 `--verify`。RunScript 构建后核对两个 App 都带 Sparkle、Info.plist 有更新源与公钥两个键，Release 构建的更新源不能为空。 |
 | 2026-11-23 | 第 2 步完成 | `PendingUpdate` 放在模块顶层，不嵌在 `ApplicationUpdater` 里（嵌进主线程隔离的类里，纯值的 `UpdateReminder` 用它就要跨隔离）；`UpdateReminder` 的事件方法叫 `updateWillShow(displayVersion:isUserInitiated:isShownBySparkle:isInImmediateFocus:)`，另有 `menuItemTitle(for:)` 给出两种菜单项标题。菜单项的目标是代理对象，它实现 `NSMenuItemValidation`：会校验菜单项的菜单（主菜单、Dock 菜单）每次打开时标题跟着提醒变，菜单栏菜单本来就每次重建。独立版「先收起界面、再显示 Sparkle 窗口」做成 `ApplicationUpdater.prepareToShowWindow` 闭包，由 `checkForUpdates()` 在激活 App 之前调用，所有入口（主菜单、Dock 菜单、设置）都经过它。独立版 Dock 菜单：有待装更新时它排第一、后跟分隔线；否则「Check for Updates…」排在「Settings…」下面。自检启动（`--self-check`）不启动 updater。Sparkle 的 `SPUUpdaterDelegate` 已是主线程隔离，`SPUStandardUserDriverDelegate` 不是，后者的遵循要写 `@preconcurrency`。 |
 | 2026-11-23 | 第 3 步完成 | 注入版控制面板「General」节在「Launch at login」两行之后加「Check for updates automatically」开关行与「Updates」行，SIP 开着、关着两版表单都有；独立版设置窗口在「Open at Login」下面加「Check for Updates Automatically:」与「Updates:」。「Updates」行的副标题平时是版本号与构建号，有待装更新时变成「Version <版本> is available.」，按钮从「Check Now」变成「Install…」（`observe` 跟着 `pendingUpdate`）。开关的状态在控制面板每次刷新、设置窗口每次出现时从 Sparkle 读：它的窗口里的勾选框也会改这个设置。两边都没有界面测试：项目里本来就没有控制面板与设置窗口的测试，构造整个控制面板要连带 daemon、注入这些控制器；这一步只靠编译与测试机上核对。 |
+| 2026-11-23 | 第 4 步完成 | `DockRestartAfterUpdate` 照改动地图单独成文件。「第一次启动新构建」的标记在启动序列走到重连驻留 payload 之后才清掉：daemon 还在等批准、序列中途停下时，等用户批准回来、序列再跑到这里时照样重启一次 Dock。重启 Dock 之后序列直接进入 `.ready`，不再另外注入：`restartTargets()` 自己会注入新拉起的 Dock。独立版的启动判断写成 `StandaloneLaunchShowing.showsOnLaunch(wasLaunchedAtLogin:wasRelaunchedForUpdate:)`，不显示时记一条日志说明原因。两个 App 的启动日志都写明这次是登录时启动、为完成更新重新打开，还是用户打开，以及是否第一次启动这个构建。 |

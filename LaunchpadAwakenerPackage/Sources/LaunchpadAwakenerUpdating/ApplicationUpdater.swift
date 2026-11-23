@@ -75,7 +75,11 @@ public final class ApplicationUpdater {
         let shortVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let buildVersion = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
         currentVersionDescription = "Version \(shortVersion) (\(buildVersion))"
-        let delegate = UpdaterDelegate(feedURL: feedURL, scheduledUpdatePresentation: scheduledUpdatePresentation)
+        let delegate = UpdaterDelegate(
+            feedURL: feedURL,
+            scheduledUpdatePresentation: scheduledUpdatePresentation,
+            relaunchRecord: UpdateRelaunchRecord(defaults: defaults)
+        )
         self.delegate = delegate
         // Sparkle keeps its delegates weakly: this object holds the one it is given.
         updaterController = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: delegate, userDriverDelegate: delegate)
@@ -131,14 +135,16 @@ public final class ApplicationUpdater {
 private final class UpdaterDelegate: NSObject {
     let feedURL: URL?
     let scheduledUpdatePresentation: ApplicationUpdater.ScheduledUpdatePresentation
+    let relaunchRecord: UpdateRelaunchRecord
     weak var applicationUpdater: ApplicationUpdater?
     /// What Sparkle proposed for the scheduled update it is about to show; it says so only when asking
     /// whether to show it, one call before the one that shows it.
     private var isScheduledUpdateInImmediateFocus = false
 
-    init(feedURL: URL?, scheduledUpdatePresentation: ApplicationUpdater.ScheduledUpdatePresentation) {
+    init(feedURL: URL?, scheduledUpdatePresentation: ApplicationUpdater.ScheduledUpdatePresentation, relaunchRecord: UpdateRelaunchRecord) {
         self.feedURL = feedURL
         self.scheduledUpdatePresentation = scheduledUpdatePresentation
+        self.relaunchRecord = relaunchRecord
     }
 
     @objc func checkForUpdatesFromMenuItem(_ sender: Any?) {
@@ -160,6 +166,11 @@ extension UpdaterDelegate: SPUUpdaterDelegate {
     /// launch, which Sparkle would not read by itself.
     func feedURLString(for updater: SPUUpdater) -> String? {
         feedURL?.absoluteString
+    }
+
+    /// Sparkle is about to quit the app and open the updated copy: the next launch finishes the update.
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        relaunchRecord.noteRelaunch()
     }
 }
 

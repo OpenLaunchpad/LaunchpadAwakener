@@ -149,8 +149,19 @@ public final class StandaloneLaunchpad {
     }
 }
 
+/// Whether the standalone app shows the springboard as it launches.
+enum StandaloneLaunchShowing {
+    /// Opened by the user, it shows at once. Opened at login it waits in the background for the first click
+    /// on its Dock icon; reopened by Sparkle to finish an update too, since the user was busy with
+    /// something else when they let it install.
+    static func showsOnLaunch(wasLaunchedAtLogin: Bool, wasRelaunchedForUpdate: Bool) -> Bool {
+        !wasLaunchedAtLogin && !wasRelaunchedForUpdate
+    }
+}
+
 /// The standalone app's delegate: shows the springboard when the app is opened or its Dock icon is
 /// clicked, and hides it when another application becomes active.
+@Loggable(subsystem: "com.MxIris.LaunchpadAwakener", category: "StandaloneApplicationDelegate")
 @MainActor
 public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegate {
     override public init() {
@@ -161,6 +172,7 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
         // Read first: the open event that tells a launch at login apart is only current until launching
         // finishes.
         let wasLaunchedAtLogin = ApplicationLaunch.wasLaunchedAtLogin
+        let wasRelaunchedForUpdate = UpdateRelaunchRecord().takeRelaunchNote()
         let launchpad = StandaloneLaunchpad.shared
         // A self-check launch leaves after fifteen seconds and must not look for updates meanwhile.
         if !StandaloneLaunchpad.isSelfCheckLaunch {
@@ -184,8 +196,10 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
         observe {
             NSApp.dockTile.badgeLabel = updater.pendingUpdate == nil ? nil : "1"
         }
-        // Opened at login, it waits in the background for the first click on its Dock icon.
-        guard !wasLaunchedAtLogin else { return }
+        guard StandaloneLaunchShowing.showsOnLaunch(wasLaunchedAtLogin: wasLaunchedAtLogin, wasRelaunchedForUpdate: wasRelaunchedForUpdate) else {
+            #log(.info, "Launched \(wasLaunchedAtLogin ? "at login" : "to finish an update", privacy: .public): waiting for a click on the Dock icon")
+            return
+        }
         launchpad.show(reason: "launched")
     }
 
