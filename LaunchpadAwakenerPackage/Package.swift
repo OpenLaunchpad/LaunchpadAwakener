@@ -78,6 +78,10 @@ let package = Package(
         // upstream and adds the AppKit bindings this package uses (table and outline selection).
         .package(url: "https://github.com/MxIris-Library-Forks/swift-navigation", from: "2.11.101"),
         .package(url: "https://github.com/SnapKit/SnapKit", .upToNextMajor(from: "6.0.0")),
+        // Both apps update themselves through it, each from a feed of its own on the GitHub Release. A
+        // binary framework; only the two apps link it. Its generate_appcast, which AppRelease runs while
+        // publishing, comes from this same package, so feed and framework always agree.
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.1"),
     ],
     targets: [
         // Names, versions and paths shared by all three binaries. No dependencies on purpose —
@@ -137,6 +141,17 @@ let package = Package(
             ]
         ),
 
+        // How both apps update themselves: Sparkle's updater, the reminders a background app shows of an
+        // update a scheduled check found, and the record of a relaunch that finished an update. Linked by
+        // the injected app's interface and by the standalone app, so nothing else carries Sparkle.
+        .target(
+            name: "LaunchpadAwakenerUpdating",
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "OSToolbox", package: "FrameworkToolbox"),
+            ]
+        ),
+
         // The injected app's interface: its delegate, the control panel, the menu bar item and the
         // organizer window. What they show and decide comes from the app core; this module only lays it
         // out and forwards the user's actions.
@@ -145,6 +160,7 @@ let package = Package(
             dependencies: [
                 "LaunchpadAwakenerAppCore",
                 "LaunchpadAwakenerSharedUI",
+                "LaunchpadAwakenerUpdating",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
                 .product(name: "UIFoundation", package: "UIFoundation"),
                 .product(name: "UIFoundationToolbox", package: "UIFoundation"),
@@ -219,6 +235,7 @@ let package = Package(
                 "LaunchpadAwakenerPrivateInterfaces",
                 "LaunchpadAwakenerSpringboardCore",
                 "LaunchpadAwakenerSharedUI",
+                "LaunchpadAwakenerUpdating",
                 .product(name: "OSToolbox", package: "FrameworkToolbox"),
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
                 .product(name: "UIFoundation", package: "UIFoundation"),
@@ -271,6 +288,13 @@ let package = Package(
         .testTarget(
             name: "LaunchpadAwakenerSharedUITests",
             dependencies: ["LaunchpadAwakenerSharedUI"]
+        ),
+
+        // The updater's rules: which feed a build reads, when a background app reminds of an update rather
+        // than letting Sparkle show it, the relaunch record. Nothing here checks for an update.
+        .testTarget(
+            name: "LaunchpadAwakenerUpdatingTests",
+            dependencies: ["LaunchpadAwakenerUpdating"]
         ),
 
         // The organizer window's views in a window that is never ordered front: where a drop on the

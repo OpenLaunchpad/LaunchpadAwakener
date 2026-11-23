@@ -1,6 +1,6 @@
 # Draft - 两个 App 用 Sparkle 自动更新
 
-- **状态**: Accepted
+- **状态**: In Progress
 - **作者**: JH
 - **创建日期**: 2026-11-23
 - **最后更新**: 2026-11-23
@@ -242,9 +242,12 @@ observe { NSApp.dockTile.badgeLabel = updater.pendingUpdate == nil ? nil : "1" }
 - `updaterWillRelaunchApplication(_:)`：`UpdateRelaunchRecord(defaults:).noteRelaunch()`。
 
 ```swift
-public struct UpdateFeedResolution: Sendable {
+public enum UpdateFeedResolution {
+    public static let overrideDefaultsKey = "UpdateFeedURL"
+    public static let allowsOverride: Bool   // true only in a development build
     /// The feed to check, or nil when there is none: a development build launched without an override.
     public static func feedURL(infoDictionaryValue: String?, overrideValue: String?, allowsOverride: Bool) -> URL?
+    public static func feedURL(of bundle: Bundle, defaults: UserDefaults) -> URL?
 }
 
 public struct UpdateReminder: Equatable, Sendable {
@@ -404,7 +407,7 @@ release_deploy_appcast() {
 
 0. **提案入库** —— 改动地图最后一行
    - 行为：无代码变化。
-1. **Sparkle 骨架与更新源** —— `Package.swift`、`ApplicationUpdater`（只建 updater、不接 UI）、`UpdateFeedResolution`、两个 `Info.plist`、`project.pbxproj` 的构建设置、测试密钥
+1. **Sparkle 骨架与更新源**（已完成）—— `Package.swift`、`ApplicationUpdater`（只建 updater、不接 UI）、`UpdateFeedResolution`、两个 `Info.plist`、`project.pbxproj` 的构建设置、测试密钥
    - 行为：`releaseBuildUsesTheBundledFeed`
    - 行为：`developmentBuildWithoutOverrideHasNoFeed`
    - 行为：`developmentBuildUsesTheOverrideFeed`
@@ -456,3 +459,4 @@ release_deploy_appcast() {
 |------|------|------|
 | 2026-11-23 | Created as Draft | 用户要给 App 加自动更新。定下两个 App 各自用 Sparkle 更新、各有一个更新源，注入版更新后自动重启一次 Dock。自行决定：每天自动检查、弹窗确认后安装，更新源挂在 GitHub Release 附件上，开发构建不检查更新，先给 AppRelease 加上发布说明进 appcast 与第二个 feed 的能力。 |
 | 2026-11-23 | Accepted | 用户批准，开始实现。功能分支 `feature/automatic-updates`，从 main 切出。 |
+| 2026-11-23 | 第 1 步完成 | `UpdateFeedResolution` 写成无实例的 `enum`（只有静态成员），多一个按 `Bundle` 与 `UserDefaults` 取值的便捷方法。`ApplicationUpdater` 在 Info.plist 没有 `SUPublicEDKey` 时也不启动：正式公钥到第 5 步才写进 Release 配置，在那之前的 Release 构建不该启动一个装不了任何更新、还会在启动时报错的 updater。updater 由 `start()` 启动而不是在构造时启动，好让 App 在建菜单之前决定。测试密钥不经钥匙串：系统的 LibreSSL 不支持 Ed25519，改用 Homebrew 的 OpenSSL 生成，私钥放在 agent 自己的目录 `/Volumes/DerivedData/Agents.noindex/claude/UpdateTesting/LaunchpadAwakener/`，`sign_update --ed-key-file` 实测能用它签名并通过 `--verify`。RunScript 构建后核对两个 App 都带 Sparkle、Info.plist 有更新源与公钥两个键，Release 构建的更新源不能为空。 |

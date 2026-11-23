@@ -262,6 +262,34 @@ zipinfo -1 "$STANDALONE_ARCHIVE_PATH" "Launchpad.app/Contents/MacOS/Launchpad" >
     || fail "$STANDALONE_ARCHIVE_PATH does not hold Launchpad.app"
 log "Embedded standalone app: $(du -h "$STANDALONE_ARCHIVE_PATH" | cut -f1) zipped"
 
+# --- How both apps update ------------------------------------------------------
+#
+# Each app carries Sparkle and names its feed and the key its updates are signed with in its Info.plist,
+# filled in from the UPDATE_FEED_URL and UPDATE_PUBLIC_ED_KEY build settings. A release build without a
+# feed never checks for updates, and nothing else fails; a development build has none on purpose.
+verify_update_settings() {
+    local label="$1" information_property_list_path="$2" has_sparkle="$3"
+    [[ "$has_sparkle" == yes ]] || fail "$label does not carry Sparkle.framework"
+    local feed_url
+    feed_url="$(plutil -extract SUFeedURL raw -o - "$information_property_list_path")" \
+        || fail "$label's Info.plist has no SUFeedURL"
+    plutil -extract SUPublicEDKey raw -o - "$information_property_list_path" >/dev/null \
+        || fail "$label's Info.plist has no SUPublicEDKey"
+    if [[ "$CONFIGURATION" == Release ]]; then
+        [[ -n "$feed_url" ]] || fail "$label's release build has an empty SUFeedURL, so it would never update"
+    fi
+    log "  $label: feed ${feed_url:-none (development build)}"
+}
+
+log "Verifying update settings:"
+verify_update_settings "app       " "$APP_PATH/Contents/Info.plist" \
+    "$([[ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]] && echo yes)"
+STANDALONE_INFORMATION_PROPERTY_LIST_PATH="$(mktemp -t LaunchpadInfo)"
+unzip -p "$STANDALONE_ARCHIVE_PATH" Launchpad.app/Contents/Info.plist > "$STANDALONE_INFORMATION_PROPERTY_LIST_PATH"
+verify_update_settings "standalone" "$STANDALONE_INFORMATION_PROPERTY_LIST_PATH" \
+    "$(zipinfo -1 "$STANDALONE_ARCHIVE_PATH" 'Launchpad.app/Contents/Frameworks/Sparkle.framework/*' >/dev/null 2>&1 && echo yes)"
+rm -f "$STANDALONE_INFORMATION_PROPERTY_LIST_PATH"
+
 # --- The icon the Dock's Apps tile is given ----------------------------------
 #
 # Copied out of the standalone app by the same phase: the Launchpad icon without the gear this app's own

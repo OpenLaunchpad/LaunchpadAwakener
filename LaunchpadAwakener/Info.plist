@@ -7,5 +7,15 @@
 	     here rather than only switching at runtime is what keeps a Dock icon from flashing on launch. -->
 	<key>LSUIElement</key>
 	<true/>
+	<!-- Sparkle: where this app's updates are listed, the key their signatures must match, and checking
+	     once a day without first asking. The two build settings differ per configuration: a development
+	     build has no feed, so it never offers the shipped app as an update of itself, and a key of its own
+	     for the test machine (Documentations/Internal/AutomaticUpdates.md). -->
+	<key>SUFeedURL</key>
+	<string>$(UPDATE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(UPDATE_PUBLIC_ED_KEY)</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 </dict>
 </plist>

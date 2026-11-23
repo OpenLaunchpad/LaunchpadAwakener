@@ -100,6 +100,13 @@
 			);
 			target = 1A5C00000000000000000100 /* LaunchpadAwakener */;
 		};
+		1A5C00000000000000000406 /* Exceptions for "LaunchpadAwakenerStandalone" folder in "LaunchpadAwakenerStandalone" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 1A5C00000000000000000104 /* LaunchpadAwakenerStandalone */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -128,6 +135,9 @@
 		};
 		1A5C00000000000000000405 /* LaunchpadAwakenerStandalone */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1A5C00000000000000000406 /* Exceptions for "LaunchpadAwakenerStandalone" folder in "LaunchpadAwakenerStandalone" target */,
+			);
 			path = LaunchpadAwakenerStandalone;
 			sourceTree = "<group>";
 		};
@@ -625,6 +635,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.MxIris.LaunchpadAwakener.debug;
 				PRODUCT_NAME = LaunchpadAwakenerDebug;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				UPDATE_FEED_URL = "";
+				UPDATE_PUBLIC_ED_KEY = "Oq/xx4R7v9Bl0OBNXF580IMwMPt9IJ8Q1KBxRv2oOBw=";
 			};
 			name = Debug;
 		};
@@ -650,6 +662,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.MxIris.LaunchpadAwakener;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				UPDATE_FEED_URL = "https://github.com/OpenLaunchpad/LaunchpadAwakener/releases/latest/download/LaunchpadAwakenerAppcast.xml";
+				UPDATE_PUBLIC_ED_KEY = "";
 			};
 			name = Release;
 		};
@@ -784,6 +798,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LaunchpadAwakenerStandalone/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Launchpad;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -798,6 +813,8 @@
 				PRODUCT_NAME = Launchpad;
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				UPDATE_FEED_URL = "";
+				UPDATE_PUBLIC_ED_KEY = "Oq/xx4R7v9Bl0OBNXF580IMwMPt9IJ8Q1KBxRv2oOBw=";
 			};
 			name = Debug;
 		};
@@ -812,6 +829,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LaunchpadAwakenerStandalone/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Launchpad;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -826,6 +844,8 @@
 				PRODUCT_NAME = Launchpad;
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				UPDATE_FEED_URL = "https://github.com/OpenLaunchpad/LaunchpadAwakener/releases/latest/download/LaunchpadAppcast.xml";
+				UPDATE_PUBLIC_ED_KEY = "";
 			};
 			name = Release;
 		};
