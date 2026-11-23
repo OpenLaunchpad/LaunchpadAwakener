@@ -1,6 +1,8 @@
 import AppKit
+import AppKitNavigation
 import KeyboardShortcuts
 import LaunchpadAwakenerSharedUI
+import LaunchpadAwakenerUpdating
 import OSToolbox
 import ServiceManagement
 import SnapKit
@@ -28,8 +30,8 @@ enum StandaloneSettings {
     }
 }
 
-/// The settings window: the shortcut that shows Launchpad, and whether it opens at login. A fixed size,
-/// as SwiftUI's Settings window was.
+/// The settings window: the shortcut that shows Launchpad, whether it opens at login, and its updates. A
+/// fixed size, as SwiftUI's Settings window was.
 private final class StandaloneSettingsWindowController: XiblessWindowController<NSWindow> {
     private let settingsViewController = StandaloneSettingsViewController()
 
@@ -52,12 +54,18 @@ private final class StandaloneSettingsWindowController: XiblessWindowController<
     }
 }
 
-/// The settings' one grouped section: the shortcut recorder, and the switch for opening at login.
+/// The settings' one grouped section: the shortcut recorder, the switch for opening at login, and the
+/// app's updates.
 private final class StandaloneSettingsViewController: XiblessViewController<XiblessView> {
     static let width: CGFloat = 380
 
     private let openAtLoginSwitch = NSSwitch()
+    private let automaticUpdatesSwitch = NSSwitch()
+    private let checkForUpdatesButton = NSButton(title: "Check Now", target: nil, action: nil)
     private let formView = FormView()
+    private var updater: ApplicationUpdater {
+        StandaloneLaunchpad.shared.updater
+    }
 
     /// The height that shows the form whole.
     func fittingContentHeight() -> CGFloat {
@@ -73,11 +81,25 @@ private final class StandaloneSettingsViewController: XiblessViewController<Xibl
             self?.showOpensAtLogin()
         }
 
+        automaticUpdatesSwitch.box.setAction { [weak self] toggle in
+            self?.updater.automaticallyChecksForUpdates = toggle?.state == .on
+        }
+        checkForUpdatesButton.controlSize = .small
+        checkForUpdatesButton.box.setAction { [weak self] _ in
+            self?.updater.checkForUpdates()
+        }
+
+        let updatesRow = FormRowView(title: "Updates:", subtitle: updater.currentVersionDescription, accessoryView: checkForUpdatesButton)
+        // None in a development build launched without a feed, where nothing checks.
+        let updateRows = updater.isStarted ? [
+            FormRowView(title: "Check for Updates Automatically:", accessoryView: automaticUpdatesSwitch),
+            updatesRow,
+        ] : []
         formView.sections = [
             FormSectionView(rows: [
                 FormRowView(title: "Show Launchpad:", accessoryView: recorder),
                 FormRowView(title: "Open at Login", accessoryView: openAtLoginSwitch),
-            ]),
+            ] + updateRows),
         ]
         hierarchy {
             formView
@@ -85,12 +107,25 @@ private final class StandaloneSettingsViewController: XiblessViewController<Xibl
         formView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
         }
+
+        observe { [weak self] in
+            guard let self else { return }
+            if let pendingUpdate = updater.pendingUpdate {
+                updatesRow.subtitle = "Version \(pendingUpdate.displayVersion) is available."
+                checkForUpdatesButton.title = "Install…"
+            } else {
+                updatesRow.subtitle = updater.currentVersionDescription
+                checkForUpdatesButton.title = "Check Now"
+            }
+        }
     }
 
     override func viewWillAppear() {
         super.viewWillAppear()
         // The user can take the app out of Open at Login in System Settings at any time; read it again.
         showOpensAtLogin()
+        // Sparkle's own setting, which its window's checkbox changes too.
+        automaticUpdatesSwitch.state = updater.automaticallyChecksForUpdates ? .on : .off
     }
 
     private func showOpensAtLogin() {

@@ -40,6 +40,7 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             killSwitchController: killSwitchController,
             dockAppsIconController: dockAppsIconController,
             standaloneLaunchpadController: standaloneLaunchpadController,
+            applicationUpdater: applicationUpdater,
             launchProgress: launchProgress,
             isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
             showOrganizer: { [weak self] in self?.showOrganizer() }
