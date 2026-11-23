@@ -1,0 +1,2 @@
+# The update feeds AppRelease writes while publishing (Release.zsh), then uploads to the GitHub Release.
+*.xml

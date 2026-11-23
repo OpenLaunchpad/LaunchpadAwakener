@@ -1,6 +1,6 @@
 # How AppRelease (https://github.com/Mx-Iris/AppRelease) ships LaunchpadAwakener: run `app-release all`.
 # Every setting is described in AppRelease's README.
-release_engine_version=1.0.0
+release_engine_version=1.3.0
 
 release_workspace=LaunchpadAwakener.xcworkspace
 release_scheme=LaunchpadAwakener
@@ -18,7 +18,55 @@ release_archive_arguments=(
     OTHER_CODE_SIGN_FLAGS=--timestamp
 )
 release_notary_keychain_profile=notarytool-password
-release_publishers=(github-release)
+
+# Both apps update themselves through Sparkle, each from a feed of its own hanging on the newest release
+# (releases/latest/download/<feed>, the apps' SUFeedURL): the app's written by the sparkle-appcast
+# publisher, the standalone app's by release_deploy_appcast. Each feed lists this release only, which is
+# all Sparkle reads, so nothing is committed; Appcasts/ ignores the files written into it.
+release_publishers=(github-release sparkle-appcast)
+release_appcast_path=Appcasts/LaunchpadAwakenerAppcast.xml
+# Written before the tag is pushed (CLAUDE.md, "Releasing"): the GitHub Release shows them, and so does the
+# update window of both apps.
+release_notes_path='ReleaseNotes/{tag_version}.md'
+release_appcast_embeds_release_notes=true
+
+# A feed written by an earlier run of the same release would keep its item; start from empty ones.
+release_preflight() {
+    [[ $app_release_publishes == true ]] || return 0
+    rm -f "$app_release_project_directory"/Appcasts/*.xml(N)
+}
+
+# The standalone app's own archive, beside the app's on the release, for its updates.
+launchpad_awakener_standalone_archive_name() {
+    print -r -- "Launchpad-$app_release_marketing_version-$app_release_build_number.zip"
+}
+
+# The standalone app ships inside the app's resources, which export cannot reach: taken out of the
+# exported app, stapled — the notary service registered it with the app, looking inside the zip — and
+# zipped again as a notarized product, so the engine checks the ticket and Gatekeeper's verdict on it.
+release_after_product() {
+    local extraction_directory=$app_release_run_directory/StandaloneLaunchpad
+    rm -rf "$extraction_directory"
+    mkdir -p "$extraction_directory"
+    ditto -x -k "$app_release_application_path/Contents/Resources/Launchpad.zip" "$extraction_directory"
+    xcrun stapler staple "$extraction_directory/Launchpad.app"
+    local archive_path=$extraction_directory/$(launchpad_awakener_standalone_archive_name)
+    ditto -c -k --sequesterRsrc --keepParent "$extraction_directory/Launchpad.app" "$archive_path"
+    app_release_add_product "$archive_path"
+    app_release_detail "standalone app: $(launchpad_awakener_standalone_archive_name)"
+}
+
+# After the app's feed: the standalone app's from its archive, with the same notes, and then both onto the
+# release, where the apps look for them.
+release_deploy_appcast() {
+    local application_feed_path=$1
+    local standalone_feed_path=${application_feed_path:h}/LaunchpadAppcast.xml
+    app_release_generate_appcast "$app_release_run_directory/Products/$(launchpad_awakener_standalone_archive_name)" \
+        "$standalone_feed_path" "$app_release_project_directory/ReleaseNotes/${app_release_tag#v}.md"
+    gh release upload "$app_release_tag" --repo "$app_release_github_repository" --clobber \
+        "$application_feed_path" "$standalone_feed_path"
+    app_release_detail "feeds on the release: ${application_feed_path:t}, ${standalone_feed_path:t}"
+}
 
 # What the engine's checks do not cover: injection needs an arm64e slice in the daemon and the payload,
 # both launchd property lists must start executables the app carries, and the standalone app must be in
