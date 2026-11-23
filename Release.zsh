@@ -93,18 +93,40 @@ launchpad_awakener_verify_every_signature() {
     app_release_detail "${bundle_path:t}: all $code_count Mach-O files signed with Developer ID and a timestamp"
 }
 
+# Both apps update themselves through Sparkle: its helpers must carry this team's signature and the
+# hardened runtime like the app around them, or the notary service rejects the app, and the Info.plist must
+# name a feed and the key the updates are signed with, or the shipped app never updates.
+launchpad_awakener_verify_updates() {
+    local application_path=$1
+    local sparkle_path=$application_path/Contents/Frameworks/Sparkle.framework/Versions/B
+    [[ -d $sparkle_path ]] || app_release_fail "${application_path:t} does not carry Sparkle.framework"
+    local code_path
+    for code_path in "$sparkle_path"/XPCServices/Installer.xpc "$sparkle_path"/XPCServices/Downloader.xpc \
+        "$sparkle_path"/Autoupdate "$sparkle_path"/Updater.app; do
+        launchpad_awakener_verify_signature "$code_path" hardened-runtime
+    done
+    local key value
+    for key in SUFeedURL SUPublicEDKey; do
+        value=$(plutil -extract "$key" raw -o - "$application_path/Contents/Info.plist" 2> /dev/null) || value=
+        [[ -n $value ]] || app_release_fail "${application_path:t} has no $key, so it would never update"
+    done
+    app_release_detail "${application_path:t}: Sparkle signed, feed $(plutil -extract SUFeedURL raw -o - "$application_path/Contents/Info.plist")"
+}
+
 release_verify_export() {
     local application_path=$1
     launchpad_awakener_verify_contents "$application_path"
     launchpad_awakener_verify_signature "$application_path/Contents/Library/LaunchServices/LaunchpadAwakenerDaemon" hardened-runtime
     launchpad_awakener_verify_signature "$application_path/Contents/Library/LoginItems/LaunchpadAwakenerTextInput.app" hardened-runtime
     launchpad_awakener_verify_signature "$application_path/Contents/Resources/LaunchpadAwakenerPayload.framework"
+    launchpad_awakener_verify_updates "$application_path"
     launchpad_awakener_verify_every_signature "$application_path"
 
     local extraction_directory
     extraction_directory=$(mktemp -d "${TMPDIR:-/tmp}/LaunchpadAwakenerRelease.XXXXXX")
     ditto -x -k "$application_path/Contents/Resources/Launchpad.zip" "$extraction_directory"
     launchpad_awakener_verify_signature "$extraction_directory/Launchpad.app" hardened-runtime
+    launchpad_awakener_verify_updates "$extraction_directory/Launchpad.app"
     launchpad_awakener_verify_every_signature "$extraction_directory/Launchpad.app"
     rm -rf "$extraction_directory"
 }
