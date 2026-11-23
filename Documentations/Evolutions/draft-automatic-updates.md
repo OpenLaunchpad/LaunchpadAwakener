@@ -473,12 +473,12 @@ AppRelease 1.3.0 新增两样，都是可选的（按它的演进策略算 minor
    - 行为：`standaloneStaysHiddenWhenRelaunchedForAnUpdate`
    - 行为：`standaloneStaysHiddenWhenLaunchedAtLogin`
    - 行为：`standaloneShowsWhenOpenedByTheUser`
-5. **发布** —— AppRelease 1.3.0、`Release.zsh`、`Release.yml`、「Embed Standalone Launchpad」、`ReleaseNotes/`、正式密钥与 secret（设之前问用户）
+5. **发布**（已完成）—— AppRelease 1.3.0、`Release.zsh`、`Release.yml`、「Embed Standalone Launchpad」、`ReleaseNotes/`、正式密钥与 secret（设之前问用户）
    - 行为：AppRelease 的测试覆盖发布说明进 appcast、`app_release_generate_appcast` 生成第二个 feed
    - 行为：手动跑一次 `Release.yml` 演练：通过，产物里有 `Launchpad-<版本>-<构建号>.zip`，其中的独立版已装订公证票据（`stapler validate`）、`spctl -a -vv` 判为 Notarized
    - 行为：`release_verify_export` 对两个 App 的 Sparkle 嵌套代码都通过
    - 行为：CI 的单元测试与 Release 构建通过
-6. **测试机验证与文档** —— 实现说明、`CLAUDE.md`、两份实现说明的更新、README、索引
+6. **测试机验证与文档**（已完成）—— 实现说明、`CLAUDE.md`、两份实现说明的更新、README、索引
    - 行为：MacBook 上照「测试机上的验证」走通两个 App 的下载、退出时安装、重新打开；注入版重启 Dock 一次且注入正常，daemon 没要求重新批准
    - 行为：文档登记完毕
 
@@ -501,3 +501,6 @@ AppRelease 1.3.0 新增两样，都是可选的（按它的演进策略算 minor
 | 2026-11-23 | 第 6 步：测试机上走通更新 | MacBook（27.2.1，26B131）上用这条分支的两版开发构建实测「下载后退出时安装」：A 版构建 3，B 版构建 4、版本 1.1.2，另把 `DYLIB_CURRENT_VERSION` 改成 2 让 payload 的 UUID 不同（payload 的版本号写死为 1，只改构建号时 payload 可能不变，那时本来也不需要重启 Dock）。B 版用测试密钥签名，`generate_appcast --embed-release-notes` 生成两个更新源，Markdown 发布说明以 `sparkle:format="markdown"` 嵌进条目；在 MacBook 本机端口用 `python3 -m http.server` 提供。注入版：带 `-UpdateFeedURL` 打开 A 版，Sparkle 立即检查（预置了很早的 `SULastCheckTime`）、下载 B 版，「EdDSA signature is correct」；退出后装成 1.1.2（4）；再打开时日志为「Launched by the user, build 4 for the first time」与「First launch of this build with an older payload in the Dock: restarting the Dock once」，Dock 进程换新、新 payload 注入、23 个方法签名零不符、hook 全部装上，daemon 没有要求重新批准；再退出重开只记「build 4」，Dock 不再重启。独立版：预置重新打开的记录后打开 A 版，日志为「Launched to finish an update: waiting for a click on the Dock icon」，没有盖住屏幕；下载、校验、退出后装成 1.1.2（4），`codesign --verify --deep --strict` 通过。开发构建里主 App 的 Sparkle 辅助程序保留厂商签名，Sparkle 因此记「Skipping atomic rename/swap」改用非原子替换，照样装好；导出的正式版会被整体重签，不受影响。「Install and Relaunch」（会写重新打开记录的那条路）要点 Sparkle 窗口里的按钮，属于交互操作，没有做。验证后测试机换回 A 版，删掉测试用的偏好与更新源。 |
 | 2026-11-23 | 第 5 步：密钥与 AppRelease 1.3.0 | 用户同意由 agent 生成正式密钥、设仓库 secret，并改 AppRelease、推 main、打 1.3.0。两把密钥都用 Homebrew 的 OpenSSL 生成，不经 `generate_keys`（它把私钥存进登录钥匙串，可能弹授权框）；正式私钥存成仓库 secret `SPARKLE_PRIVATE_KEY`，备份文件 `~/LaunchpadAwakener-SparklePrivateKey.txt` 交用户转存。`Release.yml` 第一步也检查这个 secret。AppRelease 的嵌入发布说明做成可选变量 `release_appcast_embeds_release_notes`，而不是有说明就嵌：后者会改变已有项目（LyricsX）的 appcast 输出，按它的演进策略算破坏性变更；发布器改用新的公开函数 `app_release_generate_appcast`，每个压缩包一个暂存目录。`release_appcast_path` 改放在提交进仓库的 `Appcasts/`（`.gitignore` 忽略 `*.xml`）：引擎在 `target` 段就检查它的目录存在，CI 的输出目录在 runner 临时目录里，`build/` 不存在。发布说明从这一版起写在 `ReleaseNotes/<版本>.md`，已发布的三版从 Release 补进来。Release 标题仍要手动改：引擎没有设标题的选项，不为这个再改引擎。 |
 | 2026-11-23 | 第 6 步：文档 | 新写实现说明 `Documentations/Internal/AutomaticUpdates.md`；项目 `CLAUDE.md` 的结构表加 `LaunchpadAwakenerUpdating`，「发布」一节改成打 tag 前写发布说明、核对 Release 上有两个 zip 与两个更新源，记下签名私钥的 secret 与丢失的后果；控制面板与独立版的实现说明补上更新入口、提醒与更新后重启 Dock；术语表登记「Appcast（更新源）」「Gentle reminders（温和提醒）」；README 加「Updates」一节与 Sparkle 的致谢。 |
+| 2026-11-23 | 第 5 步：发布演练通过 | 功能分支不升版本号，另开临时分支把版本改成 1.2（构建 4）、放一份演练用的 `ReleaseNotes/1.2.md`，手动跑 `Release.yml`（只跑到打 zip，不发布）：一次通过。日志里两个 App 都是「Sparkle signed」（四样嵌套代码为本团队 Developer ID、带时间戳与硬化运行时）且更新源不空；`release_after_product` 从导出的 App 里取出独立版、`stapler staple` 成功，引擎核对 `Launchpad-1.2-4.zip`「stapled, and Gatekeeper takes it for notarized」——公证服务确实登记了压在注入版资源里的独立版，不必单独提交公证。本机对同一分支 `app-release all --dry-run --publish` 的输出显示发布说明会以 `LaunchpadAwakener-1.2-4.md` 嵌进注入版的更新源、`generate_appcast` 取自 Xcode 构建目录里的 Sparkle 包；预演不调用钩子，所以独立版的更新源与上传只在真正发布时第一次运行（`app_release_generate_appcast` 本身由 AppRelease 的测试覆盖）。第一个带 Sparkle 的版本没有已装的用户会读它的更新源，它出错也不影响任何人。演练完删掉临时分支。 |
+| 2026-11-23 | 验证 | 最终状态下 `swift test` 709 个测试通过（这次新增 27 个），`RunScript.sh` 的完整构建、三个架构切片与两个 App 更新设置的核对通过。 |
+| 2026-11-23 | 实现完成，待用户看过后收尾 | 配了实现说明 `Documentations/Internal/AutomaticUpdates.md`（登记在头部「配套文档」）；新术语「Appcast（更新源）」「Gentle reminders（温和提醒）」已登记进术语表。控制面板与独立版设置里的两行、Dock 角标与菜单项没有在屏幕上看过，「Install and Relaunch」那条路没有实测，都要交互操作。 |

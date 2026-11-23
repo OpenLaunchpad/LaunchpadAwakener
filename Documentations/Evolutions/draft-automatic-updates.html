@@ -163,7 +163,7 @@ details[open] > summary { border-bottom: 1px solid var(--separator); }
   <p class="eyebrow"><span class="crumb">LaunchpadAwakener</span><span class="crumb">Evolutions</span><span class="crumb">Draft</span></p>
   <h1><span class="proposal-number">Draft</span> 两个 App 用 Sparkle 自动更新</h1>
   <dl class="meta">
-    <div><dt>状态</dt><dd><span class="status status-accepted">Accepted</span></dd></div>
+    <div><dt>状态</dt><dd><span class="status status-in-progress">In Progress</span></dd></div>
     <div><dt>最后更新</dt><dd>2026-11-23</dd></div>
     <div><dt>项目类型</dt><dd>App</dd></div>
     <div><dt>原文</dt><dd><code>draft-automatic-updates.md</code></dd></div>
@@ -196,9 +196,10 @@ details[open] > summary { border-bottom: 1px solid var(--separator); }
 <section id="decide">
   <h2>要你定</h2>
   <div class="callout">
-    <p class="callout-title">批准这份提案后开始实现</p>
+    <p class="callout-title">实现已完成，等用户看过后收尾</p>
     <ol>
-      <li>按本提案的方案与落地步骤实现？第 5 步生成正式密钥、设仓库 secret、给 AppRelease 打 1.3.0 时会再单独问一次。</li>
+      <li>六个落地步骤都已完成；用户看过效果后用 finish-feature 收尾（取号、改 Implemented、推 main）。</li>
+      <li>正式签名私钥的备份 <code>~/LaunchpadAwakener-SparklePrivateKey.txt</code> 要由用户转存进密码管理器后删除。</li>
     </ol>
   </div>
 </section>
@@ -233,7 +234,7 @@ details[open] > summary { border-bottom: 1px solid var(--separator); }
         <li><code>release_after_product</code>：取出 <code>Launchpad.zip</code>、装订公证票据、压成 <code>Launchpad-&lt;版本&gt;-&lt;构建号&gt;.zip</code> 加进产物。</li>
         <li><code>release_deploy_appcast</code>：生成 <code>LaunchpadAppcast.xml</code>，两个 feed 用 <code>gh release upload --clobber</code> 传到这次的 Release。</li>
         <li>「Embed Standalone Launchpad」先由内向外签 Sparkle 的嵌套代码；<code>release_verify_export</code> 加对应检查。</li>
-        <li>正式 EdDSA 密钥：公钥进 Release 配置，私钥存成仓库 secret <code>SPARKLE_PRIVATE_KEY</code>，<code>Release.yml</code> 交给 <code>APP_RELEASE_SPARKLE_PRIVATE_KEY</code>。设之前先问用户。</li>
+        <li>正式 EdDSA 密钥：公钥进 Release 配置，私钥存成仓库 secret <code>SPARKLE_PRIVATE_KEY</code>，<code>Release.yml</code> 交给 <code>APP_RELEASE_SPARKLE_PRIVATE_KEY</code>，并在第一步检查它在不在。</li>
       </ul>
     </li>
     <li><strong>文档</strong>：新写实现说明 <code>Documentations/Internal/AutomaticUpdates.md</code>；改项目 <code>CLAUDE.md</code>、两份实现说明与 README。</li>
@@ -343,10 +344,13 @@ details[open] > summary { border-bottom: 1px solid var(--separator); }
       <tr><td><code>LaunchpadAwakenerStandalone/Info.plist</code></td><td><span class="tag tag-added">新增</span></td><td>同上三个键</td><td>独立版原来没有 Info.plist 文件</td><td class="numeric">1</td></tr>
       <tr><td><code>LaunchpadAwakener.xcodeproj/project.pbxproj</code></td><td><span class="tag tag-changed">修改</span></td><td>两个 App target 的 <code>UPDATE_FEED_URL</code>（只 Release 有值）、<code>UPDATE_PUBLIC_ED_KEY</code>（Release 正式、Debug 测试）；独立版 <code>INFOPLIST_FILE</code>；嵌入脚本先签 Sparkle 嵌套代码</td><td>正式与开发构建分开；zip 里的独立版过公证</td><td class="numeric">1、5</td></tr>
       <tr><td><code>Release.zsh</code></td><td><span class="tag tag-changed">修改</span></td><td>引擎 1.3.0；发布器加 <code>sparkle-appcast</code>；<code>release_appcast_path</code>、<code>release_notes_path</code>；新钩子 <code>release_after_product</code>、<code>release_deploy_appcast</code>；<code>release_verify_export</code> 加 Sparkle 检查</td><td>发布时生成、签名、上传两个 feed 与独立版 zip</td><td class="numeric">5</td></tr>
-      <tr><td><code>.github/workflows/Release.yml</code></td><td><span class="tag tag-changed">修改</span></td><td><code>APP_RELEASE_SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}</code></td><td>CI 签 feed</td><td class="numeric">5</td></tr>
-      <tr><td><code>ReleaseNotes/&lt;版本&gt;.md</code></td><td><span class="tag tag-added">新增</span></td><td>每个版本的英文发布说明，打 tag 前写好</td><td>同时进 GitHub Release 与 Sparkle 窗口</td><td class="numeric">5</td></tr>
-      <tr><td>GitHub secret <code>SPARKLE_PRIVATE_KEY</code></td><td><span class="tag tag-added">新增</span></td><td>正式 EdDSA 私钥（仓库级）</td><td>CI 签名；设之前问用户</td><td class="numeric">5</td></tr>
-      <tr><td>AppRelease <code>SparkleAppcast.zsh</code>、README、提案</td><td><span class="tag tag-changed">修改</span></td><td>发布说明嵌进 appcast；公开 <code>app_release_generate_appcast</code>；打 1.3.0</td><td>另一个仓库的引擎能力</td><td class="numeric">5</td></tr>
+      <tr><td><code>.github/workflows/Release.yml</code></td><td><span class="tag tag-changed">修改</span></td><td><code>APP_RELEASE_SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}</code>；第一步检查 secret 在不在</td><td>CI 签 feed；缺了在构建前就停</td><td class="numeric">5</td></tr>
+      <tr><td><code>ReleaseNotes/&lt;版本&gt;.md</code></td><td><span class="tag tag-added">新增</span></td><td>每个版本的英文发布说明，打 tag 前写好；已发布的 1.0、1.1、1.1.1 补进来</td><td>同时进 GitHub Release 与 Sparkle 窗口</td><td class="numeric">5</td></tr>
+      <tr><td><code>Appcasts/.gitignore</code></td><td><span class="tag tag-added">新增</span></td><td>忽略发布时写进来的 <code>*.xml</code></td><td><code>release_appcast_path</code> 的目录在 <code>target</code> 段就要存在，CI 上 <code>build/</code> 不存在</td><td class="numeric">5</td></tr>
+      <tr><td><code>RunScript.sh</code></td><td><span class="tag tag-changed">修改</span></td><td>构建后核对两个 App 都带 Sparkle、Info.plist 有更新源与公钥且公钥不空，Release 构建的更新源不空</td><td>少一个键时构建「通过」、App 却永远不更新</td><td class="numeric">1、5</td></tr>
+      <tr><td><code>Tests/LaunchpadAwakenerSharedUITests/ApplicationMainMenuTests.swift</code></td><td><span class="tag tag-changed">修改</span></td><td>更新项在「About」下面</td><td>第 2 步行为</td><td class="numeric">2</td></tr>
+      <tr><td>GitHub secret <code>SPARKLE_PRIVATE_KEY</code></td><td><span class="tag tag-added">新增</span></td><td>正式 EdDSA 私钥（仓库级）</td><td>CI 签名；用户同意后设好</td><td class="numeric">5</td></tr>
+      <tr><td>AppRelease <code>SparkleAppcast.zsh</code>、<code>Configuration.zsh</code>、<code>Version</code>、README、提案、<code>TestAppcast.zsh</code>、假 <code>generate_appcast</code></td><td><span class="tag tag-changed">修改</span> <span class="tag tag-added">新增</span></td><td>可选变量 <code>release_appcast_embeds_release_notes</code>；公开 <code>app_release_generate_appcast</code>，发布器也改用它；7 个测试；打 1.3.0</td><td>另一个仓库的引擎能力</td><td class="numeric">5</td></tr>
       <tr><td><code>Documentations/Internal/AutomaticUpdates.md</code></td><td><span class="tag tag-added">新增</span></td><td>更新源放哪、签名与密钥、两种提醒、更新后的 Dock 重启、测试机上怎么验</td><td>看代码看不出的决定</td><td class="numeric">6</td></tr>
       <tr><td><code>CLAUDE.md</code></td><td><span class="tag tag-changed">修改</span></td><td>结构表加新模块；发版步骤改为先写 <code>ReleaseNotes/&lt;版本&gt;.md</code>，删掉事后补说明那一步；记下私钥在哪</td><td>发版流程变了</td><td class="numeric">6</td></tr>
       <tr><td><code>Internal/ControlPanel.md</code>、<code>StandaloneLaunchpad.md</code></td><td><span class="tag tag-changed">修改</span></td><td>新的设置行、菜单项、提醒</td><td>同步实现说明</td><td class="numeric">6</td></tr>
@@ -365,48 +369,48 @@ details[open] > summary { border-bottom: 1px solid var(--separator); }
 <pre><code><span class="token-keyword">@MainActor</span>
 <span class="token-keyword">@Observable</span>
 <span class="token-keyword">public final class</span> <span class="token-type">ApplicationUpdater</span> {
-    <span class="token-keyword">public enum</span> <span class="token-type">ScheduledUpdatePresentation</span>: <span class="token-type">Sendable</span> {
-        <span class="token-comment">/// Sparkle shows its window; when it shows it behind other apps, the app adds a reminder too.</span>
-        <span class="token-keyword">case</span> shownBySparkle
-        <span class="token-comment">/// The app only reminds, and Sparkle's window shows once the user asks for it.</span>
-        <span class="token-keyword">case</span> remindedByApplication
-    }
-    <span class="token-keyword">public struct</span> <span class="token-type">PendingUpdate</span>: <span class="token-type">Equatable</span>, <span class="token-type">Sendable</span> { <span class="token-keyword">public var</span> displayVersion: <span class="token-type">String</span> }
-
-    <span class="token-keyword">public private(set) var</span> isStarted: <span class="token-type">Bool</span>
+    <span class="token-keyword">public enum</span> <span class="token-type">ScheduledUpdatePresentation</span>: <span class="token-type">Sendable</span> { <span class="token-keyword">case</span> shownBySparkle, remindedByApplication }
+    <span class="token-keyword">public let</span> scheduledUpdatePresentation: <span class="token-type">ScheduledUpdatePresentation</span>
+    <span class="token-keyword">public private(set) var</span> isStarted: <span class="token-type">Bool</span>          <span class="token-comment">// false without a feed or a key</span>
     <span class="token-keyword">public private(set) var</span> canCheckForUpdates: <span class="token-type">Bool</span>
-    <span class="token-keyword">public private(set) var</span> pendingUpdate: <span class="token-type">PendingUpdate</span>?
-    <span class="token-keyword">public var</span> automaticallyChecksForUpdates: <span class="token-type">Bool</span> { <span class="token-keyword">get set</span> }
+    <span class="token-keyword">public var</span> automaticallyChecksForUpdates: <span class="token-type">Bool</span> { <span class="token-keyword">get set</span> }   <span class="token-comment">// Sparkle's own setting</span>
+    <span class="token-keyword">public let</span> currentVersionDescription: <span class="token-type">String</span>   <span class="token-comment">// "Version 1.2 (4)"</span>
+    <span class="token-keyword">public var</span> pendingUpdate: <span class="token-type">PendingUpdate</span>? { <span class="token-keyword">get</span> }
+    <span class="token-keyword">public var</span> prepareToShowWindow: (<span class="token-keyword">@MainActor</span> () -&gt; <span class="token-type">Void</span>)?
 
     <span class="token-keyword">public init</span>(scheduledUpdatePresentation: <span class="token-type">ScheduledUpdatePresentation</span>, bundle: <span class="token-type">Bundle</span> = .main, defaults: <span class="token-type">UserDefaults</span> = .standard)
+    <span class="token-keyword">public func</span> start()
     <span class="token-keyword">public func</span> checkForUpdates()
     <span class="token-keyword">public func</span> makeMenuItem() -&gt; <span class="token-type">NSMenuItem</span>
 }
 
-<span class="token-keyword">public struct</span> <span class="token-type">UpdateFeedResolution</span>: <span class="token-type">Sendable</span> {
+<span class="token-keyword">public struct</span> <span class="token-type">PendingUpdate</span>: <span class="token-type">Equatable</span>, <span class="token-type">Sendable</span> { <span class="token-keyword">public let</span> displayVersion: <span class="token-type">String</span> }
+
+<span class="token-keyword">public enum</span> <span class="token-type">UpdateFeedResolution</span> {
+    <span class="token-keyword">public static let</span> overrideDefaultsKey = <span class="token-string">"UpdateFeedURL"</span>
+    <span class="token-keyword">public static let</span> allowsOverride: <span class="token-type">Bool</span>   <span class="token-comment">// true only in a development build</span>
     <span class="token-keyword">public static func</span> feedURL(infoDictionaryValue: <span class="token-type">String</span>?, overrideValue: <span class="token-type">String</span>?, allowsOverride: <span class="token-type">Bool</span>) -&gt; <span class="token-type">URL</span>?
+    <span class="token-keyword">public static func</span> feedURL(of bundle: <span class="token-type">Bundle</span>, defaults: <span class="token-type">UserDefaults</span>) -&gt; <span class="token-type">URL</span>?
 }
 
 <span class="token-keyword">public struct</span> <span class="token-type">UpdateReminder</span>: <span class="token-type">Equatable</span>, <span class="token-type">Sendable</span> {
     <span class="token-keyword">public static func</span> letsSparkleShow(<span class="token-keyword">_</span> presentation: <span class="token-type">ApplicationUpdater</span>.<span class="token-type">ScheduledUpdatePresentation</span>, immediateFocus: <span class="token-type">Bool</span>) -&gt; <span class="token-type">Bool</span>
-    <span class="token-keyword">public private(set) var</span> pendingUpdate: <span class="token-type">ApplicationUpdater</span>.<span class="token-type">PendingUpdate</span>?
-    <span class="token-keyword">public mutating func</span> sparkleWillShow(<span class="token-keyword">_</span> displayVersion: <span class="token-type">String</span>, isUserInitiated: <span class="token-type">Bool</span>, isShownBySparkle: <span class="token-type">Bool</span>, immediateFocus: <span class="token-type">Bool</span>)
+    <span class="token-keyword">public private(set) var</span> pendingUpdate: <span class="token-type">PendingUpdate</span>?
+    <span class="token-keyword">public mutating func</span> updateWillShow(displayVersion: <span class="token-type">String</span>, isUserInitiated: <span class="token-type">Bool</span>, isShownBySparkle: <span class="token-type">Bool</span>, isInImmediateFocus: <span class="token-type">Bool</span>)
     <span class="token-keyword">public mutating func</span> userSawUpdate()
     <span class="token-keyword">public mutating func</span> sessionEnded()
+    <span class="token-keyword">public static func</span> menuItemTitle(for pendingUpdate: <span class="token-type">PendingUpdate</span>?) -&gt; <span class="token-type">String</span>
 }
 
 <span class="token-keyword">public struct</span> <span class="token-type">UpdateRelaunchRecord</span> {
-    <span class="token-keyword">public init</span>(defaults: <span class="token-type">UserDefaults</span> = .standard)
     <span class="token-keyword">public func</span> noteRelaunch()
-    <span class="token-comment">/// Whether Sparkle relaunched the app to finish an update; reading it clears it.</span>
-    <span class="token-keyword">public func</span> takeRelaunchNote() -&gt; <span class="token-type">Bool</span>
+    <span class="token-keyword">public func</span> takeRelaunchNote() -&gt; <span class="token-type">Bool</span>   <span class="token-comment">// reading it clears it</span>
 }</code></pre>
       <ul>
-        <li>内部持有一个 <code>SPUStandardUpdaterController</code>，<code>startingUpdater</code> 取更新源是否算得出；<code>canCheckForUpdates</code> 与 <code>automaticallyChecksForUpdates</code> 用 KVO 跟着 <code>SPUUpdater</code>。</li>
-        <li>代理是一个私有的 <code>NSObject</code> 子类，把 Sparkle 的回调翻成 <code>UpdateReminder</code> 的事件。<code>supportsGentleScheduledUpdateReminders</code> 恒为真；是否让 Sparkle 显示由 <code>letsSparkleShow</code> 决定：<code>.shownBySparkle</code> 恒真，<code>.remindedByApplication</code> 恒假。</li>
-        <li>非用户发起、且 Sparkle 不显示或不在立即聚焦时设 <code>pendingUpdate</code>；用户看过或会话结束时清掉。</li>
-        <li><code>checkForUpdates()</code> 先 <code>NSApp.activate()</code> 再调 Sparkle；有待装更新时 Sparkle 直接显示它。</li>
-        <li><code>feedURLString(for:)</code> 只在开发构建里返回 <code>UpdateFeedURL</code> 覆盖值；<code>updaterWillRelaunchApplication(_:)</code> 调 <code>noteRelaunch()</code>。</li>
+        <li>构造时不启动 Sparkle；<code>start()</code> 在算得出更新源、且 <code>SUPublicEDKey</code> 不空时才 <code>startUpdater()</code>，否则只记日志。<code>canCheckForUpdates</code> 用 KVO 跟着 Sparkle。</li>
+        <li>代理是私有的 <code>NSObject</code> 子类，也是菜单项的目标；它实现 <code>NSMenuItemValidation</code>，会校验菜单项的菜单打开时标题跟着提醒变。<code>SPUStandardUserDriverDelegate</code> 不是主线程隔离的，遵循要写 <code>@preconcurrency</code>。</li>
+        <li>定时检查：记下 <code>immediateFocus</code>，<code>.shownBySparkle</code> 让 Sparkle 显示、<code>.remindedByApplication</code> 不让；非用户发起且 Sparkle 不显示或不在立即聚焦时设 <code>pendingUpdate</code>，用户看过或会话结束时清掉。</li>
+        <li><code>checkForUpdates()</code>：<code>prepareToShowWindow</code> → <code>NSApp.activate()</code> → Sparkle；<code>feedURLString(for:)</code> 返回启动时算出的更新源；<code>updaterWillRelaunchApplication(_:)</code> 调 <code>noteRelaunch()</code>。</li>
       </ul>
     </div>
   </details>
@@ -414,33 +418,31 @@ details[open] > summary { border-bottom: 1px solid var(--separator); }
     <summary>注入版：构建记录与更新后的 Dock 重启</summary>
     <div class="details-body">
 <pre><code><span class="token-keyword">public struct</span> <span class="token-type">LaunchedBuildRecord</span> {
-    <span class="token-keyword">public init</span>(defaults: <span class="token-type">UserDefaults</span> = .standard)
-    <span class="token-comment">/// Records `build` and returns whether it differs from the build launched last, or none was recorded.</span>
-    <span class="token-keyword">@discardableResult</span>
-    <span class="token-keyword">public func</span> recordLaunch(ofBuild build: <span class="token-type">String</span>) -&gt; <span class="token-type">Bool</span>
+    <span class="token-keyword">@discardableResult</span> <span class="token-keyword">public func</span> recordLaunch(ofBuild build: <span class="token-type">String</span>) -&gt; <span class="token-type">Bool</span>
 }
-
 <span class="token-keyword">public enum</span> <span class="token-type">DockRestartAfterUpdate</span> {
     <span class="token-keyword">public static func</span> isNeeded(isNewBuild: <span class="token-type">Bool</span>, isInjectionAllowed: <span class="token-type">Bool</span>, hasStalePayload: <span class="token-type">Bool</span>) -&gt; <span class="token-type">Bool</span>
 }
 
 <span class="token-comment">// runLaunchSequence(), after reconnectToResidentPayloads()</span>
-<span class="token-keyword">if</span> <span class="token-type">DockRestartAfterUpdate</span>.isNeeded(isNewBuild: isNewBuild, isInjectionAllowed: !isInjectionBlockedBySystemIntegrityProtection, hasStalePayload: injectionCoordinator.hasStalePayload) {
-    <span class="token-macro">#log</span>(.info, <span class="token-string">"First launch of build \(build, privacy: .public) with an older payload in the Dock: restarting the Dock once"</span>)
-    injectionCoordinator.restartTargets()
-    <span class="token-keyword">return</span>   <span class="token-comment">// restartTargets() injects into the new Dock itself</span>
+<span class="token-keyword">let</span> restartsDockForNewBuild = <span class="token-type">DockRestartAfterUpdate</span>.isNeeded(isNewBuild: isFirstLaunchOfNewBuild, isInjectionAllowed: !isInjectionBlockedBySystemIntegrityProtection, hasStalePayload: injectionCoordinator.hasStalePayload)
+isFirstLaunchOfNewBuild = <span class="token-keyword">false</span>
+<span class="token-keyword">if</span> restartsDockForNewBuild {
+    injectionCoordinator.restartTargets()   <span class="token-comment">// injects into the new Dock by itself</span>
+    launchProgress.enter(.ready)
+    <span class="token-keyword">return</span>
 }</code></pre>
-      <p><code>applicationDidFinishLaunching</code> 一开头读 <code>takeRelaunchNote()</code> 与 <code>recordLaunch(ofBuild:)</code>（构建号取 <code>CFBundleVersion</code>）。</p>
+      <p>启动时读 <code>takeRelaunchNote()</code>（为真就不弹控制面板），并把 <code>recordLaunch(ofBuild:)</code> 的结果存进 <code>isFirstLaunchOfNewBuild</code>；序列中途停下（daemon 等批准）时，等它再跑到重连之后照样判断。</p>
     </div>
   </details>
   <details>
     <summary>独立版与设置行</summary>
     <div class="details-body">
       <ul>
-        <li>启动时显示与否交给纯函数 <code>StandaloneLaunchShowing.showsOnLaunch(wasLaunchedAtLogin:wasRelaunchedForUpdate:)</code>，两者任一为真就不显示。</li>
-        <li>「Install Update &lt;版本&gt;…」：界面开着就先 <code>hide(reason: "installing an update", returningToPreviousApplication: false)</code>，再 <code>NSApp.unhide(nil)</code>、<code>updater.checkForUpdates()</code>。</li>
-        <li>Dock 角标用 <code>NSApp.dockTile.badgeLabel</code>，经 swift-navigation 的 <code>observe</code> 跟着 <code>pendingUpdate</code>。</li>
-        <li>注入版「General」节两版表单都加「Check for updates automatically」开关与「Updates　Version 1.2 (4)　[Check Now]」；独立版设置窗口加「Check for Updates Automatically:」与「Updates:」。开关在 <code>viewWillAppear</code> 时读、切换时写回；开发构建没有更新源时两行都不出现。</li>
+        <li><code>StandaloneLaunchpad.startUpdating()</code> 设好 <code>prepareToShowWindow</code>（界面开着就收起、不交还焦点，再 <code>NSApp.unhide</code>）后启动；自检启动不启动 updater。</li>
+        <li>启动时显示与否交给 <code>StandaloneLaunchShowing.showsOnLaunch(wasLaunchedAtLogin:wasRelaunchedForUpdate:)</code>，不显示时记日志。</li>
+        <li>主菜单的「Check for Updates…」在「About」下面；Dock 菜单有待装更新时它排第一，否则排在「Settings…」下面；Dock 角标 <code>"1"</code> 经 <code>observe</code> 跟着 <code>pendingUpdate</code>。</li>
+        <li>设置行：注入版放在「Launch at login」两行之后，独立版放在「Open at Login」下面；开关状态从 Sparkle 读、切换时写回；有待装更新时副标题「Version &lt;版本&gt; is available.」、按钮「Install…」；开发构建没有更新源时两行都不出现。</li>
       </ul>
     </div>
   </details>
@@ -448,40 +450,23 @@ details[open] > summary { border-bottom: 1px solid var(--separator); }
     <summary>签名、发布钩子与密钥</summary>
     <div class="details-body">
       <ul>
-        <li>「Embed Standalone Launchpad」签每个框架之前，先签 <code>Versions/Current</code> 下的嵌套代码：<code>XPCServices/Installer.xpc</code>、<code>Downloader.xpc</code>（<code>--preserve-metadata=entitlements</code>）、<code>Autoupdate</code>、<code>Updater.app</code>，都带 <code>--options runtime</code>，写成通用循环。</li>
-        <li><code>release_verify_export</code> 对两个 App 都检查 Sparkle 的 <code>Autoupdate</code>、<code>Updater.app</code>、两个 XPC 服务是这个团队的 Developer ID、带时间戳与硬化运行时。</li>
+        <li>「Embed Standalone Launchpad」签每个框架之前，先签 <code>Versions/Current</code> 下的 <code>XPCServices/*.xpc</code> 与 <code>*.app</code>（保留 entitlements），再签同层的可执行文件（<code>Autoupdate</code>），都带硬化运行时。</li>
+        <li><code>launchpad_awakener_verify_updates</code> 对两个 App 核对四样嵌套代码的 Developer ID、时间戳、硬化运行时，以及更新源与公钥不空；<code>RunScript.sh</code> 构建后也核对。</li>
       </ul>
-<pre><code>release_notes_path=<span class="token-string">'ReleaseNotes/{tag_version}.md'</span>
-release_appcast_path=build/AppRelease/Appcasts/LaunchpadAwakenerAppcast.xml
+<pre><code>release_engine_version=1.3.0
+release_publishers=(github-release sparkle-appcast)
+release_appcast_path=Appcasts/LaunchpadAwakenerAppcast.xml   <span class="token-comment"># Appcasts/.gitignore ignores *.xml</span>
+release_notes_path=<span class="token-string">'ReleaseNotes/{tag_version}.md'</span>
+release_appcast_embeds_release_notes=true
 
-release_preflight() {
-    <span class="token-comment"># Each feed lists only this release: start from empty ones.</span>
-    rm -rf <span class="token-string">"$app_release_project_directory/build/AppRelease/Appcasts"</span>
-    mkdir -p <span class="token-string">"$app_release_project_directory/build/AppRelease/Appcasts"</span>
-}
-
-release_after_product() {
-    <span class="token-comment"># unzip &lt;exported app&gt;/Contents/Resources/Launchpad.zip, xcrun stapler staple Launchpad.app,</span>
-    <span class="token-comment"># ditto -c -k --keepParent → Launchpad-&lt;version&gt;-&lt;build&gt;.zip, app_release_add_product</span>
-}
-
-release_deploy_appcast() {
-    <span class="token-keyword">local</span> main_feed_path=$1
-    app_release_generate_appcast <span class="token-string">"$standalone_archive_path"</span> <span class="token-string">"${main_feed_path:h}/LaunchpadAppcast.xml"</span> \
-        <span class="token-string">"$app_release_project_directory/ReleaseNotes/${app_release_tag#v}.md"</span>
-    gh release upload <span class="token-string">"$app_release_tag"</span> <span class="token-string">"$main_feed_path"</span> <span class="token-string">"${main_feed_path:h}/LaunchpadAppcast.xml"</span> --clobber
-}</code></pre>
-      <p>导出的 App 在运行目录里的确切路径以 AppRelease 的实现为准，实现时核对。</p>
+release_preflight()      <span class="token-comment"># when publishing: rm Appcasts/*.xml, each feed lists this release only</span>
+release_after_product()  <span class="token-comment"># Launchpad.zip out of the exported app, stapled, Launchpad-&lt;v&gt;-&lt;b&gt;.zip as a notarized product</span>
+release_deploy_appcast() <span class="token-comment"># app_release_generate_appcast for the standalone zip; gh release upload --clobber both feeds</span></code></pre>
       <ul>
-        <li>正式密钥：开发机上用 Sparkle 包里的 <code>generate_keys</code> 生成（私钥进登录钥匙串），<code>-x</code> 导出到临时文件，<code>gh secret set SPARKLE_PRIVATE_KEY --repo OpenLaunchpad/LaunchpadAwakener</code>，再删掉临时文件。私钥丢了，已装的用户只能手动更新，要提醒用户另外备份。</li>
-        <li>测试密钥：<code>generate_keys --account LaunchpadAwakenerUpdateTesting</code> 另存一把，公钥进 Debug 配置，只签测试机上用的 zip。</li>
+        <li>AppRelease 1.3.0：可选变量 <code>release_appcast_embeds_release_notes</code>（默认关，打开会改变已有项目的输出）；公开 <code>app_release_generate_appcast</code>，发布器也用它，每个压缩包一个暂存目录。</li>
+        <li>两把密钥都用 Homebrew 的 OpenSSL 生成（不经会动钥匙串的 <code>generate_keys</code>），用 <code>sign_update</code> 签、验一次。正式私钥是仓库 secret，备份文件交用户转存；公钥 <code>P0qf9O0kQEJksneoqaPYx5lTaJmz9rTzwAE9fkitCxY=</code> 在 Release 配置。测试私钥在 agent 自己的目录，公钥在 Debug 配置。</li>
+        <li>测试机上的验证命令见实现说明「开发构建与测试机」。</li>
       </ul>
-    </div>
-  </details>
-  <details>
-    <summary>测试机上的验证</summary>
-    <div class="details-body">
-      <p>非交互地走「下载后退出时安装」：开发机编两版开发构建（构建号不同），较新的压成 zip、用测试密钥签名，与 feed 一起拷到 MacBook，用 <code>python3 -m http.server</code> 在本机端口上提供；<code>defaults write com.MxIris.LaunchpadAwakener.debug SUAutomaticallyUpdate -bool YES</code>，带 <code>-UpdateFeedURL http://127.0.0.1:&lt;端口&gt;/LaunchpadAwakenerAppcast.xml</code> 打开较旧的一版，等下载完成后退出让 Sparkle 安装，再打开：核对版本号、日志里的「restarting the Dock once」、注入正常、daemon 没要求重新批准。独立版同样做一遍。点 Sparkle 窗口里的按钮属于交互操作，只在用户同意时做。</p>
     </div>
   </details>
 </section>
@@ -608,13 +593,25 @@ release_deploy_appcast() {
 <section id="log">
   <h2>决策日志</h2>
   <details>
-    <summary>1 条，最近一条：Created as Draft</summary>
+    <summary>13 条，最近一条：实现完成，待用户看过后收尾</summary>
     <div class="details-body">
       <div class="table-wrap">
       <table>
         <thead><tr><th>日期</th><th>变更</th><th>说明</th></tr></thead>
         <tbody>
           <tr><td class="numeric">2026-11-23</td><td>Created as Draft</td><td>用户要给 App 加自动更新。定下两个 App 各自用 Sparkle 更新、各有一个更新源，注入版更新后自动重启一次 Dock。自行决定：每天自动检查、弹窗确认后安装，更新源挂在 GitHub Release 附件上，开发构建不检查更新，先给 AppRelease 加上发布说明进 appcast 与第二个 feed 的能力。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>Accepted</td><td>用户批准，开始实现。功能分支 <code>feature/automatic-updates</code>，从 main 切出。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>第 1 步完成</td><td><code>UpdateFeedResolution</code> 写成只有静态成员的 <code>enum</code>；没有 <code>SUPublicEDKey</code> 时 updater 也不启动；由 <code>start()</code> 启动；测试密钥用 Homebrew 的 OpenSSL 生成、不经钥匙串；RunScript 核对 Sparkle 与 Info.plist 的键。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>第 2 步完成</td><td><code>PendingUpdate</code> 放在模块顶层；菜单项目标实现 <code>NSMenuItemValidation</code>；独立版「先收起界面再开窗口」做成 <code>prepareToShowWindow</code>；自检启动不启动 updater；<code>SPUStandardUserDriverDelegate</code> 的遵循要 <code>@preconcurrency</code>。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>第 3 步完成</td><td>两边的两行设置；有待装更新时副标题与按钮跟着变；开关状态从 Sparkle 读。没有界面测试，只靠编译与测试机。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>第 4 步完成</td><td><code>DockRestartAfterUpdate</code> 单独成文件；「第一次启动新构建」在序列走到重连之后才清掉；重启后直接进入 <code>.ready</code>；独立版用 <code>StandaloneLaunchShowing</code> 判断；两个 App 的启动日志写明启动原因。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>第 5 步：嵌入独立版时签好 Sparkle</td><td>嵌入脚本先签 XPC 服务、<code>.app</code> 与 <code>Autoupdate</code>，Debug 构建实测签名与深度校验通过；<code>release_verify_export</code> 新增对 Sparkle 与更新设置的检查。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>第 6 步：测试机上走通更新</td><td>MacBook 上「下载后退出时安装」走通：注入版构建 3 → 4，再打开时自动重启一次 Dock、新 payload 注入、daemon 没要求重新批准，再次打开不再重启；独立版带重新打开记录启动时没盖住屏幕，也更新成功。「Install and Relaunch」是交互操作，没做。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>第 5 步：密钥与 AppRelease 1.3.0</td><td>用户同意由 agent 生成正式密钥、设仓库 secret，并改 AppRelease、发 1.3.0。嵌入发布说明做成可选变量（避免改变 LyricsX 的输出）；更新源放在提交进仓库的 <code>Appcasts/</code>；发布说明写在 <code>ReleaseNotes/</code>；Release 标题仍手动改。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>第 6 步：文档</td><td>新写实现说明；改 <code>CLAUDE.md</code>、两份实现说明、术语表与 README。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>第 5 步：发布演练通过</td><td>临时分支把版本改成 1.2 演练一次通过：两个 App 的 Sparkle 签名检查通过，独立版装订票据成功、Gatekeeper 认可；本机预演确认发布说明会嵌进注入版的更新源。预演不调用钩子，独立版更新源的生成与上传在真正发布时第一次运行。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>验证</td><td>最终状态下 709 个单元测试通过，<code>RunScript.sh</code> 完整构建与切片、更新设置的核对通过。</td></tr>
+          <tr><td class="numeric">2026-11-23</td><td>实现完成，待用户看过后收尾</td><td>实现说明已写；术语表登记了两个新术语。</td></tr>
         </tbody>
       </table>
       </div>
