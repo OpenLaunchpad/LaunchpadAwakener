@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Draft - 两个 App 用 Sparkle 自动更新</title>
+<style>
+/* Evolution proposal page, shared style (style A, "Apple documentation").
+   Copy this whole <style> block verbatim. Page-specific rules, if any, go only
+   in the marked block at the end. Must render in WebKit (Safari, Xcode preview,
+   Quick Look): no JavaScript, no external resources. */
+:root {
+  --background: #ffffff; --foreground: #1d1d1f; --secondary: #6e6e73; --separator: #d2d2d7;
+  --panel: #f5f5f7; --code-background: #f2f2f4; --accent: #0071e3;
+  --added: #1f8a4c; --added-fill: #e3f5ea;
+  --changed: #b26a00; --changed-fill: #fdf0db;
+  --removed: #c62828; --removed-fill: #fbe4e4;
+  --moved: #0066cc; --moved-fill: #e5f0fc;
+  --kept: #6e6e73; --kept-fill: #ececef;
+  --token-keyword: #ad3da4; --token-type: #3900a0; --token-string: #c41a16; --token-number: #1c00cf;
+  --token-comment: #707f8c; --token-macro: #643820;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1c1c1e; --foreground: #f2f2f7; --secondary: #a1a1a6; --separator: #3a3a3c;
+    --panel: #2c2c2e; --code-background: #2a2a2d; --accent: #4ea1ff;
+    --added: #4cd281; --added-fill: #183826;
+    --changed: #ffb340; --changed-fill: #3d2c10;
+    --removed: #ff6b6b; --removed-fill: #3d1a1a;
+    --moved: #5aa9ff; --moved-fill: #142b45;
+    --kept: #b0b0b5; --kept-fill: #333336;
+    --token-keyword: #fc5fa3; --token-type: #d0a8ff; --token-string: #fc6a5d; --token-number: #d0bf69;
+    --token-comment: #7f8c98; --token-macro: #fd8f3f;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--background); color: var(--foreground);
+  font: 15px/1.65 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased; }
+.page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 72px; }
+.svg-definitions { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* Header */
+.eyebrow { margin: 0 0 6px; font-size: 13px; color: var(--secondary); }
+.crumb + .crumb::before { content: " / "; }
+h1 { font-size: 28px; line-height: 1.3; letter-spacing: -0.01em; margin: 0 0 12px; }
+h1 code { font-size: 0.8em; }
+.proposal-number { color: var(--secondary); margin-right: 4px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; font-size: 13px; color: var(--secondary); }
+.meta div { display: flex; gap: 6px; align-items: baseline; }
+.meta dd { margin: 0; color: var(--foreground); }
+.meta dd code { font-size: 12px; }
+.status { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--kept); background: var(--kept-fill); }
+.status-accepted { color: var(--moved); background: var(--moved-fill); }
+.status-in-progress { color: var(--changed); background: var(--changed-fill); }
+.status-implemented { color: var(--added); background: var(--added-fill); }
+.status-rejected, .status-withdrawn { color: var(--removed); background: var(--removed-fill); }
+
+/* Table of contents */
+.toc { margin: 22px 0 8px; padding: 8px 10px; background: var(--panel); border-radius: 12px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px 4px; }
+.toc li { margin: 0; }
+.toc a { display: inline-block; padding: 3px 11px; border-radius: 999px; color: var(--accent); text-decoration: none; font-size: 14px; }
+.toc a:hover { background: var(--background); }
+
+/* Text */
+section { scroll-margin-top: 16px; }
+h2 { font-size: 21px; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--separator); }
+h3 { font-size: 16px; margin: 22px 0 8px; }
+h4 { font-size: 15px; margin: 18px 0 6px; }
+p { margin: 10px 0; }
+a { color: var(--accent); }
+ul, ol { padding-left: 22px; }
+li { margin: 4px 0; }
+blockquote { margin: 12px 0; padding: 2px 14px; border-left: 3px solid var(--separator); color: var(--secondary); }
+hr { border: none; border-top: 1px solid var(--separator); margin: 24px 0; }
+
+/* Code */
+code { font: 0.86em/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code-background); padding: 1px 5px; border-radius: 5px; }
+pre { background: var(--code-background); border-radius: 10px; padding: 14px 16px; overflow-x: auto; -webkit-overflow-scrolling: touch; font: 12.5px/1.6 ui-monospace, "SF Mono", Menlo, monospace; }
+pre code { font: inherit; background: none; padding: 0; border-radius: 0; }
+.token-keyword { color: var(--token-keyword); font-weight: 600; }
+.token-type { color: var(--token-type); }
+.token-string { color: var(--token-string); }
+.token-number { color: var(--token-number); }
+.token-comment { color: var(--token-comment); }
+.token-macro { color: var(--token-macro); }
+
+/* Callouts */
+.callout { background: var(--panel); border-left: 4px solid var(--accent); border-radius: 10px; padding: 12px 16px; margin: 14px 0; }
+.callout-note { border-left-color: var(--secondary); }
+.callout-warning { border-left-color: var(--changed); }
+.callout-title { margin: 0 0 6px; font-weight: 600; }
+.callout > :last-child { margin-bottom: 0; }
+.callout ol, .callout ul { margin: 6px 0 0; }
+
+/* Diagrams */
+.legend { list-style: none; padding: 0; margin: 8px 0 12px; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--secondary); }
+.legend li { margin: 0; }
+.swatch { display: inline-block; width: 14px; height: 14px; border-radius: 4px; border: 1.5px solid; vertical-align: -2px; margin-right: 6px; }
+.swatch-added { background: var(--added-fill); border-color: var(--added); }
+.swatch-changed { background: var(--changed-fill); border-color: var(--changed); }
+.swatch-removed { background: var(--removed-fill); border-color: var(--removed); border-style: dashed; }
+.swatch-moved { background: var(--moved-fill); border-color: var(--moved); }
+.swatch-kept { background: var(--kept-fill); border-color: var(--kept); }
+.figure { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--separator); border-radius: 12px; padding: 12px; margin: 12px 0; }
+.figure svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.figure-narrow svg { min-width: 0; max-width: 640px; margin: 0 auto; }
+.figure-caption { font-size: 13px; color: var(--secondary); margin-top: 8px; }
+svg text { font: 12px ui-monospace, "SF Mono", Menlo, monospace; fill: var(--foreground); }
+svg .group-label { font-size: 13px; font-weight: 700; }
+svg .caption { font-size: 10.5px; fill: var(--secondary); }
+svg .strike { text-decoration: line-through; }
+svg .group { fill: none; stroke: var(--separator); stroke-width: 1.5; stroke-dasharray: 5 4; }
+svg .box-added { fill: var(--added-fill); stroke: var(--added); stroke-width: 1.5; }
+svg .box-changed { fill: var(--changed-fill); stroke: var(--changed); stroke-width: 1.5; }
+svg .box-removed { fill: var(--removed-fill); stroke: var(--removed); stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg .box-moved { fill: var(--moved-fill); stroke: var(--moved); stroke-width: 1.5; }
+svg .box-kept { fill: var(--kept-fill); stroke: var(--kept); stroke-width: 1.2; }
+svg .arrow { fill: none; stroke: var(--secondary); stroke-width: 1.4; marker-end: url(#arrowhead); }
+svg .arrow-weak { stroke-dasharray: 4 3; }
+svg .arrow-removed { stroke: var(--removed); stroke-dasharray: 4 3; }
+svg .arrowhead { fill: var(--secondary); }
+
+/* Tables */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 10px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { border: 1px solid var(--separator); padding: 7px 9px; text-align: left; vertical-align: top; }
+th { background: var(--panel); font-weight: 600; }
+.numeric { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tag { display: inline-block; white-space: nowrap; padding: 0 7px; border-radius: 5px; font-size: 12px; font-weight: 600; color: var(--kept); background: var(--kept-fill); }
+.tag-added { color: var(--added); background: var(--added-fill); }
+.tag-changed { color: var(--changed); background: var(--changed-fill); }
+.tag-removed { color: var(--removed); background: var(--removed-fill); }
+.tag-moved { color: var(--moved); background: var(--moved-fill); }
+
+/* Collapsible sections */
+details { border: 1px solid var(--separator); border-radius: 12px; margin: 12px 0; overflow: hidden; }
+summary { cursor: pointer; list-style: none; padding: 11px 16px; font-weight: 600; background: var(--panel); }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: "›"; display: inline-block; width: 1em; color: var(--secondary); -webkit-transition: -webkit-transform 0.15s; transition: transform 0.15s; }
+details[open] > summary::before { -webkit-transform: rotate(90deg); transform: rotate(90deg); }
+details[open] > summary { border-bottom: 1px solid var(--separator); }
+.details-body { padding: 4px 16px 12px; }
+
+@media (max-width: 640px) {
+  .page { padding: 20px 16px 56px; }
+  h1 { font-size: 23px; }
+}
+
+/* ===== Page-specific styles (only for elements the shared style lacks, e.g. UI mockups) ===== */
+</style>
+</head>
+<body>
+<svg class="svg-definitions" aria-hidden="true" focusable="false">
+  <defs><marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrowhead" d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>
+</svg>
+<div class="page">
+
+<header class="doc-header">
+  <p class="eyebrow"><span class="crumb">LaunchpadAwakener</span><span class="crumb">Evolutions</span><span class="crumb">Draft</span></p>
+  <h1><span class="proposal-number">Draft</span> 两个 App 用 Sparkle 自动更新</h1>
+  <dl class="meta">
+    <div><dt>状态</dt><dd><span class="status status-accepted">Accepted</span></dd></div>
+    <div><dt>最后更新</dt><dd>2026-11-23</dd></div>
+    <div><dt>项目类型</dt><dd>App</dd></div>
+    <div><dt>原文</dt><dd><code>draft-automatic-updates.md</code></dd></div>
+  </dl>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <ol>
+    <li><a href="#summary">摘要</a></li>
+    <li><a href="#decide">要你定</a></li>
+    <li><a href="#solution">方案</a></li>
+    <li><a href="#architecture">架构图</a></li>
+    <li><a href="#map">改动地图</a></li>
+    <li><a href="#design">详细设计</a></li>
+    <li><a href="#research">动机与调研</a></li>
+    <li><a href="#alternatives">替代方案</a></li>
+    <li><a href="#impact">影响</a></li>
+    <li><a href="#steps">落地步骤</a></li>
+    <li><a href="#log">决策日志</a></li>
+  </ol>
+</nav>
+
+<main class="content">
+
+<section id="summary">
+  <h2>摘要</h2>
+  <p>注入版 LaunchpadAwakener 与独立版 Launchpad 各自接上 Sparkle 2，每天检查一次更新，有新版本时弹 Sparkle 的标准窗口、用户确认后安装；菜单里加「Check for Updates…」，设置里加「自动检查更新」开关。两个 App 各有一个更新源（appcast），都作为附件挂在每次的 GitHub Release 上，由 CI 在发布时生成并用 EdDSA 签名；独立版的 zip 从注入版包里取出、单独上传。两个 App 都是常驻后台的（菜单栏 App、收起后藏起来的全屏 App），所以定时检查到的更新先以「提醒」出现：注入版在菜单栏菜单里，独立版在 Dock 图标的角标与菜单里。注入版更新后第一次启动时，如果 Dock 里跑的还是旧 payload，自动重启一次 Dock；独立版被 Sparkle 重新打开时不盖住屏幕。</p>
+</section>
+
+<section id="decide">
+  <h2>要你定</h2>
+  <div class="callout">
+    <p class="callout-title">批准这份提案后开始实现</p>
+    <ol>
+      <li>按本提案的方案与落地步骤实现？第 5 步生成正式密钥、设仓库 secret、给 AppRelease 打 1.3.0 时会再单独问一次。</li>
+    </ol>
+  </div>
+</section>
+
+<section id="solution">
+  <h2>方案</h2>
+  <ol>
+    <li><strong>两个 App 都接 Sparkle</strong>，放进新模块 <code>LaunchpadAwakenerUpdating</code>：一个 <code>ApplicationUpdater</code> 包住 Sparkle 的标准 updater。
+      <ul>
+        <li>更新源：注入版 <code>https://github.com/OpenLaunchpad/LaunchpadAwakener/releases/latest/download/LaunchpadAwakenerAppcast.xml</code>，独立版同一处的 <code>LaunchpadAppcast.xml</code>。<code>latest</code> 永远指向最新的正式版，不含预发布版。</li>
+        <li><code>SUEnableAutomaticChecks = YES</code>：默认每天自动检查，不弹询问；设置里可以关。自动下载安装保持 Sparkle 的默认（关）。</li>
+        <li>开发构建没有更新源，updater 不启动、更新菜单项不出现；带启动参数 <code>-UpdateFeedURL &lt;地址&gt;</code> 时才启动，专供测试机验证。开发构建用一把单独的测试密钥。</li>
+      </ul>
+    </li>
+    <li><strong>入口</strong>：两个 App 的 App 菜单在「About」下面加「Check for Updates…」；注入版菜单栏菜单（两套）在「Quit」上面加；独立版 Dock 菜单加。设置里加自动检查开关与「Updates」一行（版本号 + 「Check Now」）。</li>
+    <li><strong>定时检查到更新时</strong>（温和提醒）：
+      <ul>
+        <li>注入版：Sparkle 自己显示窗口；不在立即聚焦时（窗口在别的 App 后面，菜单栏 App 又没有 Dock 图标），菜单栏菜单顶上多一项「Install Update &lt;版本&gt;…」。用户看过窗口或会话结束就撤掉。</li>
+        <li>独立版：从不让 Sparkle 自己显示定时检查的结果（App 平时藏着，界面开着时盖在一切之上）。改为 Dock 角标、Dock 菜单顶上的「Install Update &lt;版本&gt;…」、设置窗口里的新版本号；点了才收起界面、显示 Sparkle 窗口。</li>
+      </ul>
+    </li>
+    <li><strong>更新之后</strong>：
+      <ul>
+        <li>注入版：记下上次启动的构建号；换了构建（Sparkle 更新、手动替换都算）时，在重连驻留 payload 之后若 <code>hasStalePayload</code> 为真，调一次 <code>restartTargets()</code>。SIP 开着时不会重启。被 Sparkle 重新打开时控制面板不弹出。</li>
+        <li>独立版：被 Sparkle 重新打开时不盖住屏幕，等用户点 Dock 图标；手动打开的照旧显示。</li>
+      </ul>
+    </li>
+    <li><strong>发布</strong>：
+      <ul>
+        <li>AppRelease 1.3.0：<code>sparkle-appcast</code> 发布器把发布说明嵌进 appcast；公开 <code>app_release_generate_appcast</code> 给钩子生成第二个 App 的 feed。</li>
+        <li><code>Release.zsh</code>：发布器加 <code>sparkle-appcast</code>，每次从空 feed 开始；<code>release_notes_path='ReleaseNotes/{tag_version}.md'</code>，打 tag 前写好。</li>
+        <li><code>release_after_product</code>：取出 <code>Launchpad.zip</code>、装订公证票据、压成 <code>Launchpad-&lt;版本&gt;-&lt;构建号&gt;.zip</code> 加进产物。</li>
+        <li><code>release_deploy_appcast</code>：生成 <code>LaunchpadAppcast.xml</code>，两个 feed 用 <code>gh release upload --clobber</code> 传到这次的 Release。</li>
+        <li>「Embed Standalone Launchpad」先由内向外签 Sparkle 的嵌套代码；<code>release_verify_export</code> 加对应检查。</li>
+        <li>正式 EdDSA 密钥：公钥进 Release 配置，私钥存成仓库 secret <code>SPARKLE_PRIVATE_KEY</code>，<code>Release.yml</code> 交给 <code>APP_RELEASE_SPARKLE_PRIVATE_KEY</code>。设之前先问用户。</li>
+      </ul>
+    </li>
+    <li><strong>文档</strong>：新写实现说明 <code>Documentations/Internal/AutomaticUpdates.md</code>；改项目 <code>CLAUDE.md</code>、两份实现说明与 README。</li>
+  </ol>
+  <h3>非目标</h3>
+  <ul>
+    <li>不做 beta 通道、增量更新、分阶段推送、关键更新标记。</li>
+    <li>不保留 feed 的版本历史：每次只有最新一版。</li>
+    <li>不让注入版在更新后顺带替换已装的独立版。</li>
+    <li>不为已装 1.1.1 及更早版本的用户做什么：手动换到第一个带 Sparkle 的版本后才开始自动更新。</li>
+    <li>不改 daemon 与输入法辅助进程的换新机制；不发系统通知。</li>
+  </ul>
+</section>
+
+<section id="architecture">
+  <h2>架构图</h2>
+  <ul class="legend">
+    <li><i class="swatch swatch-added"></i>新增</li>
+    <li><i class="swatch swatch-changed"></i>修改</li>
+    <li><i class="swatch swatch-kept"></i>不变</li>
+  </ul>
+  <h3>模块依赖</h3>
+  <div class="figure">
+  <svg viewBox="0 0 1000 320" role="img" aria-label="Module dependencies">
+    <rect class="box-changed" x="30" y="30" width="260" height="50" rx="6"/><text x="42" y="51">LaunchpadAwakenerAppUI</text><text class="caption" x="42" y="69">LaunchpadAwakener.app: delegate, menu bar, panel</text>
+    <rect class="box-changed" x="710" y="30" width="260" height="50" rx="6"/><text x="722" y="51">LaunchpadAwakenerStandaloneCore</text><text class="caption" x="722" y="69">Launchpad.app: launch, Dock menu, settings</text>
+    <rect class="box-changed" x="30" y="140" width="260" height="50" rx="6"/><text x="42" y="161">LaunchpadAwakenerAppCore</text><text class="caption" x="42" y="179">+ LaunchedBuildRecord, + DockRestartAfterUpdate</text>
+    <rect class="box-changed" x="340" y="140" width="250" height="50" rx="6"/><text x="352" y="161">LaunchpadAwakenerSharedUI</text><text class="caption" x="352" y="179">~ ApplicationMainMenu.make(updateItem:)</text>
+    <rect class="box-added" x="640" y="140" width="330" height="50" rx="6"/><text x="652" y="161">LaunchpadAwakenerUpdating</text><text class="caption" x="652" y="179">ApplicationUpdater, UpdateReminder, feed, relaunch</text>
+    <rect class="box-added" x="700" y="250" width="210" height="50" rx="6"/><text x="712" y="271">Sparkle 2.10.1</text><text class="caption" x="712" y="289">binary XCFramework</text>
+    <rect class="box-kept" x="30" y="250" width="300" height="50" rx="6"/><text x="42" y="271">Payload / Daemon / TextInput</text><text class="caption" x="42" y="289">unchanged, no Sparkle</text>
+    <path class="arrow" d="M 160 80 L 160 140"/>
+    <path class="arrow" d="M 250 80 L 420 140"/>
+    <path class="arrow" d="M 290 66 L 700 140"/>
+    <path class="arrow" d="M 760 80 L 540 140"/>
+    <path class="arrow" d="M 840 80 L 840 140"/>
+    <path class="arrow" d="M 805 190 L 805 250"/>
+  </svg>
+  </div>
+  <p class="figure-caption">两个 App 经新模块 <code>LaunchpadAwakenerUpdating</code> 链接 Sparkle；payload、daemon、输入法辅助进程不链接它。</p>
+
+  <h3>发布与更新的数据流</h3>
+  <div class="figure">
+  <svg viewBox="0 0 1000 300" role="img" aria-label="Release and update data flow">
+    <rect class="box-kept" x="20" y="30" width="130" height="50" rx="6"/><text x="32" y="51">tag v&lt;version&gt;</text><text class="caption" x="32" y="69">pushed by hand</text>
+    <rect class="box-changed" x="185" y="30" width="190" height="50" rx="6"/><text x="197" y="51">Release.yml</text><text class="caption" x="197" y="69">AppRelease 1.3.0, + secret</text>
+    <rect class="box-changed" x="410" y="30" width="250" height="50" rx="6"/><text x="422" y="51">product</text><text class="caption" x="422" y="69">+ Launchpad-&lt;v&gt;-&lt;b&gt;.zip (stapled)</text>
+    <rect class="box-kept" x="695" y="30" width="280" height="50" rx="6"/><text x="707" y="51">GitHub Release</text><text class="caption" x="707" y="69">both zips, notes from ReleaseNotes/</text>
+    <rect class="box-added" x="410" y="130" width="250" height="50" rx="6"/><text x="422" y="151">sparkle-appcast</text><text class="caption" x="422" y="169">LaunchpadAwakenerAppcast.xml</text>
+    <rect class="box-added" x="695" y="130" width="280" height="50" rx="6"/><text x="707" y="151">release_deploy_appcast</text><text class="caption" x="707" y="169">LaunchpadAppcast.xml; upload both</text>
+    <rect class="box-kept" x="20" y="230" width="260" height="50" rx="6"/><text x="32" y="251">LaunchpadAwakener.app</text><text class="caption" x="32" y="269">SUFeedURL → latest/download/…</text>
+    <rect class="box-kept" x="320" y="230" width="220" height="50" rx="6"/><text x="332" y="251">Launchpad.app</text><text class="caption" x="332" y="269">SUFeedURL → latest/download/…</text>
+    <path class="arrow" d="M 150 55 L 185 55"/>
+    <path class="arrow" d="M 375 55 L 410 55"/>
+    <path class="arrow" d="M 660 55 L 695 55"/>
+    <path class="arrow" d="M 835 80 L 560 130"/>
+    <path class="arrow" d="M 660 155 L 695 155"/>
+    <path class="arrow arrow-weak" d="M 150 230 L 760 180"/>
+    <path class="arrow arrow-weak" d="M 430 230 L 800 180"/>
+  </svg>
+  </div>
+  <p class="figure-caption">发布顺序固定为 tag → Release → appcast → 部署钩子，钩子运行时 Release 已经在了。App 只读最新正式版上的 feed。</p>
+
+  <h3>更新之后的启动（注入版）</h3>
+  <div class="figure">
+  <svg viewBox="0 0 1000 220" role="img" aria-label="Launch after an update">
+    <rect class="box-kept" x="20" y="30" width="200" height="50" rx="6"/><text x="32" y="51">Sparkle installs</text><text class="caption" x="32" y="69">willInstallUpdate</text>
+    <rect class="box-added" x="255" y="30" width="230" height="50" rx="6"/><text x="267" y="51">UpdateRelaunchRecord</text><text class="caption" x="267" y="69">noteRelaunch() before relaunch</text>
+    <rect class="box-added" x="520" y="30" width="220" height="50" rx="6"/><text x="532" y="51">takeRelaunchNote()</text><text class="caption" x="532" y="69">true: panel stays closed</text>
+    <rect class="box-added" x="775" y="30" width="200" height="50" rx="6"/><text x="787" y="51">LaunchedBuildRecord</text><text class="caption" x="787" y="69">recordLaunch(ofBuild:)</text>
+    <rect class="box-kept" x="20" y="140" width="260" height="50" rx="6"/><text x="32" y="161">reconnectToResidentPayloads()</text><text class="caption" x="32" y="179">daemon check unchanged</text>
+    <rect class="box-added" x="320" y="140" width="330" height="50" rx="6"/><text x="332" y="161">DockRestartAfterUpdate.isNeeded</text><text class="caption" x="332" y="179">new build, injection allowed, stale payload</text>
+    <rect class="box-kept" x="690" y="140" width="285" height="50" rx="6"/><text x="702" y="161">restartTargets()</text><text class="caption" x="702" y="179">once; injects into the new Dock</text>
+    <path class="arrow" d="M 220 55 L 255 55"/>
+    <path class="arrow" d="M 485 55 L 520 55"/>
+    <path class="arrow" d="M 740 55 L 775 55"/>
+    <path class="arrow" d="M 875 80 L 150 140"/>
+    <path class="arrow" d="M 280 165 L 320 165"/>
+    <path class="arrow" d="M 650 165 L 690 165"/>
+  </svg>
+  </div>
+</section>
+
+<section id="map">
+  <h2>改动地图</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>文件 / 类型</th><th>动作</th><th>改什么</th><th>为什么</th><th>步骤</th></tr></thead>
+    <tbody>
+      <tr><td><code>LaunchpadAwakenerPackage/Package.swift</code></td><td><span class="tag tag-changed">修改</span></td><td>依赖 Sparkle <code>from: "2.10.1"</code>；新 target <code>LaunchpadAwakenerUpdating</code>（依赖 Sparkle、OSToolbox）；AppUI、StandaloneCore 依赖它；新测试 target</td><td>两个 App 共用一套更新逻辑；payload、daemon、辅助进程不链接 Sparkle</td><td class="numeric">1</td></tr>
+      <tr><td><code>LaunchpadAwakenerUpdating/ApplicationUpdater.swift</code> · <code>ApplicationUpdater</code></td><td><span class="tag tag-added">新增</span></td><td><code>@MainActor @Observable</code>：包住 <code>SPUStandardUpdaterController</code>，实现两个 Sparkle 代理，对外给 <code>canCheckForUpdates</code>、<code>automaticallyChecksForUpdates</code>、<code>pendingUpdate</code>、<code>checkForUpdates()</code>、<code>isStarted</code></td><td>两个 App 的唯一入口</td><td class="numeric">1、2</td></tr>
+      <tr><td><code>UpdateFeedResolution.swift</code> · <code>UpdateFeedResolution</code></td><td><span class="tag tag-added">新增</span></td><td>由 <code>SUFeedURL</code> 与开发构建的 <code>UpdateFeedURL</code> 覆盖值算出更新源，算不出就不启动</td><td>开发构建不碰正式更新源，测试机上又能指定本地 feed</td><td class="numeric">1</td></tr>
+      <tr><td><code>UpdateReminder.swift</code> · <code>UpdateReminder</code></td><td><span class="tag tag-added">新增</span></td><td>纯值状态：让 Sparkle 显示还是由 App 提醒、提醒何时撤掉</td><td>Sparkle 的回调类型不能在测试里构造</td><td class="numeric">2</td></tr>
+      <tr><td><code>UpdateRelaunchRecord.swift</code> · <code>UpdateRelaunchRecord</code></td><td><span class="tag tag-added">新增</span></td><td>在 <code>UserDefaults</code> 记「Sparkle 为完成更新重新打开的」，启动时读一次即清</td><td>独立版不盖住屏幕；注入版不弹控制面板</td><td class="numeric">4</td></tr>
+      <tr><td><code>SharedUI/ApplicationMainMenu.swift</code> · <code>ApplicationMainMenu.make</code></td><td><span class="tag tag-changed">修改</span></td><td>新参数 <code>updateItem: NSMenuItem? = nil</code>，放在「About」下面</td><td>Mac App 检查更新的惯常位置</td><td class="numeric">2</td></tr>
+      <tr><td><code>AppCore/LaunchedBuildRecord.swift</code> · <code>LaunchedBuildRecord</code></td><td><span class="tag tag-added">新增</span></td><td>记上次启动的构建号，<code>recordLaunch(ofBuild:)</code> 返回是否换了构建</td><td>判断「更新后第一次启动」，不依赖是谁换的</td><td class="numeric">4</td></tr>
+      <tr><td><code>AppCore/DockRestartAfterUpdate.swift</code> · <code>DockRestartAfterUpdate</code></td><td><span class="tag tag-added">新增</span></td><td>纯判断：换了构建、允许注入、有旧 payload 才重启</td><td>能单测</td><td class="numeric">4</td></tr>
+      <tr><td><code>AppUI/Application/ApplicationDelegate.swift</code></td><td><span class="tag tag-changed">修改</span></td><td>建 <code>ApplicationUpdater(scheduledUpdatePresentation: .shownBySparkle)</code>；接主菜单、菜单栏、控制面板；重连后按需重启 Dock；被 Sparkle 重新打开时不弹控制面板</td><td>注入版的接线</td><td class="numeric">2、4</td></tr>
+      <tr><td><code>AppUI/MenuBar/StatusItemController.swift</code></td><td><span class="tag tag-changed">修改</span></td><td>两套菜单在「Quit」上面加「Check for Updates…」；有待装更新时顶上加「Install Update &lt;版本&gt;…」</td><td>菜单栏 App 的入口与提醒位置</td><td class="numeric">2</td></tr>
+      <tr><td><code>AppUI/ControlPanel/ControlPanelViewController.swift</code></td><td><span class="tag tag-changed">修改</span></td><td>「General」节（含 SIP 开着的一版）加自动检查开关行与「Updates」行</td><td>设置入口</td><td class="numeric">3</td></tr>
+      <tr><td><code>StandaloneCore/StandaloneLaunchpad.swift</code></td><td><span class="tag tag-changed">修改</span></td><td>建 <code>ApplicationUpdater(scheduledUpdatePresentation: .remindedByApplication)</code>；App 菜单与 Dock 菜单加更新项；Dock 角标；安装前先收起界面；被 Sparkle 重新打开时不 <code>show</code></td><td>独立版的接线</td><td class="numeric">2、4</td></tr>
+      <tr><td><code>StandaloneCore/StandaloneSettings.swift</code></td><td><span class="tag tag-changed">修改</span></td><td>加「Check for Updates Automatically:」与「Updates:」两行</td><td>设置入口</td><td class="numeric">3</td></tr>
+      <tr><td><code>Tests/LaunchpadAwakenerUpdatingTests/*</code></td><td><span class="tag tag-added">新增</span></td><td>更新源、提醒、重新打开记录的测试</td><td></td><td class="numeric">1、2、4</td></tr>
+      <tr><td><code>Tests/LaunchpadAwakenerAppCoreTests/LaunchedBuildRecordTests.swift</code>、<code>DockRestartAfterUpdateTests.swift</code></td><td><span class="tag tag-added">新增</span></td><td>构建记录与 Dock 重启判断</td><td></td><td class="numeric">4</td></tr>
+      <tr><td><code>Tests/LaunchpadAwakenerStandaloneCoreTests/StandaloneLaunchShowingTests.swift</code></td><td><span class="tag tag-added">新增</span></td><td>启动时显示与否（登录时启动、被 Sparkle 重新打开、手动打开）</td><td></td><td class="numeric">4</td></tr>
+      <tr><td><code>LaunchpadAwakener/Info.plist</code></td><td><span class="tag tag-changed">修改</span></td><td><code>SUFeedURL = $(UPDATE_FEED_URL)</code>、<code>SUPublicEDKey = $(UPDATE_PUBLIC_ED_KEY)</code>、<code>SUEnableAutomaticChecks = YES</code></td><td>Sparkle 从 Info.plist 读；值按配置取</td><td class="numeric">1</td></tr>
+      <tr><td><code>LaunchpadAwakenerStandalone/Info.plist</code></td><td><span class="tag tag-added">新增</span></td><td>同上三个键</td><td>独立版原来没有 Info.plist 文件</td><td class="numeric">1</td></tr>
+      <tr><td><code>LaunchpadAwakener.xcodeproj/project.pbxproj</code></td><td><span class="tag tag-changed">修改</span></td><td>两个 App target 的 <code>UPDATE_FEED_URL</code>（只 Release 有值）、<code>UPDATE_PUBLIC_ED_KEY</code>（Release 正式、Debug 测试）；独立版 <code>INFOPLIST_FILE</code>；嵌入脚本先签 Sparkle 嵌套代码</td><td>正式与开发构建分开；zip 里的独立版过公证</td><td class="numeric">1、5</td></tr>
+      <tr><td><code>Release.zsh</code></td><td><span class="tag tag-changed">修改</span></td><td>引擎 1.3.0；发布器加 <code>sparkle-appcast</code>；<code>release_appcast_path</code>、<code>release_notes_path</code>；新钩子 <code>release_after_product</code>、<code>release_deploy_appcast</code>；<code>release_verify_export</code> 加 Sparkle 检查</td><td>发布时生成、签名、上传两个 feed 与独立版 zip</td><td class="numeric">5</td></tr>
+      <tr><td><code>.github/workflows/Release.yml</code></td><td><span class="tag tag-changed">修改</span></td><td><code>APP_RELEASE_SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}</code></td><td>CI 签 feed</td><td class="numeric">5</td></tr>
+      <tr><td><code>ReleaseNotes/&lt;版本&gt;.md</code></td><td><span class="tag tag-added">新增</span></td><td>每个版本的英文发布说明，打 tag 前写好</td><td>同时进 GitHub Release 与 Sparkle 窗口</td><td class="numeric">5</td></tr>
+      <tr><td>GitHub secret <code>SPARKLE_PRIVATE_KEY</code></td><td><span class="tag tag-added">新增</span></td><td>正式 EdDSA 私钥（仓库级）</td><td>CI 签名；设之前问用户</td><td class="numeric">5</td></tr>
+      <tr><td>AppRelease <code>SparkleAppcast.zsh</code>、README、提案</td><td><span class="tag tag-changed">修改</span></td><td>发布说明嵌进 appcast；公开 <code>app_release_generate_appcast</code>；打 1.3.0</td><td>另一个仓库的引擎能力</td><td class="numeric">5</td></tr>
+      <tr><td><code>Documentations/Internal/AutomaticUpdates.md</code></td><td><span class="tag tag-added">新增</span></td><td>更新源放哪、签名与密钥、两种提醒、更新后的 Dock 重启、测试机上怎么验</td><td>看代码看不出的决定</td><td class="numeric">6</td></tr>
+      <tr><td><code>CLAUDE.md</code></td><td><span class="tag tag-changed">修改</span></td><td>结构表加新模块；发版步骤改为先写 <code>ReleaseNotes/&lt;版本&gt;.md</code>，删掉事后补说明那一步；记下私钥在哪</td><td>发版流程变了</td><td class="numeric">6</td></tr>
+      <tr><td><code>Internal/ControlPanel.md</code>、<code>StandaloneLaunchpad.md</code></td><td><span class="tag tag-changed">修改</span></td><td>新的设置行、菜单项、提醒</td><td>同步实现说明</td><td class="numeric">6</td></tr>
+      <tr><td><code>README.md</code></td><td><span class="tag tag-changed">修改</span></td><td>一句话说明两个 App 会自动检查更新</td><td>对外可见的变化</td><td class="numeric">6</td></tr>
+      <tr><td><code>Documentations/README.md</code>、<code>Evolutions/README.md</code></td><td><span class="tag tag-changed">修改</span></td><td>登记本提案与实现说明</td><td>索引</td><td class="numeric">0、6</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="design">
+  <h2>详细设计</h2>
+  <details>
+    <summary><code>LaunchpadAwakenerUpdating</code> 的接口</summary>
+    <div class="details-body">
+<pre><code><span class="token-keyword">@MainActor</span>
+<span class="token-keyword">@Observable</span>
+<span class="token-keyword">public final class</span> <span class="token-type">ApplicationUpdater</span> {
+    <span class="token-keyword">public enum</span> <span class="token-type">ScheduledUpdatePresentation</span>: <span class="token-type">Sendable</span> {
+        <span class="token-comment">/// Sparkle shows its window; when it shows it behind other apps, the app adds a reminder too.</span>
+        <span class="token-keyword">case</span> shownBySparkle
+        <span class="token-comment">/// The app only reminds, and Sparkle's window shows once the user asks for it.</span>
+        <span class="token-keyword">case</span> remindedByApplication
+    }
+    <span class="token-keyword">public struct</span> <span class="token-type">PendingUpdate</span>: <span class="token-type">Equatable</span>, <span class="token-type">Sendable</span> { <span class="token-keyword">public var</span> displayVersion: <span class="token-type">String</span> }
+
+    <span class="token-keyword">public private(set) var</span> isStarted: <span class="token-type">Bool</span>
+    <span class="token-keyword">public private(set) var</span> canCheckForUpdates: <span class="token-type">Bool</span>
+    <span class="token-keyword">public private(set) var</span> pendingUpdate: <span class="token-type">PendingUpdate</span>?
+    <span class="token-keyword">public var</span> automaticallyChecksForUpdates: <span class="token-type">Bool</span> { <span class="token-keyword">get set</span> }
+
+    <span class="token-keyword">public init</span>(scheduledUpdatePresentation: <span class="token-type">ScheduledUpdatePresentation</span>, bundle: <span class="token-type">Bundle</span> = .main, defaults: <span class="token-type">UserDefaults</span> = .standard)
+    <span class="token-keyword">public func</span> checkForUpdates()
+    <span class="token-keyword">public func</span> makeMenuItem() -&gt; <span class="token-type">NSMenuItem</span>
+}
+
+<span class="token-keyword">public struct</span> <span class="token-type">UpdateFeedResolution</span>: <span class="token-type">Sendable</span> {
+    <span class="token-keyword">public static func</span> feedURL(infoDictionaryValue: <span class="token-type">String</span>?, overrideValue: <span class="token-type">String</span>?, allowsOverride: <span class="token-type">Bool</span>) -&gt; <span class="token-type">URL</span>?
+}
+
+<span class="token-keyword">public struct</span> <span class="token-type">UpdateReminder</span>: <span class="token-type">Equatable</span>, <span class="token-type">Sendable</span> {
+    <span class="token-keyword">public static func</span> letsSparkleShow(<span class="token-keyword">_</span> presentation: <span class="token-type">ApplicationUpdater</span>.<span class="token-type">ScheduledUpdatePresentation</span>, immediateFocus: <span class="token-type">Bool</span>) -&gt; <span class="token-type">Bool</span>
+    <span class="token-keyword">public private(set) var</span> pendingUpdate: <span class="token-type">ApplicationUpdater</span>.<span class="token-type">PendingUpdate</span>?
+    <span class="token-keyword">public mutating func</span> sparkleWillShow(<span class="token-keyword">_</span> displayVersion: <span class="token-type">String</span>, isUserInitiated: <span class="token-type">Bool</span>, isShownBySparkle: <span class="token-type">Bool</span>, immediateFocus: <span class="token-type">Bool</span>)
+    <span class="token-keyword">public mutating func</span> userSawUpdate()
+    <span class="token-keyword">public mutating func</span> sessionEnded()
+}
+
+<span class="token-keyword">public struct</span> <span class="token-type">UpdateRelaunchRecord</span> {
+    <span class="token-keyword">public init</span>(defaults: <span class="token-type">UserDefaults</span> = .standard)
+    <span class="token-keyword">public func</span> noteRelaunch()
+    <span class="token-comment">/// Whether Sparkle relaunched the app to finish an update; reading it clears it.</span>
+    <span class="token-keyword">public func</span> takeRelaunchNote() -&gt; <span class="token-type">Bool</span>
+}</code></pre>
+      <ul>
+        <li>内部持有一个 <code>SPUStandardUpdaterController</code>，<code>startingUpdater</code> 取更新源是否算得出；<code>canCheckForUpdates</code> 与 <code>automaticallyChecksForUpdates</code> 用 KVO 跟着 <code>SPUUpdater</code>。</li>
+        <li>代理是一个私有的 <code>NSObject</code> 子类，把 Sparkle 的回调翻成 <code>UpdateReminder</code> 的事件。<code>supportsGentleScheduledUpdateReminders</code> 恒为真；是否让 Sparkle 显示由 <code>letsSparkleShow</code> 决定：<code>.shownBySparkle</code> 恒真，<code>.remindedByApplication</code> 恒假。</li>
+        <li>非用户发起、且 Sparkle 不显示或不在立即聚焦时设 <code>pendingUpdate</code>；用户看过或会话结束时清掉。</li>
+        <li><code>checkForUpdates()</code> 先 <code>NSApp.activate()</code> 再调 Sparkle；有待装更新时 Sparkle 直接显示它。</li>
+        <li><code>feedURLString(for:)</code> 只在开发构建里返回 <code>UpdateFeedURL</code> 覆盖值；<code>updaterWillRelaunchApplication(_:)</code> 调 <code>noteRelaunch()</code>。</li>
+      </ul>
+    </div>
+  </details>
+  <details>
+    <summary>注入版：构建记录与更新后的 Dock 重启</summary>
+    <div class="details-body">
+<pre><code><span class="token-keyword">public struct</span> <span class="token-type">LaunchedBuildRecord</span> {
+    <span class="token-keyword">public init</span>(defaults: <span class="token-type">UserDefaults</span> = .standard)
+    <span class="token-comment">/// Records `build` and returns whether it differs from the build launched last, or none was recorded.</span>
+    <span class="token-keyword">@discardableResult</span>
+    <span class="token-keyword">public func</span> recordLaunch(ofBuild build: <span class="token-type">String</span>) -&gt; <span class="token-type">Bool</span>
+}
+
+<span class="token-keyword">public enum</span> <span class="token-type">DockRestartAfterUpdate</span> {
+    <span class="token-keyword">public static func</span> isNeeded(isNewBuild: <span class="token-type">Bool</span>, isInjectionAllowed: <span class="token-type">Bool</span>, hasStalePayload: <span class="token-type">Bool</span>) -&gt; <span class="token-type">Bool</span>
+}
+
+<span class="token-comment">// runLaunchSequence(), after reconnectToResidentPayloads()</span>
+<span class="token-keyword">if</span> <span class="token-type">DockRestartAfterUpdate</span>.isNeeded(isNewBuild: isNewBuild, isInjectionAllowed: !isInjectionBlockedBySystemIntegrityProtection, hasStalePayload: injectionCoordinator.hasStalePayload) {
+    <span class="token-macro">#log</span>(.info, <span class="token-string">"First launch of build \(build, privacy: .public) with an older payload in the Dock: restarting the Dock once"</span>)
+    injectionCoordinator.restartTargets()
+    <span class="token-keyword">return</span>   <span class="token-comment">// restartTargets() injects into the new Dock itself</span>
+}</code></pre>
+      <p><code>applicationDidFinishLaunching</code> 一开头读 <code>takeRelaunchNote()</code> 与 <code>recordLaunch(ofBuild:)</code>（构建号取 <code>CFBundleVersion</code>）。</p>
+    </div>
+  </details>
+  <details>
+    <summary>独立版与设置行</summary>
+    <div class="details-body">
+      <ul>
+        <li>启动时显示与否交给纯函数 <code>StandaloneLaunchShowing.showsOnLaunch(wasLaunchedAtLogin:wasRelaunchedForUpdate:)</code>，两者任一为真就不显示。</li>
+        <li>「Install Update &lt;版本&gt;…」：界面开着就先 <code>hide(reason: "installing an update", returningToPreviousApplication: false)</code>，再 <code>NSApp.unhide(nil)</code>、<code>updater.checkForUpdates()</code>。</li>
+        <li>Dock 角标用 <code>NSApp.dockTile.badgeLabel</code>，经 swift-navigation 的 <code>observe</code> 跟着 <code>pendingUpdate</code>。</li>
+        <li>注入版「General」节两版表单都加「Check for updates automatically」开关与「Updates　Version 1.2 (4)　[Check Now]」；独立版设置窗口加「Check for Updates Automatically:」与「Updates:」。开关在 <code>viewWillAppear</code> 时读、切换时写回；开发构建没有更新源时两行都不出现。</li>
+      </ul>
+    </div>
+  </details>
+  <details>
+    <summary>签名、发布钩子与密钥</summary>
+    <div class="details-body">
+      <ul>
+        <li>「Embed Standalone Launchpad」签每个框架之前，先签 <code>Versions/Current</code> 下的嵌套代码：<code>XPCServices/Installer.xpc</code>、<code>Downloader.xpc</code>（<code>--preserve-metadata=entitlements</code>）、<code>Autoupdate</code>、<code>Updater.app</code>，都带 <code>--options runtime</code>，写成通用循环。</li>
+        <li><code>release_verify_export</code> 对两个 App 都检查 Sparkle 的 <code>Autoupdate</code>、<code>Updater.app</code>、两个 XPC 服务是这个团队的 Developer ID、带时间戳与硬化运行时。</li>
+      </ul>
+<pre><code>release_notes_path=<span class="token-string">'ReleaseNotes/{tag_version}.md'</span>
+release_appcast_path=build/AppRelease/Appcasts/LaunchpadAwakenerAppcast.xml
+
+release_preflight() {
+    <span class="token-comment"># Each feed lists only this release: start from empty ones.</span>
+    rm -rf <span class="token-string">"$app_release_project_directory/build/AppRelease/Appcasts"</span>
+    mkdir -p <span class="token-string">"$app_release_project_directory/build/AppRelease/Appcasts"</span>
+}
+
+release_after_product() {
+    <span class="token-comment"># unzip &lt;exported app&gt;/Contents/Resources/Launchpad.zip, xcrun stapler staple Launchpad.app,</span>
+    <span class="token-comment"># ditto -c -k --keepParent → Launchpad-&lt;version&gt;-&lt;build&gt;.zip, app_release_add_product</span>
+}
+
+release_deploy_appcast() {
+    <span class="token-keyword">local</span> main_feed_path=$1
+    app_release_generate_appcast <span class="token-string">"$standalone_archive_path"</span> <span class="token-string">"${main_feed_path:h}/LaunchpadAppcast.xml"</span> \
+        <span class="token-string">"$app_release_project_directory/ReleaseNotes/${app_release_tag#v}.md"</span>
+    gh release upload <span class="token-string">"$app_release_tag"</span> <span class="token-string">"$main_feed_path"</span> <span class="token-string">"${main_feed_path:h}/LaunchpadAppcast.xml"</span> --clobber
+}</code></pre>
+      <p>导出的 App 在运行目录里的确切路径以 AppRelease 的实现为准，实现时核对。</p>
+      <ul>
+        <li>正式密钥：开发机上用 Sparkle 包里的 <code>generate_keys</code> 生成（私钥进登录钥匙串），<code>-x</code> 导出到临时文件，<code>gh secret set SPARKLE_PRIVATE_KEY --repo OpenLaunchpad/LaunchpadAwakener</code>，再删掉临时文件。私钥丢了，已装的用户只能手动更新，要提醒用户另外备份。</li>
+        <li>测试密钥：<code>generate_keys --account LaunchpadAwakenerUpdateTesting</code> 另存一把，公钥进 Debug 配置，只签测试机上用的 zip。</li>
+      </ul>
+    </div>
+  </details>
+  <details>
+    <summary>测试机上的验证</summary>
+    <div class="details-body">
+      <p>非交互地走「下载后退出时安装」：开发机编两版开发构建（构建号不同），较新的压成 zip、用测试密钥签名，与 feed 一起拷到 MacBook，用 <code>python3 -m http.server</code> 在本机端口上提供；<code>defaults write com.MxIris.LaunchpadAwakener.debug SUAutomaticallyUpdate -bool YES</code>，带 <code>-UpdateFeedURL http://127.0.0.1:&lt;端口&gt;/LaunchpadAwakenerAppcast.xml</code> 打开较旧的一版，等下载完成后退出让 Sparkle 安装，再打开：核对版本号、日志里的「restarting the Dock once」、注入正常、daemon 没要求重新批准。独立版同样做一遍。点 Sparkle 窗口里的按钮属于交互操作，只在用户同意时做。</p>
+    </div>
+  </details>
+</section>
+
+<section id="research">
+  <h2>动机与调研</h2>
+  <details>
+    <summary>动机</summary>
+    <div class="details-body">
+      <ul>
+        <li>两个 App 都没有更新途径。1.0（2026-11-12）、1.1（2026-11-22）、1.1.1（2026-11-23）十一天发了三个版本，修的都是一用就会碰到的问题，到不了已装的人手里。</li>
+        <li>独立版只装在注入版包里的 <code>Launchpad.zip</code> 里，已经装过的原样保留（<code>StandaloneLaunchpadInstaller.install()</code>）；手动换了注入版，独立版仍停在旧版，没有任何提示。</li>
+        <li>SIP 开着的用户主要用独立版，注入版不一定开着；只给注入版接更新，这些用户永远收不到更新。</li>
+        <li>换了注入版，Dock 里的旧 payload 卸不掉，现在要用户自己点「Restart Dock」；自动更新之后再让用户补这一步，等于只做了一半。</li>
+      </ul>
+    </div>
+  </details>
+  <details>
+    <summary>现状代码</summary>
+    <div class="details-body">
+      <ul>
+        <li>注入版启动：<code>ApplicationDelegate.applicationDidFinishLaunching(_:)</code>（<code>ApplicationDelegate.swift:68</code>）建菜单与菜单栏项；SIP 开着时只弹控制面板；否则开自动注入、登记并换新输入法辅助进程、不是登录时启动就弹控制面板，最后 <code>runLaunchSequence()</code>：daemon → <code>reconnectToResidentPayloads()</code> → 自动注入 → <code>.ready</code>。</li>
+        <li><code>PayloadInjectionCoordinator.hasStalePayload</code>（<code>:340</code>）按镜像 UUID 判旧；<code>restartTargets()</code>（<code>:610</code>）是「Restart Dock」的实现。</li>
+        <li>daemon 版本不一致自动重装、辅助进程可执行文件被换就结束它：整包替换时照常生效，不改。</li>
+        <li>菜单：<code>ApplicationMainMenu.make</code>（<code>SharedUI/ApplicationMainMenu.swift:16</code>）、<code>StatusItemController</code>（两套条目）、独立版 <code>applicationDockMenu(_:)</code>（<code>StandaloneLaunchpad.swift:183</code>，只有「Settings…」）。</li>
+        <li>设置：控制面板「General」节（<code>:213</code>、<code>:223</code>）；独立版 <code>StandaloneSettings</code>（快捷键、Open at Login）。</li>
+        <li>独立版不是登录时启动就盖住整块屏幕；收起后 <code>NSApp.hide(nil)</code>，窗口层级 27。</li>
+        <li>注入版有只含 <code>LSUIElement</code> 的 Info.plist，独立版没有 Info.plist 文件；都没开沙盒，都开着硬化运行时。</li>
+        <li>「Embed Standalone Launchpad」只重签框架 <code>Resources/*.bundle</code> 与框架本身，不处理别的嵌套代码。</li>
+        <li><code>Release.zsh</code> 用 AppRelease 1.0.0，只有 <code>github-release</code> 发布器，发布说明事后用 <code>gh release edit</code> 补。</li>
+      </ul>
+    </div>
+  </details>
+  <details>
+    <summary>上游能力</summary>
+    <div class="details-body">
+      <ul>
+        <li>Sparkle 2.10.1（2026-10-25，SwiftPM 二进制 XCFramework）：<code>SPUStandardUpdaterController</code>；温和提醒的四个代理方法（后台 App 在 <code>immediateFocus</code> 为假时，标准窗口「立即显示，但在其他 App 后面」；用户主动检查总由 Sparkle 显示）；<code>feedURLString(for:)</code>、<code>updater(_:willInstallUpdate:)</code>、<code>updaterWillRelaunchApplication(_:)</code>；<code>generate_appcast</code> 认同名的 <code>.md</code> 发布说明，<code>--embed-release-notes</code> 强制嵌入；Info.plist 键 <code>SUFeedURL</code>、<code>SUPublicEDKey</code>、<code>SUEnableAutomaticChecks</code>、<code>SUScheduledCheckInterval</code>。</li>
+        <li>AppRelease 1.2.0：<code>sparkle-appcast</code> 发布器用 App 链接的 Sparkle 包里的 <code>generate_appcast</code>，只放这次的 zip，预发布版加 <code>--channel beta</code>，私钥来自 <code>APP_RELEASE_SPARKLE_PRIVATE_KEY</code>；发布顺序 tag → Release → appcast → 部署钩子；暂存目录只放 zip，发布说明进不了 appcast，钩子拿不到内部的 <code>generate_appcast</code> 路径与私钥文件；<code>release_after_product</code> 可以加产物。</li>
+        <li>LyricsX：同一个发布器生成单条目 feed，再由钩子插进两个仓库的 <code>appcast.xml</code> 推送；发布说明事先写在 <code>ReleaseNotes/</code>。</li>
+      </ul>
+    </div>
+  </details>
+  <details>
+    <summary>推测，待验证</summary>
+    <div class="details-body">
+      <ul>
+        <li>zip 里的独立版能不能单独装订公证票据：第 5 步演练里验证；不行就由钩子单独提交公证。</li>
+        <li>导出会不会重签 Sparkle 的嵌套代码：<code>release_verify_export</code> 的逐个 Mach-O 检查给出答案。</li>
+        <li>Sparkle 换掉整个注入版之后，后台任务管理会不会再要求批准 daemon：推测不会，测试机上验证。</li>
+      </ul>
+    </div>
+  </details>
+</section>
+
+<section id="alternatives">
+  <h2>替代方案</h2>
+  <details>
+    <summary>9 条，均已否</summary>
+    <div class="details-body">
+      <ul>
+        <li><strong>只给注入版接更新、顺带替换独立版</strong>：用户否决；独立版会一直停在旧版。</li>
+        <li><strong>feed 提交进仓库、经 raw 或 Pages 提供</strong>：每次往 <code>main</code> 推机器人提交、多触发一次 CI、和共用检出搅在一起；挂在 Release 附件上什么都不用提交。</li>
+        <li><strong>feed 保留历史</strong>：要先下载上一版合并，<code>latest</code> 变动时会出错；Sparkle 只需要最新一条。</li>
+        <li><strong>不改 AppRelease，全在钩子里做</strong>：可行但只借发布器的钩子、绕开它的输出，还要猜引擎的内部变量；做进引擎别的项目也能用。</li>
+        <li><strong>独立版另开仓库或另一串 Release</strong>：两个 App 同版本同构建，分开只会对不上。</li>
+        <li><strong>默认静默自动安装</strong>：这个工具注入 Dock、装特权 daemon，更新前让用户看一眼更合适；愿意的用户在 Sparkle 窗口里勾选。</li>
+        <li><strong>系统通知提醒</strong>：要先要通知权限；角标与菜单项不需要。</li>
+        <li><strong>改菜单栏图标提醒</strong>：图标是状态指示，混进去会让「出问题」和「有更新」分不清。</li>
+        <li><strong>自己写更新器</strong>：Sparkle 都做好了。</li>
+      </ul>
+    </div>
+  </details>
+</section>
+
+<section id="impact">
+  <h2>影响</h2>
+  <h3>用户可见变化</h3>
+  <ul>
+    <li>App 菜单、注入版菜单栏菜单、独立版 Dock 菜单多「Check for Updates…」；有待装更新时变成「Install Update &lt;版本&gt;…」。</li>
+    <li>控制面板「General」节与独立版设置窗口各多两行。</li>
+    <li>有新版本时：注入版弹 Sparkle 窗口（在后面时菜单栏菜单里有提醒）；独立版 Dock 图标出现角标。</li>
+    <li>注入版更新后 Dock 重启一次，新 payload 自动注入；独立版被 Sparkle 重新打开时不盖住屏幕。原有操作都不变。</li>
+  </ul>
+  <h3>可发现性</h3>
+  <p>默认开启自动检查，不额外询问：这类工具的用户本来就要跟着 macOS 的 Dock 变化拿修复。菜单与设置里都有入口和开关。</p>
+  <h3>数据与配置兼容</h3>
+  <ul>
+    <li>新增 Sparkle 的 <code>SU*</code> 键，以及构建记录与重新打开记录各一个键，都在各自 App 的偏好域里，不碰布局库与已有设置。</li>
+    <li>从没装过 Sparkle 的版本升上来，构建记录为空按「换了构建」算：Dock 里若是旧 payload 就重启一次，与手动点「Restart Dock」相同。</li>
+    <li>装回旧版不受影响。</li>
+  </ul>
+  <h3>平台与最低版本</h3>
+  <p>不变（macOS 15 起）；26 与 27 行为相同。</p>
+  <h3>发布</h3>
+  <ul>
+    <li>不需要新 entitlement；Sparkle 的 XPC 服务用不上但照样签名。</li>
+    <li>公证多了 Sparkle 的嵌套代码，导出与嵌入阶段都要签好，<code>release_verify_export</code> 检查。</li>
+    <li>每次发布多传一个独立版 zip 与两个 feed；发布说明改为打 tag 前写进 <code>ReleaseNotes/&lt;版本&gt;.md</code>；需要仓库 secret <code>SPARKLE_PRIVATE_KEY</code>。</li>
+    <li>第一个带 Sparkle 的版本（预计 1.2）发出后，自动更新从下一个版本起才起作用。</li>
+  </ul>
+</section>
+
+<section id="steps">
+  <h2>落地步骤</h2>
+  <ol start="0">
+    <li><strong>提案入库</strong>：无代码变化。</li>
+    <li><strong>Sparkle 骨架与更新源</strong>：<code>releaseBuildUsesTheBundledFeed</code>、<code>developmentBuildWithoutOverrideHasNoFeed</code>、<code>developmentBuildUsesTheOverrideFeed</code>、<code>releaseBuildIgnoresTheOverride</code>、<code>emptyFeedValueCountsAsNone</code>；Release 构建的 Info.plist 里有三个 Sparkle 键（RunScript 核对）。</li>
+    <li><strong>菜单入口与温和提醒</strong>：<code>shownBySparkleLetsSparkleShowScheduledUpdates</code>、<code>remindedByApplicationNeverLetsSparkleShowScheduledUpdates</code>、<code>updateShownOutOfFocusLeavesAReminder</code>、<code>updateShownInFocusLeavesNoReminder</code>、<code>userInitiatedCheckLeavesNoReminder</code>、<code>reminderClearsWhenTheUserSeesTheUpdate</code>、<code>reminderClearsWhenTheSessionEnds</code>、<code>menuItemOffersTheWaitingUpdate</code>、<code>mainMenuPutsTheUpdateItemUnderAbout</code>。</li>
+    <li><strong>设置行</strong>：两版控制面板表单都有两行更新设置，开发构建没有更新源时没有；切换开关写回 <code>automaticallyChecksForUpdates</code>。</li>
+    <li><strong>更新之后</strong>：<code>firstRecordedLaunchCountsAsNewBuild</code>、<code>sameBuildIsNotNew</code>、<code>differentBuildIsNew</code>、<code>restartsTheDockOnceForANewBuildWithAStalePayload</code>、<code>doesNotRestartWithoutAStalePayload</code>、<code>doesNotRestartWhileInjectionIsBlocked</code>、<code>doesNotRestartForTheSameBuild</code>、<code>relaunchNoteIsReadOnce</code>、<code>standaloneStaysHiddenWhenRelaunchedForAnUpdate</code>、<code>standaloneStaysHiddenWhenLaunchedAtLogin</code>、<code>standaloneShowsWhenOpenedByTheUser</code>。</li>
+    <li><strong>发布</strong>：AppRelease 的测试覆盖发布说明进 appcast 与第二个 feed；手动跑一次 <code>Release.yml</code> 演练，产物里有独立版 zip，其中的独立版已装订票据、<code>spctl</code> 判为 Notarized；<code>release_verify_export</code> 对两个 App 的 Sparkle 嵌套代码都通过；CI 通过。</li>
+    <li><strong>测试机验证与文档</strong>：MacBook 上走通两个 App 的下载、退出时安装、重新打开；注入版重启 Dock 一次且注入正常，daemon 没要求重新批准；文档登记完毕。</li>
+  </ol>
+  <div class="callout callout-note">
+    <p class="callout-title">收尾时判断</p>
+    <ul>
+      <li>预计要写实现说明 <code>AutomaticUpdates.md</code>。</li>
+      <li>「更新源（appcast）」「温和提醒（gentle reminders）」可能要登记进术语表。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="log">
+  <h2>决策日志</h2>
+  <details>
+    <summary>1 条，最近一条：Created as Draft</summary>
+    <div class="details-body">
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>日期</th><th>变更</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="numeric">2026-11-23</td><td>Created as Draft</td><td>用户要给 App 加自动更新。定下两个 App 各自用 Sparkle 更新、各有一个更新源，注入版更新后自动重启一次 Dock。自行决定：每天自动检查、弹窗确认后安装，更新源挂在 GitHub Release 附件上，开发构建不检查更新，先给 AppRelease 加上发布说明进 appcast 与第二个 feed 的能力。</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </details>
+</section>
+
+</main>
+</div>
+</body>
+</html>
