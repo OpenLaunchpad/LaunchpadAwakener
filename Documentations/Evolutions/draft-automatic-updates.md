@@ -414,7 +414,7 @@ release_deploy_appcast() {
    - 行为：`releaseBuildIgnoresTheOverride`
    - 行为：`emptyFeedValueCountsAsNone`
    - 行为：两个 App 的 Release 构建 Info.plist 里有 `SUFeedURL`、`SUPublicEDKey`、`SUEnableAutomaticChecks`（构建后用 `plutil` 核对，写进 RunScript 的检查）
-2. **菜单入口与温和提醒** —— `UpdateReminder`、`ApplicationUpdater.makeMenuItem()`、`ApplicationMainMenu`、`StatusItemController`、独立版的 App 菜单与 Dock 菜单、Dock 角标
+2. **菜单入口与温和提醒**（已完成）—— `UpdateReminder`、`ApplicationUpdater.makeMenuItem()`、`ApplicationMainMenu`、`StatusItemController`、独立版的 App 菜单与 Dock 菜单、Dock 角标
    - 行为：`shownBySparkleLetsSparkleShowScheduledUpdates`
    - 行为：`remindedByApplicationNeverLetsSparkleShowScheduledUpdates`
    - 行为：`updateShownOutOfFocusLeavesAReminder`
@@ -460,3 +460,4 @@ release_deploy_appcast() {
 | 2026-11-23 | Created as Draft | 用户要给 App 加自动更新。定下两个 App 各自用 Sparkle 更新、各有一个更新源，注入版更新后自动重启一次 Dock。自行决定：每天自动检查、弹窗确认后安装，更新源挂在 GitHub Release 附件上，开发构建不检查更新，先给 AppRelease 加上发布说明进 appcast 与第二个 feed 的能力。 |
 | 2026-11-23 | Accepted | 用户批准，开始实现。功能分支 `feature/automatic-updates`，从 main 切出。 |
 | 2026-11-23 | 第 1 步完成 | `UpdateFeedResolution` 写成无实例的 `enum`（只有静态成员），多一个按 `Bundle` 与 `UserDefaults` 取值的便捷方法。`ApplicationUpdater` 在 Info.plist 没有 `SUPublicEDKey` 时也不启动：正式公钥到第 5 步才写进 Release 配置，在那之前的 Release 构建不该启动一个装不了任何更新、还会在启动时报错的 updater。updater 由 `start()` 启动而不是在构造时启动，好让 App 在建菜单之前决定。测试密钥不经钥匙串：系统的 LibreSSL 不支持 Ed25519，改用 Homebrew 的 OpenSSL 生成，私钥放在 agent 自己的目录 `/Volumes/DerivedData/Agents.noindex/claude/UpdateTesting/LaunchpadAwakener/`，`sign_update --ed-key-file` 实测能用它签名并通过 `--verify`。RunScript 构建后核对两个 App 都带 Sparkle、Info.plist 有更新源与公钥两个键，Release 构建的更新源不能为空。 |
+| 2026-11-23 | 第 2 步完成 | `PendingUpdate` 放在模块顶层，不嵌在 `ApplicationUpdater` 里（嵌进主线程隔离的类里，纯值的 `UpdateReminder` 用它就要跨隔离）；`UpdateReminder` 的事件方法叫 `updateWillShow(displayVersion:isUserInitiated:isShownBySparkle:isInImmediateFocus:)`，另有 `menuItemTitle(for:)` 给出两种菜单项标题。菜单项的目标是代理对象，它实现 `NSMenuItemValidation`：会校验菜单项的菜单（主菜单、Dock 菜单）每次打开时标题跟着提醒变，菜单栏菜单本来就每次重建。独立版「先收起界面、再显示 Sparkle 窗口」做成 `ApplicationUpdater.prepareToShowWindow` 闭包，由 `checkForUpdates()` 在激活 App 之前调用，所有入口（主菜单、Dock 菜单、设置）都经过它。独立版 Dock 菜单：有待装更新时它排第一、后跟分隔线；否则「Check for Updates…」排在「Settings…」下面。自检启动（`--self-check`）不启动 updater。Sparkle 的 `SPUUpdaterDelegate` 已是主线程隔离，`SPUStandardUserDriverDelegate` 不是，后者的遵循要写 `@preconcurrency`。 |

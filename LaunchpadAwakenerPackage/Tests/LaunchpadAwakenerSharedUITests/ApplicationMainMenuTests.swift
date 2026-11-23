@@ -34,6 +34,17 @@ struct ApplicationMainMenuTests {
         #expect(try Self.submenuTitles(menu, "Launchpad").prefix(5) == ["About Launchpad", "-", "Settings…", "-", "Services"])
     }
 
+    @Test("an app that updates itself gets Check for Updates… right under About, as Mac apps put it")
+    func mainMenuPutsTheUpdateItemUnderAbout() throws {
+        let settingsItem = NSMenuItem(title: "Settings…", action: nil, keyEquivalent: ",")
+        let updateItem = NSMenuItem(title: "Check for Updates…", action: nil, keyEquivalent: "")
+        let menu = ApplicationMainMenu.make(applicationName: "Launchpad", settingsItem: settingsItem, updateItem: updateItem)
+        #expect(try Self.submenuTitles(menu, "Launchpad").prefix(6) == ["About Launchpad", "Check for Updates…", "-", "Settings…", "-", "Services"])
+
+        let menuWithoutSettings = ApplicationMainMenu.make(applicationName: "LaunchpadAwakener", updateItem: NSMenuItem(title: "Check for Updates…", action: nil, keyEquivalent: ""))
+        #expect(try Self.submenuTitles(menuWithoutSettings, "LaunchpadAwakener").prefix(4) == ["About LaunchpadAwakener", "Check for Updates…", "-", "Services"])
+    }
+
     @Test("the Window menu starts with Close on Command-W and lists the app's windows")
     func windowMenu() throws {
         let windowItems = [NSMenuItem(title: "LaunchpadAwakener", action: nil, keyEquivalent: ""), NSMenuItem(title: "Organize Launchpad", action: nil, keyEquivalent: "")]

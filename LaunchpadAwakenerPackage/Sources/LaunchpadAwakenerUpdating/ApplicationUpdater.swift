@@ -41,6 +41,18 @@ public final class ApplicationUpdater {
     /// The version and build of the running app, as the settings show them.
     public let currentVersionDescription: String
 
+    /// The update the app reminds of: one a scheduled check found and Sparkle did not show in front.
+    public var pendingUpdate: PendingUpdate? {
+        reminder.pendingUpdate
+    }
+
+    fileprivate var reminder = UpdateReminder()
+
+    /// Runs just before Sparkle's window shows at the user's request, to clear the way for it: the
+    /// standalone app hides its springboard, which would cover the window, and unhides itself.
+    @ObservationIgnored
+    public var prepareToShowWindow: (@MainActor () -> Void)?
+
     @ObservationIgnored
     private let feedURL: URL?
     @ObservationIgnored
@@ -63,10 +75,11 @@ public final class ApplicationUpdater {
         let shortVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let buildVersion = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
         currentVersionDescription = "Version \(shortVersion) (\(buildVersion))"
-        let delegate = UpdaterDelegate(feedURL: feedURL)
+        let delegate = UpdaterDelegate(feedURL: feedURL, scheduledUpdatePresentation: scheduledUpdatePresentation)
         self.delegate = delegate
         // Sparkle keeps its delegates weakly: this object holds the one it is given.
         updaterController = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: delegate, userDriverDelegate: delegate)
+        delegate.applicationUpdater = self
     }
 
     /// Starts checking, when the build has a feed. Call once, at launch, before building the menus.
@@ -91,20 +104,54 @@ public final class ApplicationUpdater {
     /// Shows Sparkle's window: checking now, or showing the update a scheduled check already found.
     public func checkForUpdates() {
         guard isStarted else { return }
+        prepareToShowWindow?()
         // A menu bar app is not active when its menu is used: unless it activates, the window opens
         // behind the app in front.
         NSApp.activate()
         updaterController.updater.checkForUpdates()
     }
+
+    /// The item every menu shares: "Check for Updates…", or "Install Update <version>…" while the app
+    /// reminds of one. Either shows Sparkle's window. In a menu that validates its items the title follows
+    /// the reminder each time the menu opens; a menu rebuilt on opening gets a fresh item instead.
+    public func makeMenuItem() -> NSMenuItem {
+        let menuItem = NSMenuItem(
+            title: UpdateReminder.menuItemTitle(for: pendingUpdate),
+            action: #selector(UpdaterDelegate.checkForUpdatesFromMenuItem(_:)),
+            keyEquivalent: ""
+        )
+        menuItem.target = delegate
+        return menuItem
+    }
 }
 
-/// Sparkle's delegates for ``ApplicationUpdater``. Sparkle calls them on the main thread.
+/// Sparkle's delegates for ``ApplicationUpdater``, and the target of its menu items. Sparkle calls the
+/// delegate methods on the main thread.
 @MainActor
 private final class UpdaterDelegate: NSObject {
     let feedURL: URL?
+    let scheduledUpdatePresentation: ApplicationUpdater.ScheduledUpdatePresentation
+    weak var applicationUpdater: ApplicationUpdater?
+    /// What Sparkle proposed for the scheduled update it is about to show; it says so only when asking
+    /// whether to show it, one call before the one that shows it.
+    private var isScheduledUpdateInImmediateFocus = false
 
-    init(feedURL: URL?) {
+    init(feedURL: URL?, scheduledUpdatePresentation: ApplicationUpdater.ScheduledUpdatePresentation) {
         self.feedURL = feedURL
+        self.scheduledUpdatePresentation = scheduledUpdatePresentation
+    }
+
+    @objc func checkForUpdatesFromMenuItem(_ sender: Any?) {
+        applicationUpdater?.checkForUpdates()
+    }
+}
+
+extension UpdaterDelegate: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(checkForUpdatesFromMenuItem(_:)) {
+            menuItem.title = UpdateReminder.menuItemTitle(for: applicationUpdater?.pendingUpdate)
+        }
+        return true
     }
 }
 
@@ -116,4 +163,31 @@ extension UpdaterDelegate: SPUUpdaterDelegate {
     }
 }
 
-extension UpdaterDelegate: SPUStandardUserDriverDelegate {}
+extension UpdaterDelegate: @preconcurrency SPUStandardUserDriverDelegate {
+    var supportsGentleScheduledUpdateReminders: Bool {
+        true
+    }
+
+    func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool) -> Bool {
+        isScheduledUpdateInImmediateFocus = immediateFocus
+        return UpdateReminder.letsSparkleShow(scheduledUpdatePresentation, immediateFocus: immediateFocus)
+    }
+
+    func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        applicationUpdater?.reminder.updateWillShow(
+            displayVersion: update.displayVersionString,
+            isUserInitiated: state.userInitiated,
+            isShownBySparkle: handleShowingUpdate,
+            isInImmediateFocus: isScheduledUpdateInImmediateFocus
+        )
+        isScheduledUpdateInImmediateFocus = false
+    }
+
+    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        applicationUpdater?.reminder.userSawUpdate()
+    }
+
+    func standardUserDriverWillFinishUpdateSession() {
+        applicationUpdater?.reminder.sessionEnded()
+    }
+}

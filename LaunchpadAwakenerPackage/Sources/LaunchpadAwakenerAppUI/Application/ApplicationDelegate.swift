@@ -2,6 +2,7 @@ import AppKit
 import AppKitPlus
 import LaunchpadAwakenerAppCore
 import LaunchpadAwakenerSharedUI
+import LaunchpadAwakenerUpdating
 import OSToolbox
 
 /// The injected app: owns its controllers, its windows and menu bar item, and its launch sequence.
@@ -19,6 +20,9 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     private let launchProgress = ApplicationLaunchProgress()
     private let organizerViewModel: LaunchpadOrganizerViewModel
     private var statusItemController: StatusItemController?
+    /// Sparkle shows the updates it finds; one it shows behind other apps also gets an item at the top of
+    /// the menu bar menu, since this app has no Dock icon to bring the window forward.
+    private let applicationUpdater = ApplicationUpdater(scheduledUpdatePresentation: .shownBySparkle)
 
     /// Whether System Integrity Protection keeps this app from injecting into the Dock. Read once: changing
     /// SIP takes a restart.
@@ -70,19 +74,28 @@ public final class ApplicationDelegate: NSObject, NSApplicationDelegate {
         // finishes.
         let wasLaunchedAtLogin = ApplicationLaunch.wasLaunchedAtLogin
 
+        // Before the menus, which offer updates only when the updater runs. While SIP is on too: this app
+        // updates itself whether or not it can inject.
+        applicationUpdater.start()
+
         // The organizer edits Launchpad through the payload in the Dock, which there is none of while SIP is on.
         let organizerItems = isInjectionBlockedBySystemIntegrityProtection ? [] : [
             menuItem("Organize Launchpad") { [weak self] in self?.showOrganizer() },
         ]
-        NSApp.mainMenu = ApplicationMainMenu.make(applicationName: "LaunchpadAwakener", windowItems: [
-            menuItem("LaunchpadAwakener") { [weak self] in self?.showControlPanel() },
-        ] + organizerItems)
+        NSApp.mainMenu = ApplicationMainMenu.make(
+            applicationName: "LaunchpadAwakener",
+            updateItem: applicationUpdater.isStarted ? applicationUpdater.makeMenuItem() : nil,
+            windowItems: [
+                menuItem("LaunchpadAwakener") { [weak self] in self?.showControlPanel() },
+            ] + organizerItems
+        )
         statusItemController = StatusItemController(
             daemonController: daemonController,
             injectionCoordinator: injectionCoordinator,
             killSwitchController: killSwitchController,
             dockAppsIconController: dockAppsIconController,
             standaloneLaunchpadController: standaloneLaunchpadController,
+            applicationUpdater: applicationUpdater,
             launchProgress: launchProgress,
             isInjectionBlockedBySystemIntegrityProtection: isInjectionBlockedBySystemIntegrityProtection,
             showControlPanel: { [weak self] in self?.showControlPanel() },

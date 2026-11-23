@@ -1,7 +1,9 @@
 import AppKit
+import AppKitNavigation
 import KeyboardShortcuts
 import LaunchpadAwakenerSharedUI
 import LaunchpadAwakenerSpringboardCore
+import LaunchpadAwakenerUpdating
 import OSToolbox
 import ServiceManagement
 import UIFoundation
@@ -65,6 +67,25 @@ public final class StandaloneLaunchpad {
         KeyboardShortcuts.onKeyDown(for: .toggleLaunchpad) { [weak self] in
             self?.toggle(reason: "shortcut")
         }
+    }
+
+    // MARK: - Updates
+
+    /// The app's updates. It is hidden between uses and covers everything while it shows, so Sparkle never
+    /// shows a scheduled update by itself: the Dock icon gets a badge, and its menu offers the update.
+    public let updater = ApplicationUpdater(scheduledUpdatePresentation: .remindedByApplication)
+
+    /// Starts checking for updates. Before Sparkle's window shows at the user's request, the springboard
+    /// hides — it would cover the window — keeping the keyboard for the window, and the app unhides.
+    public func startUpdating() {
+        updater.prepareToShowWindow = { [weak self] in
+            guard let self else { return }
+            if isVisible {
+                hide(reason: "showing an update", returningToPreviousApplication: false)
+            }
+            NSApp.unhide(nil)
+        }
+        updater.start()
     }
 
     // MARK: - Opening at login
@@ -140,9 +161,18 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
         // Read first: the open event that tells a launch at login apart is only current until launching
         // finishes.
         let wasLaunchedAtLogin = ApplicationLaunch.wasLaunchedAtLogin
-        NSApp.mainMenu = ApplicationMainMenu.make(applicationName: "Launchpad", settingsItem: makeSettingsItem())
-
         let launchpad = StandaloneLaunchpad.shared
+        // A self-check launch leaves after fifteen seconds and must not look for updates meanwhile.
+        if !StandaloneLaunchpad.isSelfCheckLaunch {
+            launchpad.startUpdating()
+        }
+        let updater = launchpad.updater
+        NSApp.mainMenu = ApplicationMainMenu.make(
+            applicationName: "Launchpad",
+            settingsItem: makeSettingsItem(),
+            updateItem: updater.isStarted ? updater.makeMenuItem() : nil
+        )
+
         launchpad.start()
         if StandaloneLaunchpad.isSelfCheckLaunch {
             launchpad.runSelfCheck()
@@ -150,6 +180,10 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
         }
         launchpad.registerLoginItemOnFirstLaunch()
         launchpad.listenForShortcut()
+        // An update waiting: a badge on the Dock icon, the one part of the app always in sight.
+        observe {
+            NSApp.dockTile.badgeLabel = updater.pendingUpdate == nil ? nil : "1"
+        }
         // Opened at login, it waits in the background for the first click on its Dock icon.
         guard !wasLaunchedAtLogin else { return }
         launchpad.show(reason: "launched")
@@ -178,13 +212,21 @@ public final class StandaloneApplicationDelegate: NSObject, NSApplicationDelegat
         StandaloneLaunchpad.shared.hide(reason: "another application became active")
     }
 
-    /// The Dock icon's menu: the way to the settings while the springboard, covering the menu bar, is not
-    /// showing the app's own menu.
+    /// The Dock icon's menu: the way to the settings and to updates while the springboard, covering the
+    /// menu bar, is not showing the app's own menu. An update waiting comes first.
     public func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let dockMenu = NSMenu()
+        let updater = StandaloneLaunchpad.shared.updater
+        if updater.isStarted, updater.pendingUpdate != nil {
+            dockMenu.addItem(updater.makeMenuItem())
+            dockMenu.addItem(.separator())
+        }
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: "")
         settingsItem.target = self
         dockMenu.addItem(settingsItem)
+        if updater.isStarted, updater.pendingUpdate == nil {
+            dockMenu.addItem(updater.makeMenuItem())
+        }
         return dockMenu
     }
 
