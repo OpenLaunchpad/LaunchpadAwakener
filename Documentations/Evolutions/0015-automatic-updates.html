@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Draft - 两个 App 用 Sparkle 自动更新</title>
+<title>0015 - 两个 App 用 Sparkle 自动更新</title>
 <style>
 /* Evolution proposal page, shared style (style A, "Apple documentation").
    Copy this whole <style> block verbatim. Page-specific rules, if any, go only
@@ -160,13 +160,13 @@ details[open] > summary { border-bottom: 1px solid var(--separator); }
 <div class="page">
 
 <header class="doc-header">
-  <p class="eyebrow"><span class="crumb">LaunchpadAwakener</span><span class="crumb">Evolutions</span><span class="crumb">Draft</span></p>
-  <h1><span class="proposal-number">Draft</span> 两个 App 用 Sparkle 自动更新</h1>
+  <p class="eyebrow"><span class="crumb">LaunchpadAwakener</span><span class="crumb">Evolutions</span><span class="crumb">0015</span></p>
+  <h1><span class="proposal-number">0015</span> 两个 App 用 Sparkle 自动更新</h1>
   <dl class="meta">
-    <div><dt>状态</dt><dd><span class="status status-in-progress">In Progress</span></dd></div>
-    <div><dt>最后更新</dt><dd>2026-11-23</dd></div>
+    <div><dt>状态</dt><dd><span class="status status-implemented">Implemented</span></dd></div>
+    <div><dt>最后更新</dt><dd>2026-11-24</dd></div>
     <div><dt>项目类型</dt><dd>App</dd></div>
-    <div><dt>原文</dt><dd><code>draft-automatic-updates.md</code></dd></div>
+    <div><dt>原文</dt><dd><code>0015-automatic-updates.md</code></dd></div>
   </dl>
 </header>
 
@@ -196,9 +196,9 @@ details[open] > summary { border-bottom: 1px solid var(--separator); }
 <section id="decide">
   <h2>要你定</h2>
   <div class="callout">
-    <p class="callout-title">实现已完成，等用户看过后收尾</p>
+    <p class="callout-title">已落地（0015，Implemented），没有待定的事</p>
     <ol>
-      <li>六个落地步骤都已完成；用户看过效果后用 finish-feature 收尾（取号、改 Implemented、推 main）。</li>
+      <li>六个落地步骤都已完成，2026-11-24 合进 main。</li>
       <li>正式签名私钥的备份 <code>~/LaunchpadAwakener-SparklePrivateKey.txt</code> 要由用户转存进密码管理器后删除。</li>
     </ol>
   </div>
@@ -593,7 +593,7 @@ release_deploy_appcast() <span class="token-comment"># app_release_generate_appc
 <section id="log">
   <h2>决策日志</h2>
   <details>
-    <summary>13 条，最近一条：实现完成，待用户看过后收尾</summary>
+    <summary>14 条，最近一条：Implemented，编号 0015</summary>
     <div class="details-body">
       <div class="table-wrap">
       <table>
@@ -612,6 +612,7 @@ release_deploy_appcast() <span class="token-comment"># app_release_generate_appc
           <tr><td class="numeric">2026-11-23</td><td>第 5 步：发布演练通过</td><td>临时分支把版本改成 1.2 演练一次通过：两个 App 的 Sparkle 签名检查通过，独立版装订票据成功、Gatekeeper 认可；本机预演确认发布说明会嵌进注入版的更新源。预演不调用钩子，独立版更新源的生成与上传在真正发布时第一次运行。</td></tr>
           <tr><td class="numeric">2026-11-23</td><td>验证</td><td>最终状态下 709 个单元测试通过，<code>RunScript.sh</code> 完整构建与切片、更新设置的核对通过。</td></tr>
           <tr><td class="numeric">2026-11-23</td><td>实现完成，待用户看过后收尾</td><td>实现说明已写；术语表登记了两个新术语。</td></tr>
+          <tr><td class="numeric">2026-11-24</td><td>Implemented，编号 0015</td><td>用户看过后收尾，合进 main。没做的：设置行、Dock 角标与菜单项没在屏幕上看过，「Install and Relaunch」那条路没实测，独立版更新源的生成与上传要到第一次真正发布才运行。不需要使用指南（没有调用方）。</td></tr>
         </tbody>
       </table>
       </div>

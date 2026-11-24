@@ -1,9 +1,9 @@
-# Draft - 两个 App 用 Sparkle 自动更新
+# 0015 - 两个 App 用 Sparkle 自动更新
 
-- **状态**: In Progress
+- **状态**: Implemented
 - **作者**: JH
 - **创建日期**: 2026-11-23
-- **最后更新**: 2026-11-23
+- **最后更新**: 2026-11-24
 - **所属愿景**: 无
 - **关联提案**: [0002 不注入 Dock 的独立版 Launchpad](0002-standalone-launchpad.md)、[0003 照 DockIconOverride 重做注入版 App 的控制面板](0003-app-control-panel.md)、[0010 SIP 没关时引导用户改用独立版，并一键安装](0010-system-integrity-protection-guide.md)
 - **实现分支 / PR**: `feature/automatic-updates`
@@ -504,3 +504,4 @@ AppRelease 1.3.0 新增两样，都是可选的（按它的演进策略算 minor
 | 2026-11-23 | 第 5 步：发布演练通过 | 功能分支不升版本号，另开临时分支把版本改成 1.2（构建 4）、放一份演练用的 `ReleaseNotes/1.2.md`，手动跑 `Release.yml`（只跑到打 zip，不发布）：一次通过。日志里两个 App 都是「Sparkle signed」（四样嵌套代码为本团队 Developer ID、带时间戳与硬化运行时）且更新源不空；`release_after_product` 从导出的 App 里取出独立版、`stapler staple` 成功，引擎核对 `Launchpad-1.2-4.zip`「stapled, and Gatekeeper takes it for notarized」——公证服务确实登记了压在注入版资源里的独立版，不必单独提交公证。本机对同一分支 `app-release all --dry-run --publish` 的输出显示发布说明会以 `LaunchpadAwakener-1.2-4.md` 嵌进注入版的更新源、`generate_appcast` 取自 Xcode 构建目录里的 Sparkle 包；预演不调用钩子，所以独立版的更新源与上传只在真正发布时第一次运行（`app_release_generate_appcast` 本身由 AppRelease 的测试覆盖）。第一个带 Sparkle 的版本没有已装的用户会读它的更新源，它出错也不影响任何人。演练完删掉临时分支。 |
 | 2026-11-23 | 验证 | 最终状态下 `swift test` 709 个测试通过（这次新增 27 个），`RunScript.sh` 的完整构建、三个架构切片与两个 App 更新设置的核对通过。 |
 | 2026-11-23 | 实现完成，待用户看过后收尾 | 配了实现说明 `Documentations/Internal/AutomaticUpdates.md`（登记在头部「配套文档」）；新术语「Appcast（更新源）」「Gentle reminders（温和提醒）」已登记进术语表。控制面板与独立版设置里的两行、Dock 角标与菜单项没有在屏幕上看过，「Install and Relaunch」那条路没有实测，都要交互操作。 |
+| 2026-11-24 | Implemented，编号 0015 | 用户看过后收尾，合进 main。实现与方案的出入都已写进上面各行与详细设计：`UpdateFeedResolution` 是 `enum`、`PendingUpdate` 在模块顶层、独立版经 `prepareToShowWindow` 收起界面、没有公钥时 updater 也不启动、两把密钥用 OpenSSL 生成、AppRelease 的嵌入发布说明是可选变量、更新源放在提交进仓库的 `Appcasts/`。没做的：设置行、Dock 角标与菜单项没在屏幕上看过，「Install and Relaunch」那条路没实测，独立版更新源的生成与上传要到第一次真正发布才运行。配套文档已有实现说明 `Documentations/Internal/AutomaticUpdates.md`，不需要使用指南（没有调用方）；新术语「Appcast（更新源）」「Gentle reminders（温和提醒）」已登记进术语表。 |

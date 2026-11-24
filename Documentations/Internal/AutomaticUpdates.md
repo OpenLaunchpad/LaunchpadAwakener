@@ -1,6 +1,6 @@
 # 自动更新：实现说明
 
-> 配套提案见[两个 App 用 Sparkle 自动更新](../Evolutions/draft-automatic-updates.md)。
+> 配套提案见[两个 App 用 Sparkle 自动更新](../Evolutions/0015-automatic-updates.md)。
 
 注入版 LaunchpadAwakener 与独立版 Launchpad 都用 [Sparkle](https://sparkle-project.org) 2 更新自己：每天检查一次各自的更新源（appcast，Sparkle 读的一份 XML，列出可装的版本、下载地址与签名），有新版本就弹 Sparkle 的窗口，用户确认后安装。这份说明讲清更新源与密钥放在哪、两个 App 为什么提醒方式不同、装完之后发生什么，以及发布与测试时要做什么。
 

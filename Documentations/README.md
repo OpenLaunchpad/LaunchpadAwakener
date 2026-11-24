@@ -1,7 +1,7 @@
 # LaunchpadAwakener 文档索引
 
 - [Evolutions/README.md](Evolutions/README.md) —— 提案状态总表
-- [Evolutions/draft-automatic-updates.md](Evolutions/draft-automatic-updates.md) —— 两个 App 用 Sparkle 自动更新：各有一个挂在 GitHub Release 上的更新源，后台 App 的温和提醒，注入版更新后重启一次 Dock（In Progress）
+- [Evolutions/0015-automatic-updates.md](Evolutions/0015-automatic-updates.md) —— 两个 App 用 Sparkle 自动更新：各有一个挂在 GitHub Release 上的更新源，后台 App 的温和提醒，注入版更新后重启一次 Dock（Implemented）
 - [Evolutions/0014-dock-icon-dragging.md](Evolutions/0014-dock-icon-dragging.md) —— Launchpad 开着时拖动 Dock 栏里的图标：Dock 上开始的手势整段归 Dock，拖出去的图标落在 Launchpad 上照样移除（Implemented）
 - [Evolutions/0013-dock-apps-icon.md](Evolutions/0013-dock-apps-icon.md) —— 注入成功后把 Dock 的 Apps 图标换成 Launchpad 的图标，配置 App 的图标加齿轮标志区分（Implemented）
 - [Evolutions/draft-launchpad-replica.md](Evolutions/draft-launchpad-replica.md) —— 在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad（In Progress）

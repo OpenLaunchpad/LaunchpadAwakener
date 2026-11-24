@@ -18,5 +18,5 @@
 | 0012 | [多显示器：照 macOS 15 开在 Dock 所在的那块屏](0012-multi-display.md) | Implemented |
 | 0013 | [注入成功后把 Dock 的 Apps 图标换成 Launchpad 的图标](0013-dock-apps-icon.md) | Implemented |
 | 0014 | [Launchpad 开着时拖动 Dock 栏里的图标](0014-dock-icon-dragging.md) | Implemented |
+| 0015 | [两个 App 用 Sparkle 自动更新](0015-automatic-updates.md) | Implemented |
 | draft | [在 macOS 27 的 Dock 中复刻 macOS 15 的 Launchpad](draft-launchpad-replica.md) | In Progress |
-| draft | [两个 App 用 Sparkle 自动更新](draft-automatic-updates.md) | In Progress |
