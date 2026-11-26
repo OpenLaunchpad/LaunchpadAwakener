@@ -151,7 +151,7 @@ daemon 必须带 arm64e 切片才能注入 Dock 这类 arm64e 系统进程 —�
 
 **发一个版本的步骤**：把三个 App target（注入版、文本输入辅助进程、独立版）的 `MARKETING_VERSION` 改成新版本号、`CURRENT_PROJECT_VERSION` 加一（Sparkle 按它比新旧，绝不能回退），写好 `ReleaseNotes/<版本>.md`，推到 main；在 Actions 页面手动跑一次 `Release.yml` 演练，通过后打带注解的 tag（`git tag -a v<版本> -m "Release v<版本>"`）推上去；Release 建好后改标题，并核对 Release 上有两个 zip 与两个更新源。一次演练或发布约 14 分钟。
 
-1.0 于 2026-11-12 在本机用 `app-release all --publish` 发布，没有走 CI：当时仓库还是私有的，拿不到组织级 secret。1.1 于 2026-11-22 第一次照上面的步骤由 CI 发布，演练与正式发布都一次通过。两个版本的包都还没在测试机上装过。
+1.0 于 2026-11-12 在本机用 `app-release all --publish` 发布，没有走 CI：当时仓库还是私有的，拿不到组织级 secret。1.1 于 2026-11-22 第一次照上面的步骤由 CI 发布，演练与正式发布都一次通过。两个版本的包都还没在测试机上装过。1.2 于 2026-11-26 由 CI 发布，是第一个带自动更新的版本，演练与正式发布同样一次通过；它的包也还没在测试机上装过。
 
 ## 改完代码之后要做什么
 
